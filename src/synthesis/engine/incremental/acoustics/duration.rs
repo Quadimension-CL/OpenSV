@@ -22,8 +22,13 @@ pub(super) fn prepare(
     base: &OwnerSynthesis,
     mapping: &Mapping,
 ) -> Result<Prepared> {
+    let seeds: Vec<_> = phrase
+        .retake_seeds
+        .iter()
+        .map(|seeds| seeds.unwrap_or_default().duration)
+        .collect();
     let mut current = DurationStage::prepare(voice.model("duration")?, identity)?
-        .predict_explicit(&phrase.records)?;
+        .predict_explicit_seeded(&phrase.records, &seeds)?;
     let old = &base.duration;
     validate_arrays(&current)?;
     validate_arrays(old)?;

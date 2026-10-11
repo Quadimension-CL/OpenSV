@@ -86,6 +86,8 @@ fn padded_sv2(score: &ExplicitScore) -> ContextNotes {
 fn silence(edge: &ScoreNote, duration_seconds: f64) -> ScoreNote {
     ScoreNote {
         source_note_id: None,
+        retake_seeds: Default::default(),
+        performance: Default::default(),
         duration_seconds,
         pitch: edge.pitch,
         phones: vec![ScorePhone {

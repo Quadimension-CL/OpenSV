@@ -37,6 +37,9 @@ pub struct FrontendNote {
     pub part_index: u32,
     /// Durations of the associated linked notes.
     pub appended_durations: Vec<f64>,
+    /// Per-note performance controls retain the source note's full settings
+    /// after syllable splitting and boundary redistribution.
+    pub performance: crate::model::NotePerformance,
 }
 
 pub struct NoteFrontend {

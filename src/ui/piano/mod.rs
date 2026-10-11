@@ -7,6 +7,7 @@ mod lyrics;
 mod pitch_anchor;
 mod pitch_edit;
 mod rendered;
+mod retakes;
 mod scene;
 mod toolbar;
 use crate::model::*;

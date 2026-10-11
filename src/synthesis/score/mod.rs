@@ -9,14 +9,17 @@ mod context;
 mod lyrics;
 mod options;
 mod owner;
+mod performance;
 mod pitch;
 mod pronunciation;
 mod records;
+mod retakes;
 mod types;
 mod voice_binding;
 
 pub use lyrics::LyricFrontend;
 pub use owner::prepare_owner;
+pub use performance::PreparedPerformanceControls;
 pub use pitch::PreparedPitchControls;
 pub use types::{ExplicitScore, PreparedPhrase, ScoreNote, ScorePhone};
 pub use voice_binding::validate_voice;

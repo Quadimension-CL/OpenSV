@@ -484,6 +484,7 @@ impl eframe::App for App {
         ui::piano::end_keyboard_frame(self, &ctx);
         ui::piano::end_pitch_frame(self, &ctx);
         ui::piano::end_anchor_frame(self, &ctx);
+        ui::panels::end_performance_frame(self, &ctx);
         if !self.editor.is_editing() {
             self.synthesis
                 .sync_project(&self.editor.project, self.editor.revision);

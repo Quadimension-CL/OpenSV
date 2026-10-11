@@ -6,12 +6,16 @@ mod instrumental;
 mod lyrics;
 mod midi;
 mod note_properties;
+mod performance;
+mod retakes;
 mod time_events;
 mod transport;
 mod voice;
 pub use groups::GroupEdit;
 pub use lyrics::{LyricSelection, split_lyrics};
 pub use midi::ImportSummary;
+pub use performance::{PerformanceParameter, PerformanceSelection};
+pub use retakes::RetakeSelection;
 pub use transport::Transport;
 
 use crate::model::*;
@@ -33,6 +37,7 @@ pub struct Editor {
     pub revision: u64,
     pub transport: Transport,
     history: History,
+    performance_edit: Option<performance::PerformanceEdit>,
 }
 impl Editor {
     pub fn new(project: Project) -> Self {
@@ -51,6 +56,7 @@ impl Editor {
             revision: 0,
             transport: Transport::default(),
             history: History::default(),
+            performance_edit: None,
         }
     }
     pub fn current_track(&self) -> &Track {
@@ -108,12 +114,14 @@ impl Editor {
         self.history.is_editing()
     }
     pub fn finish(&mut self) {
+        self.performance_edit = None;
         if self.history.finish(&self.project) {
             self.revision += 1;
             self.reconcile();
         }
     }
     pub fn cancel(&mut self) {
+        self.performance_edit = None;
         if let Some(selection) = self.history.cancel(&mut self.project) {
             self.restore_selection(selection);
         }
@@ -134,6 +142,7 @@ impl Editor {
         self.history.undo_label()
     }
     pub fn undo(&mut self) {
+        self.performance_edit = None;
         let selection = self.selection();
         if let Some(selection) = self.history.undo(&mut self.project, selection) {
             self.revision += 1;
@@ -141,6 +150,7 @@ impl Editor {
         }
     }
     pub fn redo(&mut self) {
+        self.finish_performance_edit();
         let selection = self.selection();
         if let Some(selection) = self.history.redo(&mut self.project, selection) {
             self.revision += 1;

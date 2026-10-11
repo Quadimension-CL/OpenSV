@@ -2,8 +2,10 @@ mod automation;
 mod dictionary;
 mod instrumental;
 mod language;
+mod performance;
 pub mod pitch;
 mod project;
+mod retakes;
 mod time;
 mod track_color;
 
@@ -11,8 +13,10 @@ pub use automation::*;
 pub use dictionary::*;
 pub use instrumental::*;
 pub use language::*;
+pub use performance::*;
 pub use pitch::{PitchControl, PitchCurve, PitchPoint};
 pub use project::*;
+pub use retakes::*;
 pub use time::*;
 pub use track_color::*;
 

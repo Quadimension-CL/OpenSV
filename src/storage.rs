@@ -135,6 +135,12 @@ fn validate(p: &Project) -> Result<(), String> {
         }) {
             return bad("音符时间或 MIDI 音高无效");
         }
+        for note in &g.notes {
+            NotePerformance::from_note(note)
+                .map_err(|error| format!("工程校验失败：音符 {}：{error}", note.lyrics))?;
+            TakeSet::from_extra(&note.extra)
+                .map_err(|error| format!("工程校验失败：音符 {}：{error}", note.lyrics))?;
+        }
         for curve in g.parameters.values() {
             if !["linear", "cosine", "cubic"].contains(&curve.mode.as_str())
                 || curve.points.iter().any(|(_, v)| !v.is_finite())
@@ -167,6 +173,8 @@ fn validate(p: &Project) -> Result<(), String> {
             return bad("主组引用不匹配");
         }
         for r in track.references() {
+            TakeSet::from_extra(&r.extra)
+                .map_err(|error| format!("工程校验失败：音轨 {}：{error}", track.name))?;
             let Some(group) = p.group(&r.group_id) else {
                 return bad("存在悬空音符组引用");
             };

@@ -62,15 +62,14 @@ pub(super) fn prepare(
                 (note.timbre_seed.unwrap_or(0) as i32, [1.0, 1.0, 0.0])
             }
             Contract::Native => {
-                if note.timbre_seed.is_some_and(|seed| seed != 0) {
-                    return Err(VoiceError::new(
-                        "Original SV1 acoustic retake seeds are not supported",
-                    ));
-                }
-                // The seed comes from the phone option, not its frame count.
-                // With no explicit option or retake, it remains zero and uses
-                // the seed-zero control branch at factor 1.
-                (0, [0.995, 0.5, 1.0])
+                let seed = note.timbre_seed.unwrap_or(0);
+                let controls = if seed == 0 {
+                    [0.995, 0.5, 1.0]
+                } else {
+                    [0.995, 1.0, 0.2]
+                };
+                // Preserve the full seed bit pattern for signed noise labels.
+                (seed as i32, controls)
             }
         };
         local_parameters.push(seed);

@@ -128,10 +128,16 @@ impl<'a> Sv1F0Stage<'a> {
         }
     }
 
-    pub fn predict_default(
+    pub fn frame_seconds(&self) -> f64 {
+        f64::from(self.frontend.frame_seconds)
+    }
+
+    pub fn predict_singing(
         &self,
         notes: &[FrontendNote],
         phones: &[TimedPhone],
+        pitch_seeds: &[u32],
+        vibrato: Option<&[f32]>,
     ) -> Result<PitchResult> {
         if !matches!(self.contract, Contract::Compatible) {
             return Err(VoiceError::new(
@@ -141,7 +147,7 @@ impl<'a> Sv1F0Stage<'a> {
         // The SV2 adapter consumes the duration stage's corrected phone frame
         // counts directly; it does not quantize NOFS phone seconds.
         let phone_frames: Vec<_> = phones.iter().map(|phone| phone.frames).collect();
-        self.predict(notes, phones, &phone_frames)
+        self.predict(notes, phones, &phone_frames, pitch_seeds, vibrato)
     }
 
     pub fn predict_native(
@@ -149,6 +155,8 @@ impl<'a> Sv1F0Stage<'a> {
         notes: &[FrontendNote],
         phones: &[TimedPhone],
         phone_seconds: &[f64],
+        pitch_seeds: &[u32],
+        vibrato: Option<&[f32]>,
     ) -> Result<PitchResult> {
         if !matches!(self.contract, Contract::Native { .. }) || phone_seconds.len() != phones.len()
         {
@@ -157,7 +165,7 @@ impl<'a> Sv1F0Stage<'a> {
             ));
         }
         let phone_frames = timing::phone_frame_counts(phone_seconds, self.frontend.frame_seconds)?;
-        self.predict(notes, phones, &phone_frames)
+        self.predict(notes, phones, &phone_frames, pitch_seeds, vibrato)
     }
 
     fn predict(
@@ -165,6 +173,8 @@ impl<'a> Sv1F0Stage<'a> {
         notes: &[FrontendNote],
         phones: &[TimedPhone],
         phone_frames: &[usize],
+        pitch_seeds: &[u32],
+        vibrato: Option<&[f32]>,
     ) -> Result<PitchResult> {
         if notes.is_empty() || phones.is_empty() {
             return Err(VoiceError::new(
@@ -191,19 +201,30 @@ impl<'a> Sv1F0Stage<'a> {
             phone_frames,
             self.defaults,
             self.contract,
+            pitch_seeds,
         )?;
         if controls.positions.len() != features.context.frames {
             return Err(VoiceError::new(
                 "Compatible F0 rounded phone clock extends beyond the note controls",
             ));
         }
+        let expression = controls::vibrato(notes, &note_frames, vibrato)?;
         let sampled = sampler::sample(
             self.tree,
             self.sampler,
-            &features.source,
-            &features.context,
-            &controls.positions,
-            &controls.noise,
+            sampler::Request {
+                source: &features.source,
+                context: &features.context,
+                positions: &controls.positions,
+                noise: &controls.noise,
+                expression: &expression,
+                notes,
+                note_frames: &note_frames,
+                vowel_mask: &encoded.vowel_mask,
+                normalizer: self.frontend.normalizer,
+                transpose,
+                contract: self.contract,
+            },
         )?;
         let inverse = |value| {
             self.frontend
@@ -211,18 +232,6 @@ impl<'a> Sv1F0Stage<'a> {
                 .denormalize_scalar(2, value)
                 .map_err(|error| VoiceError::new(error.to_string()))
         };
-        let preliminary = sampled
-            .preliminary
-            .iter()
-            .map(|&value| inverse(value))
-            .collect::<Result<Vec<_>>>()?;
-        let predicted_controls = statistics::estimate(
-            &preliminary,
-            &encoded.vowel_mask,
-            notes,
-            &note_frames,
-            transpose,
-        )?;
         let mut pitch = Vec::with_capacity(sampled.pitch.len());
         for frame in 0..sampled.pitch.len() {
             // Initial boundary checks are asymmetric: frame 0 contributes only
@@ -240,11 +249,7 @@ impl<'a> Sv1F0Stage<'a> {
             let right = sampled.pitch.get(frame + 1).copied().unwrap_or(0.0) * 0.25;
             pitch.push(inverse(left + center + right)? - transpose);
         }
-        if pitch
-            .iter()
-            .chain(&preliminary)
-            .any(|value| !value.is_finite())
-        {
+        if pitch.iter().any(|value| !value.is_finite()) {
             return Err(VoiceError::new(
                 "Compatible DDS F0 produced non-finite pitch",
             ));
@@ -252,7 +257,7 @@ impl<'a> Sv1F0Stage<'a> {
         Ok(PitchResult {
             pitch,
             frame_seconds: f64::from(self.frontend.frame_seconds),
-            predicted_controls,
+            predicted_controls: sampled.predicted_controls,
         })
     }
 }

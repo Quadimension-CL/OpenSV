@@ -35,7 +35,7 @@ impl Note {
             extra: BTreeMap::from([
                 ("accent".into(), json!("")),
                 ("detune".into(), json!(0)),
-                ("takes".into(), takes()),
+                ("takes".into(), TakeSet::default().to_value()),
             ]),
         }
     }
@@ -46,10 +46,6 @@ impl Note {
             .unwrap_or(false)
     }
 }
-fn takes() -> Value {
-    json!({"activeTakeId":0,"takes":[{"id":0,"seedDuration":0,"seedPitch":0,"seedTimbre":0,"liked":false}]})
-}
-
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Group {
@@ -126,7 +122,7 @@ impl GroupRef {
                     json!({"vocalModeInherited":true,"vocalModePreset":"","vocalModeParams":{}}),
                 ),
                 ("voicePresetName".into(), json!("")),
-                ("takes".into(), takes()),
+                ("takes".into(), TakeSet::default().to_value()),
             ]),
         }
     }

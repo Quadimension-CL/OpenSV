@@ -58,7 +58,11 @@ impl OwnerSynthesis {
             .saturating_add(vector_bytes(&phrase.records))
             .saturating_add(vector_bytes(&phrase.notes))
             .saturating_add(vector_bytes(&phrase.source_note_ids))
+            .saturating_add(vector_bytes(&phrase.retake_seeds))
             .saturating_add(vector_bytes(&prepared.phones));
+        if let Some(controls) = &phrase.performance_controls {
+            bytes = bytes.saturating_add(controls.memory_bytes());
+        }
         for record in &phrase.records {
             bytes = bytes
                 .saturating_add(vector_bytes(&record.phones))

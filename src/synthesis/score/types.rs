@@ -1,3 +1,4 @@
+use crate::model::{NoteMode, NotePerformance, RetakeSeeds};
 use serde::{Deserialize, Serialize};
 
 use super::{FRAME_SECONDS, HOP_SAMPLES, SAMPLE_RATE};
@@ -25,6 +26,10 @@ pub struct ScorePhone {
 pub struct ScoreNote {
     #[serde(default)]
     pub source_note_id: Option<u64>,
+    #[serde(default)]
+    pub retake_seeds: Option<RetakeSeeds>,
+    #[serde(default)]
+    pub performance: NotePerformance,
     pub duration_seconds: f64,
     pub pitch: f32,
     pub phones: Vec<ScorePhone>,
@@ -61,12 +66,16 @@ pub struct ExplicitScore {
 pub struct PreparedPhrase {
     /// Native curve/point conditioning, sampled after the model clock is known.
     pub pitch_controls: Option<super::PreparedPitchControls>,
+    /// Note modulation sampled on the editor's tempo-aware parameter grid.
+    pub performance_controls: Option<super::PreparedPerformanceControls>,
     /// These two arrays have identical indexing, including silence records.
     pub records: Vec<DurationRecord>,
     pub notes: Vec<FrontendNote>,
     /// Stable score identity across phoneme redistribution and syllable splits.
     /// Synthetic context and explicit rests have no source note.
     pub source_note_ids: Vec<Option<u64>>,
+    /// Reproducible sampling conditions on the complete record timeline.
+    pub retake_seeds: Vec<Option<RetakeSeeds>>,
     pub start_seconds: f64,
     pub visible_begin_seconds: f64,
     pub visible_end_seconds: Option<f64>,
@@ -94,6 +103,8 @@ impl ExplicitScore {
         let mut records = Vec::with_capacity(source.len());
         let mut notes = Vec::with_capacity(source.len());
         for (index, note) in source.iter().enumerate() {
+            super::retakes::validate_seeds(note.retake_seeds.unwrap_or_default(), family)?;
+            super::options::validate_performance(note.performance, family)?;
             if !note.duration_seconds.is_finite()
                 || note.duration_seconds <= 0.0
                 || !note.pitch.is_finite()
@@ -139,11 +150,13 @@ impl ExplicitScore {
                 duration_seconds: note.duration_seconds,
                 frame_seconds: FRAME_SECONDS,
                 kind: note.kind,
-                flag: note.flag,
+                flag: note.flag
+                    || (family != VoiceFamily::Sv1 && note.performance.mode == NoteMode::Rap),
                 tag: note.tag.clone(),
                 parts: note.parts,
                 part_index: note.part_index,
                 appended_durations: Vec::new(),
+                performance: note.performance,
             };
             // The internal alignment remainder may round to zero frames. Its
             // time still participates in phrase placement; source notes must
@@ -182,9 +195,11 @@ impl ExplicitScore {
         super::records::redistribute_onsets(duration_tree, &mut records, &mut notes, family)?;
         Ok(PreparedPhrase {
             pitch_controls: None,
+            performance_controls: None,
             records,
             notes,
             source_note_ids: source.iter().map(|note| note.source_note_id).collect(),
+            retake_seeds: source.iter().map(|note| note.retake_seeds).collect(),
             start_seconds,
             visible_begin_seconds: self.visible_begin_seconds,
             visible_end_seconds: self.visible_end_seconds,

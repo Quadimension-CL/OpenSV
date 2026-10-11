@@ -97,11 +97,16 @@ pub fn draw_notes(app: &App, ui: &Ui, canvas: Rect, groups: &[SceneGroup]) {
             } else {
                 color
             };
-            painter.rect_filled(r, 2, color);
+            let corner_radius = if note.musical_type == NoteMode::Rap.id() {
+                r.height() / 2.0
+            } else {
+                2.0
+            };
+            painter.rect_filled(r, corner_radius, color);
             if !drawing_pitch {
                 painter.rect_stroke(
                     r,
-                    2,
+                    corner_radius,
                     Stroke::new(
                         0.7,
                         if selected {

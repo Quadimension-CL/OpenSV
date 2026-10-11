@@ -68,7 +68,7 @@ pub(super) fn interaction(app: &mut App, ui: &Ui, response: &Response, canvas: R
             } if matches!(button, PointerButton::Primary | PointerButton::Secondary)
                 && app.gesture.is_none()
                 && canvas.contains(pos)
-                && (response.contains_pointer()
+                && (response.hovered()
                     || response.is_pointer_button_down_on()
                     || response.clicked_by(button)
                     || response.dragged_by(button)) =>

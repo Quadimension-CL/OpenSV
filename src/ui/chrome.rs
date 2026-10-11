@@ -127,7 +127,7 @@ pub fn menus(app: &mut App, ui: &mut Ui) {
         });
         ui.menu_button("自动处理", |ui| {
             item(ui, "装饰所选音符", "", false);
-            item(ui, "AI 重录新采样", "Alt+T", false);
+            super::retakes::commands(app, ui);
             item(ui, "从音频提取音符", "", false);
             item(ui, "检测曲速", "", false);
         });
@@ -179,6 +179,9 @@ fn paste(app: &mut App) {
     app.editor.paste(app.editor.transport.position);
 }
 pub fn shortcuts(app: &mut App, ctx: &Context) {
+    if app.editor.has_performance_edit() {
+        return;
+    }
     if app.audio_drag.is_some() {
         return;
     }
@@ -228,6 +231,13 @@ pub fn shortcuts(app: &mut App, ctx: &Context) {
         app.editor.undo();
     }
     if super::piano::anchor_keyboard(app, ctx) {
+        return;
+    }
+    if command(Key::T, Modifiers::ALT | Modifiers::SHIFT) {
+        super::retakes::prune(app);
+        return;
+    } else if command(Key::T, Modifiers::ALT) {
+        super::retakes::create(app, RetakeComponent::All);
         return;
     }
     if command(Key::A, ctrl) {

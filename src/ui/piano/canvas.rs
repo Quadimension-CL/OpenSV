@@ -113,6 +113,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
     super::rendered::pitch(app, ui, canvas, &groups);
     super::pitch_edit::draw(app, ui, canvas, &groups);
     super::pitch_anchor::draw(app, ui, canvas);
+    super::retakes::show(app, ui, canvas, &groups);
     scene::headers(app, ui, canvas, &groups);
     if let Some(Gesture::Select { origin, .. }) = &app.gesture
         && let Some(p) = ui.input(|i| i.pointer.interact_pos())
@@ -237,6 +238,8 @@ fn interaction(
             app.editor.mute_selected();
             ui.close();
         }
+        ui.separator();
+        crate::ui::retakes::commands(app, ui);
         ui.separator();
         if ui.add_enabled(selected, Button::new("复制")).clicked() {
             app.editor.copy();

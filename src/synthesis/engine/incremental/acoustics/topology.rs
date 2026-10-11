@@ -27,6 +27,8 @@ pub(super) fn validate(
         || base.records.len() != base.notes.len()
         || current.source_note_ids.len() != current.notes.len()
         || base.source_note_ids.len() != base.notes.len()
+        || current.retake_seeds.len() != current.notes.len()
+        || base.retake_seeds.len() != base.notes.len()
         || current.start_seconds != base.start_seconds
         || current.visible_begin_seconds != base.visible_begin_seconds
         || current.visible_end_seconds != base.visible_end_seconds
@@ -59,6 +61,7 @@ pub(super) fn validate(
         if record_frames[index] != old_frames[old_index]
             || record_frames[index + 1] != old_frames[old_index + 1]
             || current.source_note_ids[index] != base.source_note_ids[old_index]
+            || current.retake_seeds[index] != base.retake_seeds[old_index]
             || !same_note(&current.notes[index], &base.notes[old_index])
             || !same_record(&current.records[index], &base.records[old_index])
         {
@@ -98,6 +101,7 @@ fn same_note(now: &FrontendNote, old: &FrontendNote) -> bool {
         && now.parts == old.parts
         && now.part_index == old.part_index
         && now.appended_durations == old.appended_durations
+        && now.performance == old.performance
 }
 
 fn same_record(now: &DurationRecord, old: &DurationRecord) -> bool {

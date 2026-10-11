@@ -5,7 +5,7 @@ use crate::synthesis::{
     stages::{
         compatible_duration::CompatibleDurationStage,
         duration::DurationStage,
-        f0::{F0Stage, TimedPhone},
+        f0::{F0Stage, PitchInputControls, TimedPhone},
         sv1_duration::Sv1DurationStage,
         timbre::TimbreNetwork,
     },
@@ -21,12 +21,26 @@ pub fn prepare_acoustics(
     phrase: &PreparedPhrase,
     mut checkpoint: impl FnMut(RenderStage) -> Result<()>,
 ) -> Result<PreparedRenderAcoustics> {
-    if phrase.records.is_empty() || phrase.records.len() != phrase.notes.len() {
+    if phrase.records.is_empty()
+        || phrase.records.len() != phrase.notes.len()
+        || phrase.retake_seeds.len() != phrase.notes.len()
+    {
         return Err(VoiceError::new(
             "Synthesis requires matching nonempty note records",
         ));
     }
     let mut prepared_phrase = phrase.clone();
+    let duration_seeds: Vec<_> = phrase
+        .retake_seeds
+        .iter()
+        .map(|seeds| seeds.unwrap_or_default().duration)
+        .collect();
+    let pitch_seeds: Vec<_> = phrase
+        .retake_seeds
+        .iter()
+        .map(|seeds| seeds.map(|seeds| seeds.pitch))
+        .collect();
+    let dds_pitch_seeds: Vec<_> = pitch_seeds.iter().map(|seed| seed.unwrap_or(0)).collect();
     checkpoint(RenderStage::Duration)?;
     let started = Instant::now();
     #[cfg(feature = "synth-profile")]
@@ -64,7 +78,7 @@ pub fn prepare_acoustics(
             voice.model("duration")?,
             models::required_identity(duration_identity)?,
         )?
-        .predict_explicit(&phrase.records)?,
+        .predict_explicit_seeded(&phrase.records, &duration_seeds)?,
     };
     if duration
         .prediction
@@ -115,28 +129,58 @@ pub fn prepare_acoustics(
                 .iter()
                 .map(|phone| phone.duration_seconds)
                 .collect::<Vec<_>>();
+            let stage = models::dds_pitch(voice)?;
+            let expressiveness = crate::synthesis::engine::pitch::expressiveness(
+                &prepared_phrase,
+                stage.frame_seconds(),
+                stage.note_frames(&prepared_phrase.notes)?.iter().sum(),
+            )?;
             (
-                models::dds_pitch(voice)?.predict_native(
+                stage.predict_native(
                     &prepared_phrase.notes,
                     &phones,
                     &seconds,
+                    &dds_pitch_seeds,
+                    expressiveness.as_deref(),
                 )?,
                 None,
             )
         }
-        VoiceFamily::Sv2Compatible => (
-            models::dds_pitch(voice)?.predict_default(&phrase.notes, &phones)?,
-            None,
-        ),
+        VoiceFamily::Sv2Compatible => {
+            let stage = models::dds_pitch(voice)?;
+            let expressiveness = crate::synthesis::engine::pitch::expressiveness(
+                phrase,
+                stage.frame_seconds(),
+                stage.note_frames(&phrase.notes)?.iter().sum(),
+            )?;
+            (
+                stage.predict_singing(
+                    &phrase.notes,
+                    &phones,
+                    &dds_pitch_seeds,
+                    expressiveness.as_deref(),
+                )?,
+                None,
+            )
+        }
         VoiceFamily::Sv2 => {
             let stage = F0Stage::prepare(voice.model("f0")?)?;
             let features = stage.prepare_features(&phrase.notes, &phones)?;
             let controls = crate::synthesis::engine::pitch::sv2_controls(phrase)?;
+            let expressiveness = crate::synthesis::engine::pitch::expressiveness(
+                phrase,
+                crate::synthesis::score::FRAME_SECONDS,
+                note_frames.iter().sum(),
+            )?;
             let pitch = stage.predict_singing_prepared(
                 &phrase.notes,
                 &phones,
                 &features,
-                controls.as_deref(),
+                PitchInputControls {
+                    pitch_seeds: Some(&pitch_seeds),
+                    absolute_pitch: controls.as_deref(),
+                    expressiveness: expressiveness.as_deref(),
+                },
                 None,
             )?;
             (pitch, Some(features))

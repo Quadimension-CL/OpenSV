@@ -1,14 +1,14 @@
-//! The local default-duration path of the Mo Xu fourth model tree.
+//! Explicit-phone duration prediction and seeded duration sampling.
 //!
-//! Phones without a nonzero retake seed use child 8's scalar prediction.
-//! This evaluates that deterministic branch directly; the containment tree
-//! is not executed as a list.
+//! A zero seed uses the deterministic scalar head. Other records use the
+//! noise-conditioned head while retaining the same context and timing rules.
 
 mod attention;
 pub(crate) mod context;
 pub(crate) mod encoding;
 pub mod frontend;
 mod heads;
+mod sampling;
 
 use crate::synthesis::voice::{
     DURATION_ROOT_TYPE_ID, DurationConfiguration, PreparedModule, PreparedTree, Result, VoiceError,
@@ -101,8 +101,37 @@ impl<'a> DurationStage<'a> {
         })
     }
 
+    /// Each record has an independent duration seed; zero selects its default
+    /// prediction. Seeds remain attached to records with no phonemes as well.
+    pub fn predict_explicit_seeded(
+        &self,
+        records: &[DurationRecord],
+        seeds: &[u32],
+    ) -> Result<DurationResult> {
+        if records.len() != seeds.len() {
+            return Err(VoiceError::new(
+                "Duration seed count differs from the explicit record count",
+            ));
+        }
+        let phones = frontend::prepare_explicit(self.tree, records)?;
+        let prediction = self.predict_with_seeds(phones, Some(seeds))?;
+        let durations = frontend::postprocess(self.tree, records, &prediction.scalars)?;
+        Ok(DurationResult {
+            durations,
+            prediction,
+        })
+    }
+
     /// Execute real explicit-phone conditions on the default, non-retake path.
     pub fn predict(&self, phones: Vec<PhoneFeatures>) -> Result<DurationPrediction> {
+        self.predict_with_seeds(phones, None)
+    }
+
+    fn predict_with_seeds(
+        &self,
+        phones: Vec<PhoneFeatures>,
+        seeds: Option<&[u32]>,
+    ) -> Result<DurationPrediction> {
         if phones.is_empty() {
             return Ok(DurationPrediction {
                 phones,
@@ -125,8 +154,8 @@ impl<'a> DurationStage<'a> {
         for node in &self.tree.node(self.children[7])?.children {
             encoded = context::encode(self.tree, *node, &encoded, width)?;
         }
-        // A zero retake seed selects child 8 instead of the sampled path.
-        let scalars = self.tree.execute_node(self.children[8], &encoded)?;
+        let scalars =
+            sampling::predict(self.tree, &self.children, &encoded, width, &phones, seeds)?;
         if scalars.len() != phones.len() || scalars.iter().any(|v| !v.is_finite()) {
             return Err(VoiceError::new(
                 "Duration prediction is not one finite scalar per phone",

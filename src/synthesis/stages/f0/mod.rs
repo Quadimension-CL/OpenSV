@@ -50,6 +50,13 @@ pub struct PitchRequest<'a> {
     pub expressiveness: &'a [f32],
 }
 
+#[derive(Default)]
+pub struct PitchInputControls<'a> {
+    pub pitch_seeds: Option<&'a [Option<u32>]>,
+    pub absolute_pitch: Option<&'a [f32]>,
+    pub expressiveness: Option<&'a [f32]>,
+}
+
 #[derive(Clone, Debug)]
 pub struct PitchResult {
     /// Absolute model pitch after inverse normalization, pitch-range clamping,
@@ -134,7 +141,7 @@ impl<'a> F0Stage<'a> {
         phones: &[TimedPhone],
         prepared: &PreparedPitchFeatures,
     ) -> Result<PitchResult> {
-        self.predict_singing_prepared(notes, phones, prepared, None, None)
+        self.predict_singing_prepared(notes, phones, prepared, PitchInputControls::default(), None)
     }
 
     pub fn predict_default_prepared_frames(
@@ -144,29 +151,53 @@ impl<'a> F0Stage<'a> {
         prepared: &PreparedPitchFeatures,
         frames: std::ops::Range<usize>,
     ) -> Result<PitchResult> {
-        self.predict_singing_prepared(notes, phones, prepared, None, Some(frames))
+        self.predict_singing_prepared(
+            notes,
+            phones,
+            prepared,
+            PitchInputControls::default(),
+            Some(frames),
+        )
     }
 
-    /// Neutral singing with optional absolute pitch controls. Controls
+    /// Performance-conditioned singing with optional absolute pitch controls. Controls
     /// cover the complete owner even when only a work interval is evaluated.
     pub fn predict_singing_prepared(
         &self,
         notes: &[FrontendNote],
         phones: &[TimedPhone],
         prepared: &PreparedPitchFeatures,
-        absolute_controls: Option<&[f32]>,
+        controls: PitchInputControls<'_>,
         frame_range: Option<std::ops::Range<usize>>,
     ) -> Result<PitchResult> {
+        let PitchInputControls {
+            pitch_seeds,
+            absolute_pitch: absolute_controls,
+            expressiveness,
+        } = controls;
+        if pitch_seeds.is_some_and(|seeds| seeds.len() != notes.len()) {
+            return Err(VoiceError::new(
+                "F0 retake seeds differ from the note timeline",
+            ));
+        }
         let modulation: Vec<_> = notes
             .iter()
-            .map(|note| {
+            .enumerate()
+            .map(|(index, note)| {
                 let mut modulation = NoteModulation {
                     frames: frontend::frame_count(note)?,
                     kind: note.kind,
                     flag: note.flag,
+                    pitch_seed: pitch_seeds.and_then(|seeds| seeds[index]),
+                    pitch_center: note.performance.r_intonation,
+                    pitch_motion: note.performance.r_tone,
                     ..NoteModulation::default()
                 };
-                if let Some(controls) = expression::neutral_singing_controls(note.kind, note.flag) {
+                if let Some(controls) = expression::expression_controls(
+                    note.kind,
+                    note.performance.expression_x,
+                    note.performance.expression_y,
+                ) {
                     modulation.expression = Some(controls.expression);
                     modulation.position_c = Some(controls.position_c);
                     modulation.position_b = Some(controls.position_b);
@@ -187,12 +218,26 @@ impl<'a> F0Stage<'a> {
                 &absent_controls
             }
         };
+        let default_expressiveness;
+        let expressiveness = match expressiveness {
+            Some(values) => values,
+            None => {
+                default_expressiveness = notes
+                    .iter()
+                    .zip(&modulation)
+                    .flat_map(|(note, modulation)| {
+                        std::iter::repeat_n(note.performance.vibrato as f32, modulation.frames)
+                    })
+                    .collect::<Vec<_>>();
+                &default_expressiveness
+            }
+        };
         let request = PitchRequest {
             notes,
             phones,
             modulation: &modulation,
             absolute_controls,
-            expressiveness: &vec![1.0; frames],
+            expressiveness,
         };
         match frame_range {
             Some(frames) => self.predict_prepared_frames(&request, prepared, frames),

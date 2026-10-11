@@ -18,6 +18,7 @@ pub fn prepare_owner(
     let mut phrase = ExplicitScore::from_owner(input, lexicon, duration_tree, family)?
         .prepare(duration_tree, family)?;
     phrase.pitch_controls = super::PreparedPitchControls::new(input);
+    phrase.performance_controls = super::PreparedPerformanceControls::new(input)?;
     Ok(phrase)
 }
 
@@ -36,7 +37,7 @@ impl ExplicitScore {
             if options::muted(&note.attributes)? {
                 continue;
             }
-            options::validate_note(note)?;
+            options::validate_note(note, family)?;
             if note.duration <= 0 {
                 return Err(VoiceError::new(format!(
                     "Note {} has non-positive duration",
@@ -105,6 +106,8 @@ impl ExplicitScore {
                 // use the default kind and an unset flag.
                 score.notes.push(ScoreNote {
                     source_note_id: None,
+                    retake_seeds: Default::default(),
+                    performance: Default::default(),
                     duration_seconds: gap_seconds,
                     pitch: previous_pitch,
                     phones: vec![ScorePhone {
@@ -142,6 +145,12 @@ impl ExplicitScore {
             for (part_index, tokens) in syllables.into_iter().enumerate() {
                 score.notes.push(ScoreNote {
                     source_note_id: Some(note.id),
+                    retake_seeds: Some(super::retakes::note_seeds(note, family)?),
+                    performance: crate::model::NotePerformance::from_parts(
+                        &note.musical_type,
+                        &note.attributes,
+                    )
+                    .map_err(VoiceError::new)?,
                     duration_seconds,
                     pitch,
                     phones: tokens
@@ -161,7 +170,12 @@ impl ExplicitScore {
                             .get("evenSyllableDuration")
                             .and_then(serde_json::Value::as_bool)
                             .unwrap_or(true),
-                    tag: None,
+                    tag: note
+                        .extensions
+                        .get("accent")
+                        .and_then(serde_json::Value::as_str)
+                        .filter(|value| !value.is_empty())
+                        .map(str::to_owned),
                     parts,
                     part_index: part_index as u32,
                 });

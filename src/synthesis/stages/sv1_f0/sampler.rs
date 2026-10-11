@@ -1,27 +1,53 @@
-//! Grouped two-pass DDS pitch sampler with default expression controls.
+//! Grouped two-pass DDS pitch sampler with expression controls.
 //!
 //! The final payload integer specifies temporal grouping, not a diffusion
 //! iteration count. SV1 and SV2 compatibility models share this contract.
+mod controls;
 mod inputs;
 
 use crate::synthesis::{
-    inference::{ModelRuntime, Sequence},
+    inference::{ModelRuntime, Sequence, ops::standard_normalizer::StandardNormalizer},
+    stages::f0::{frontend::FrontendNote, statistics::SamplerStatistics},
     voice::{PreparedTree, Result, VoiceError, embedded::types::F0_SAMPLER_TYPE_ID},
 };
 
 pub(super) struct SampleResult {
     pub pitch: Vec<f32>,
-    pub preliminary: Vec<f32>,
+    pub predicted_controls: SamplerStatistics,
+}
+
+pub(super) struct Request<'a> {
+    pub source: &'a Sequence,
+    pub context: &'a Sequence,
+    pub positions: &'a [[f32; 3]],
+    pub noise: &'a [f32],
+    pub expression: &'a [f32],
+    pub notes: &'a [FrontendNote],
+    pub note_frames: &'a [usize],
+    pub vowel_mask: &'a [bool],
+    pub normalizer: &'a StandardNormalizer,
+    pub transpose: f32,
+    pub contract: super::Contract,
 }
 
 pub(super) fn sample(
     tree: &PreparedTree,
     index: usize,
-    source: &Sequence,
-    context: &Sequence,
-    positions: &[[f32; 3]],
-    noise: &[f32],
+    request: Request<'_>,
 ) -> Result<SampleResult> {
+    let Request {
+        source,
+        context,
+        positions,
+        noise,
+        expression,
+        notes,
+        note_frames,
+        vowel_mask,
+        normalizer,
+        transpose,
+        contract,
+    } = request;
     let config = Configuration::prepare(tree, index)?;
     source.validate()?;
     context.validate()?;
@@ -29,6 +55,7 @@ pub(super) fn sample(
         || context.frames != source.frames
         || positions.len() != source.frames
         || noise.len() != source.frames
+        || expression.len() != source.frames
     {
         return Err(VoiceError::new(
             "SV1 pitch sampler inputs have incompatible frame counts",
@@ -55,18 +82,68 @@ pub(super) fn sample(
         true,
     )?;
     require_shape(&preliminary, source.frames, 1, "preliminary pitch head")?;
+    let preliminary = preliminary
+        .values
+        .iter()
+        .map(|&value| {
+            normalizer
+                .denormalize_scalar(2, value)
+                .map_err(|error| VoiceError::new(error.to_string()))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    if preliminary.iter().any(|value| !value.is_finite()) {
+        return Err(VoiceError::new("DDS preliminary pitch is not finite"));
+    }
+    let predicted_controls = super::statistics::estimate(
+        &preliminary,
+        vowel_mask,
+        notes,
+        note_frames,
+        transpose,
+        contract,
+    )?;
 
-    // Unset slope and offset controls contribute zero, regardless of their
-    // predicted statistics. Default expressiveness is exactly zero;
-    // its learned projection still contributes and must not be omitted.
-    let default_expression = Sequence::zeros(base.frames, 1)?;
-    let embedding = runtime.execute(children[1], &default_expression, true)?;
+    // Expressiveness and explicit pitch controls use the same grouped frame
+    // grid before their learned projections.
+    let mut expression = inputs::group_mean(
+        &Sequence::new(source.frames, 1, expression.to_vec())?,
+        config.group_frames,
+    )?;
+    for value in &mut expression.values {
+        *value = value.clamp(-0.999, 0.999);
+    }
+    let mut embedding = runtime.execute(children[1], &expression, true)?;
     require_shape(
         &embedding,
         base.frames,
         base.channels,
         "expression projection",
     )?;
+    if let Some(controls) = controls::prepare(notes, note_frames, &predicted_controls, contract)? {
+        for (index, values, weights) in [
+            (2, controls.slope, controls.slope_weight),
+            (3, controls.offset, controls.offset_weight),
+        ] {
+            let values = inputs::group_mean(&values, config.group_frames)?;
+            let weights = inputs::group_mean(&weights, config.group_frames)?;
+            let projected = runtime.execute(children[index], &values, true)?;
+            require_shape(
+                &projected,
+                base.frames,
+                base.channels,
+                "pitch control projection",
+            )?;
+            for (frame, &weight) in weights.values.iter().enumerate() {
+                let start = frame * embedding.channels;
+                for (value, &adjustment) in embedding.values[start..start + embedding.channels]
+                    .iter_mut()
+                    .zip(projected.frame(frame)?)
+                {
+                    *value += adjustment * weight;
+                }
+            }
+        }
+    }
     let adjustment_input = Sequence::concat_channels(&[&base, &embedding])?;
     let mut adjustment = runtime.execute(children[4], &adjustment_input, true)?;
     require_shape(
@@ -92,7 +169,7 @@ pub(super) fn sample(
     require_shape(&pitch, source.frames, 1, "final pitch head")?;
     Ok(SampleResult {
         pitch: pitch.values,
-        preliminary: preliminary.values,
+        predicted_controls,
     })
 }
 

@@ -2,6 +2,7 @@ mod controls;
 mod dictionary;
 mod note;
 mod render;
+pub(crate) use note::end_performance_frame;
 
 use super::{
     child,

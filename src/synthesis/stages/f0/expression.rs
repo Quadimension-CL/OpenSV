@@ -1,23 +1,20 @@
-//! Editor-side neutral expression conditioning, before the F0 model defaults.
+//! Editor-side expression conditioning, before the F0 model defaults.
 //!
 //! Absent `expValueX/Y` coordinates default to zero and blend nine control
 //! points. Leaving engine fields unspecified selects different model defaults.
-//! Only neutral singing is supported; custom expression coordinates are not.
 
 #[derive(Clone, Copy, Debug)]
-pub struct SingingControls {
+pub struct ExpressionControls {
     pub expression: f32,
     pub position_c: f32,
     pub position_b: f32,
     pub accent: f32,
 }
 
-/// The current supported editor path consists of ordinary, unflagged singing
-/// records. Synthetic silence (kind 1) leaves its initial controls absent.
-/// Other record kinds/flags are deliberately not assigned singing defaults.
-/// Caller-level special modes must not be inferred from the per-note flag.
-pub fn neutral_singing_controls(kind: u32, flag: bool) -> Option<SingingControls> {
-    if kind != 0 || flag {
+/// Ordinary records blend their performance position independently of the
+/// musical mode. Other record kinds leave these controls absent.
+pub fn expression_controls(kind: u32, x: f64, y: f64) -> Option<ExpressionControls> {
+    if kind != 0 {
         return None;
     }
     // Blend in order: center, right, upper-right, up, upper-left, left,
@@ -34,7 +31,7 @@ pub fn neutral_singing_controls(kind: u32, flag: bool) -> Option<SingingControls
         (0.0, -1.0),
         (0.8, -0.8),
     ];
-    let weights = points.map(|(x, y)| (-4.0 * x.hypot(y)).exp());
+    let weights = points.map(|(point_x, point_y)| (-4.0 * (x - point_x).hypot(y - point_y)).exp());
     let total: f64 = weights.iter().sum();
     let [
         center,
@@ -59,11 +56,10 @@ pub fn neutral_singing_controls(kind: u32, flag: bool) -> Option<SingingControls
     let position_c = (right + center_half + upper_right + up) / total;
     let position_b =
         (center_half + upper_right_half + up + upper_left + left + lower_left * 0.5) / total;
-    Some(SingingControls {
+    Some(ExpressionControls {
         expression: expression as f32,
         position_c: position_c as f32,
         position_b: position_b as f32,
-        // At (0,0), hypot(-1-x,-1-y) >= .5, so the accent is zero.
-        accent: 0.0,
+        accent: (1.0 - 2.0 * (-1.0 - x).hypot(-1.0 - y)).max(0.0) as f32,
     })
 }

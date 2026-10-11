@@ -1,10 +1,13 @@
-mod unavailable;
+mod performance;
+mod retake_buttons;
+mod retakes;
 use super::controls::*;
 use crate::{
     app::App,
     model::{Language, Note, database_language},
 };
 use eframe::egui::*;
+pub(crate) use performance::end_frame as end_performance_frame;
 
 #[derive(Clone, Default)]
 struct PhonemeDraft {
@@ -17,9 +20,9 @@ struct PhonemeDraft {
 }
 
 pub(super) fn show(app: &mut App, ui: &mut Ui) {
-    section(ui, "模式", unavailable::mode);
-    section(ui, "演绎", unavailable::expression);
-    section(ui, "AI 重录", unavailable::retakes);
+    section(ui, "模式", |ui| performance::mode(app, ui));
+    section(ui, "演绎", |ui| performance::expression(app, ui));
+    section(ui, "AI 重录", |ui| retakes::show(app, ui));
     let notes: Vec<_> = app
         .editor
         .notes()

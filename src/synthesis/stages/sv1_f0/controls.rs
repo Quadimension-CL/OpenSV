@@ -1,11 +1,11 @@
-//! Default singing/rest controls from the two DDS editor adapters.
+//! Note performance controls from the two DDS editor adapters.
 
 use super::Contract;
 
 use crate::synthesis::{
     inference::noise::seeds::SeedSource,
     stages::{
-        f0::{TimedPhone, expression::neutral_singing_controls, frontend::FrontendNote},
+        f0::{TimedPhone, expression::expression_controls, frontend::FrontendNote},
         sv1_noise::Normal,
     },
     voice::{Result, VoiceError},
@@ -33,8 +33,10 @@ pub(super) fn prepare(
     phone_frames: &[usize],
     defaults: Defaults,
     contract: Contract,
+    pitch_seeds: &[u32],
 ) -> Result<Controls> {
     if notes.len() != note_frames.len()
+        || notes.len() != pitch_seeds.len()
         || phones.len() != phone_frames.len()
         || !defaults.temperature.is_finite()
         || !defaults.flagged_temperature_scale.is_finite()
@@ -54,7 +56,11 @@ pub(super) fn prepare(
     for (note, &count) in notes.iter().zip(note_frames) {
         let (note_temperature, value) = match contract {
             Contract::Compatible => {
-                let controls = neutral_singing_controls(note.kind, note.flag);
+                let controls = expression_controls(
+                    note.kind,
+                    note.performance.expression_x,
+                    note.performance.expression_y,
+                );
                 let mut temperature = if note.flag {
                     f64::from(defaults.temperature) * f64::from(defaults.flagged_temperature_scale)
                 } else {
@@ -115,7 +121,7 @@ pub(super) fn prepare(
     let tokens: Vec<&str> = phones.iter().map(|phone| phone.token.as_str()).collect();
     let mut phone_seeds = SeedSource::context(&tokens, phone_frames, "magic", 0)
         .map_err(|error| VoiceError::new(error.to_string()))?;
-    let mut note_seeds = SeedSource::new(&vec![0; notes.len()], note_frames)
+    let mut note_seeds = SeedSource::new(pitch_seeds, note_frames)
         .map_err(|error| VoiceError::new(error.to_string()))?;
     let mut normal = Normal::new(123);
     let mut last_phone = 0;
@@ -143,6 +149,36 @@ pub(super) fn prepare(
         })
         .collect();
     Ok(Controls { positions, noise })
+}
+
+pub(super) fn vibrato(
+    notes: &[FrontendNote],
+    note_frames: &[usize],
+    values: Option<&[f32]>,
+) -> Result<Vec<f32>> {
+    let total: usize = note_frames.iter().sum();
+    let values = match values {
+        Some(values) if values.len() == total => values.to_vec(),
+        Some(_) => {
+            return Err(VoiceError::new(
+                "DDS vibrato controls differ from its note frame count",
+            ));
+        }
+        None => notes
+            .iter()
+            .zip(note_frames)
+            .flat_map(|(note, &count)| std::iter::repeat_n(note.performance.vibrato as f32, count))
+            .collect(),
+    };
+    if values.iter().any(|value| !value.is_finite()) {
+        return Err(VoiceError::new("DDS vibrato controls must be finite"));
+    }
+    // Neutral modulation is one; the sampler projection takes a centered
+    // scalar. Both DDS wrappers use unit scale and zero offset by default.
+    Ok(values
+        .into_iter()
+        .map(|value| value.clamp(0.0, 2.0) - 1.0)
+        .collect())
 }
 
 fn smooth(values: &mut [f32]) {

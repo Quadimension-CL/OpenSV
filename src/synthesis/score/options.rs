@@ -4,7 +4,7 @@
 use serde_json::Value;
 
 use crate::{
-    model::{Extra, Language, database_language, pitch::PitchControl},
+    model::{Extra, Language, NoteMode, NotePerformance, database_language, pitch::PitchControl},
     synthesis::{
         plan::{NoteInput, OwnerInput},
         voice::{Result, VoiceError, VoiceFamily},
@@ -51,7 +51,10 @@ pub(super) fn validate_owner(input: &OwnerInput, family: VoiceFamily) -> Result<
                     validate_voice(value, label)?;
                     true
                 }
-                "takes" => neutral_take(value),
+                "takes" => {
+                    super::retakes::validate_instance(value)?;
+                    true
+                }
                 _ => false,
             };
             if !supported {
@@ -87,10 +90,12 @@ pub(super) fn validate_owner(input: &OwnerInput, family: VoiceFamily) -> Result<
     Ok(())
 }
 
-pub(super) fn validate_note(note: &NoteInput) -> Result<()> {
-    if note.musical_type != "singing" {
-        return unsupported(format!("note {} type {}", note.id, note.musical_type));
-    }
+pub(super) fn validate_note(note: &NoteInput, family: VoiceFamily) -> Result<()> {
+    validate_performance(
+        NotePerformance::from_parts(&note.musical_type, &note.attributes)
+            .map_err(VoiceError::new)?,
+        family,
+    )?;
     for (key, value) in &note.attributes {
         let supported = match key.as_str() {
             "muted" => value.is_boolean(),
@@ -100,6 +105,8 @@ pub(super) fn validate_note(note: &NoteInput) -> Result<()> {
                 .is_some_and(|id| id.is_empty() || Language::parse(id).is_some()),
             // The alphabet is checked after resolving the note's language.
             "phonesetOverride" => value.is_string(),
+            // The typed performance parser above validates these values.
+            "expValueX" | "expValueY" | "dF0VbrMod" | "rTone" | "rIntonation" => true,
             _ => false,
         };
         if !supported {
@@ -108,14 +115,28 @@ pub(super) fn validate_note(note: &NoteInput) -> Result<()> {
     }
     for (key, value) in &note.extensions {
         let supported = match key.as_str() {
-            "accent" => value.as_str() == Some(""),
+            "accent" => matches!(value.as_str(), Some("" | "1" | "2" | "3" | "4" | "5")),
             "detune" => value.as_f64() == Some(0.0),
-            "takes" => neutral_take(value),
+            "takes" => {
+                super::retakes::validate(value, family)?;
+                true
+            }
             _ => false,
         };
         if !supported {
             return unsupported(format!("note {} option {key}", note.id));
         }
+    }
+    Ok(())
+}
+
+pub(super) fn validate_performance(value: NotePerformance, family: VoiceFamily) -> Result<()> {
+    value.validate().map_err(VoiceError::new)?;
+    if family == VoiceFamily::Sv1 && (value.expression_x != 0.0 || value.expression_y != 0.0) {
+        return Err(VoiceError::new("原生一代歌声暂不支持二维演绎参数。"));
+    }
+    if family == VoiceFamily::Sv1 && value.mode == NoteMode::Rap {
+        return Err(VoiceError::new("原生一代歌声暂不支持说唱合成。"));
     }
     Ok(())
 }
@@ -183,38 +204,6 @@ fn validate_voice(value: &Value, scope: &str) -> Result<()> {
         }
     }
     Ok(())
-}
-
-fn neutral_take(value: &Value) -> bool {
-    let Some(object) = value.as_object() else {
-        return false;
-    };
-    if object
-        .keys()
-        .any(|key| !matches!(key.as_str(), "activeTakeId" | "takes"))
-    {
-        return false;
-    }
-    let Some(id) = object.get("activeTakeId").and_then(Value::as_u64) else {
-        return false;
-    };
-    let Some(takes) = object.get("takes").and_then(Value::as_array) else {
-        return false;
-    };
-    let Some(take) = takes
-        .iter()
-        .find(|take| take.get("id").and_then(Value::as_u64) == Some(id))
-    else {
-        return false;
-    };
-    take.as_object().is_some_and(|take| {
-        take.iter().all(|(key, value)| match key.as_str() {
-            "id" => value.as_u64() == Some(id),
-            "seedDuration" | "seedPitch" | "seedTimbre" => value.as_u64() == Some(0),
-            "liked" => value.is_boolean(),
-            _ => false,
-        })
-    })
 }
 
 fn empty_object(value: &Value) -> bool {

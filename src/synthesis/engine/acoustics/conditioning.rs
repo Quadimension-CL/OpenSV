@@ -1,7 +1,7 @@
 use super::PreparedRenderAcoustics;
 use crate::synthesis::engine::PreparedModelFeatures;
 use crate::synthesis::stages::{
-    f0::expression::neutral_singing_controls,
+    f0::expression::expression_controls,
     timbre::records::{AcousticNote, PhoneImpulse},
 };
 
@@ -17,17 +17,20 @@ impl PreparedRenderAcoustics {
             .notes
             .iter()
             .zip(note_frames)
-            .map(|(note, frames)| AcousticNote {
+            .zip(&self.prepared.phrase.retake_seeds)
+            .map(|((note, frames), seeds)| AcousticNote {
                 frames,
-                timbre_seed: None,
+                timbre_seed: seeds.map(|seeds| seeds.timbre),
                 kind: note.kind,
                 factor: match &self.prepared.features {
                     // SV1's native frontend uses its own neutral factor of 1.
                     PreparedModelFeatures::Sv1Local => None,
-                    PreparedModelFeatures::Sv2 { .. } => {
-                        neutral_singing_controls(note.kind, note.flag)
-                            .map(|controls| controls.position_b)
-                    }
+                    PreparedModelFeatures::Sv2 { .. } => expression_controls(
+                        note.kind,
+                        note.performance.expression_x,
+                        note.performance.expression_y,
+                    )
+                    .map(|controls| controls.position_b),
                 },
             })
             .collect()

@@ -12,6 +12,7 @@ pub mod midi_import;
 pub mod panels;
 pub mod piano;
 pub mod rename;
+pub mod retakes;
 pub mod scrollbars;
 pub mod settings;
 pub mod state;

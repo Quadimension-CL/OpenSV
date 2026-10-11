@@ -8,7 +8,10 @@ mod topology;
 use crate::synthesis::{
     engine::{OwnerSynthesis, PreparedAcoustics, PreparedModelFeatures, RenderStage, StageTimings},
     score::PreparedPhrase,
-    stages::{f0::F0Stage, timbre::TimbreNetwork},
+    stages::{
+        f0::{F0Stage, PitchInputControls},
+        timbre::TimbreNetwork,
+    },
     voice::{PreparedVoice, Result, VoiceError},
 };
 use std::time::Instant;
@@ -65,11 +68,25 @@ pub fn recompute(
     let pitch_features =
         fresh.reuse_rows_from(base_pitch_features, &mapping.note_rows, &phone_rows)?;
     let controls = crate::synthesis::engine::pitch::sv2_controls(phrase)?;
+    let expressiveness = crate::synthesis::engine::pitch::expressiveness(
+        phrase,
+        crate::synthesis::score::FRAME_SECONDS,
+        total,
+    )?;
+    let pitch_seeds: Vec<_> = phrase
+        .retake_seeds
+        .iter()
+        .map(|seeds| seeds.map(|seeds| seeds.pitch))
+        .collect();
     let patch = stage.predict_singing_prepared(
         &phrase.notes,
         &phones,
         &pitch_features,
-        controls.as_deref(),
+        PitchInputControls {
+            pitch_seeds: Some(&pitch_seeds),
+            absolute_pitch: controls.as_deref(),
+            expressiveness: expressiveness.as_deref(),
+        },
         Some(work_frames.clone()),
     )?;
     if patch.pitch.len() != work_frames.len()

@@ -24,6 +24,18 @@ pub(super) fn sv2_controls(phrase: &PreparedPhrase) -> Result<Option<Vec<f32>>> 
         .map(Some)
 }
 
+pub(super) fn expressiveness(
+    phrase: &PreparedPhrase,
+    step: f64,
+    count: usize,
+) -> Result<Option<Vec<f32>>> {
+    phrase
+        .performance_controls
+        .as_ref()
+        .map(|controls| controls.sample(phrase.start_seconds, step, count))
+        .transpose()
+}
+
 /// The DDS adapter consumes absolute curves after its native F0 prediction.
 /// It overwrites only specified frames; SV2's neural conditioning and 15-frame
 /// control blending are deliberately not substituted for this contract.
