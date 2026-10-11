@@ -1,0 +1,171 @@
+use super::{PreparedTree, PreparedTreeSummary, Result, VoiceError, VoiceFamily};
+use serde::Serialize;
+use std::sync::{Arc, OnceLock};
+
+/// Immutable prepared parameters shared by all future rendering sessions.
+/// Mutable temporal state belongs in a separate session, never in this object.
+pub struct PreparedVoice {
+    files: Vec<PreparedFile>,
+    pub family: VoiceFamily,
+    pub f0_enhancement: Option<f32>,
+    summary: OnceLock<PreparationSummary>,
+}
+
+pub(super) struct PreparedFile {
+    pub name: String,
+    pub trees: Vec<PreparedModel>,
+}
+
+pub(super) struct PreparedModel {
+    pub role: &'static str,
+    pub tree: Arc<PreparedTree>,
+}
+
+#[derive(Serialize)]
+pub struct PreparationSummary {
+    pub files: Vec<PreparedFileSummary>,
+    /// Structural readiness, separate from local session conditioning and an
+    /// individual score's supported options.
+    pub stage_programs_available: bool,
+    pub stage_preparation_error: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct PreparedFileSummary {
+    pub name: String,
+    pub trees: Vec<PreparedModelSummary>,
+}
+
+#[derive(Serialize)]
+pub struct PreparedModelSummary {
+    pub role: &'static str,
+    pub modules: PreparedTreeSummary,
+}
+
+impl PreparedVoice {
+    pub(super) fn new(
+        files: Vec<PreparedFile>,
+        family: VoiceFamily,
+        f0_enhancement: Option<f32>,
+    ) -> Self {
+        let model = Self {
+            files,
+            family,
+            f0_enhancement,
+            summary: OnceLock::new(),
+        };
+        // Metadata is prepared with weights on the loader thread, not per UI frame.
+        model.summary();
+        model
+    }
+
+    pub fn summary(&self) -> &PreparationSummary {
+        self.summary.get_or_init(|| {
+            let stage_preparation_error =
+                self.prepare_stages().err().map(|error| error.to_string());
+            PreparationSummary {
+                files: self
+                    .files
+                    .iter()
+                    .map(|file| PreparedFileSummary {
+                        name: file.name.clone(),
+                        trees: file
+                            .trees
+                            .iter()
+                            .map(|model| PreparedModelSummary {
+                                role: model.role,
+                                modules: model.tree.summary(),
+                            })
+                            .collect(),
+                    })
+                    .collect(),
+                stage_programs_available: stage_preparation_error.is_none(),
+                stage_preparation_error,
+            }
+        })
+    }
+
+    fn prepare_stages(&self) -> Result<()> {
+        use crate::synthesis::stages::{
+            compatible_duration::CompatibleDurationStage, f0::F0Stage, sv1_f0::Sv1F0Stage,
+            sv1_timbre::Sv1TimbreNetwork, timbre::TimbreNetwork, vocoder::VocoderStage,
+        };
+        let duration = self.model("duration")?;
+        match self.family {
+            VoiceFamily::Sv1 => {
+                crate::synthesis::stages::sv1_duration::Sv1DurationStage::prepare(duration)?;
+                let enhancement = self.f0_enhancement.ok_or_else(|| {
+                    VoiceError::new(
+                        "SV1 voice is missing the researched F0 enhancement configuration",
+                    )
+                })?;
+                Sv1F0Stage::prepare_native(self.model("f0")?, enhancement)?;
+                Sv1TimbreNetwork::prepare_native(self.model("timbre")?)?;
+            }
+            VoiceFamily::Sv2Compatible => {
+                CompatibleDurationStage::validate(duration)?;
+                Sv1F0Stage::prepare(self.model("f0")?)?;
+                Sv1TimbreNetwork::prepare(self.model("timbre")?)?;
+            }
+            VoiceFamily::Sv2 => {
+                let root = duration.node(duration.root_index())?;
+                if root.type_id != super::DURATION_ROOT_TYPE_ID || root.children.len() != 14 {
+                    return Err(VoiceError::new("Unsupported duration stage structure"));
+                }
+                super::DurationConfiguration::parse(
+                    &duration.resource_bytes(duration.root_index())?,
+                )?;
+                F0Stage::prepare(self.model("f0")?)?;
+                TimbreNetwork::prepare(self.model("timbre")?)?;
+            }
+        }
+        VocoderStage::prepare(self.model("vocoder")?)?;
+        Ok(())
+    }
+
+    /// Models are identified by their registered resource role, independently
+    /// of container filenames, file ordering, or inline/indexed representation.
+    pub fn model(&self, role: &str) -> Result<&PreparedTree> {
+        Ok(self.find_model(role)?.tree.as_ref())
+    }
+
+    pub(crate) fn shared_model(&self, role: &str) -> Result<Arc<PreparedTree>> {
+        Ok(Arc::clone(&self.find_model(role)?.tree))
+    }
+
+    fn find_model(&self, role: &str) -> Result<&PreparedModel> {
+        let mut models = self
+            .files
+            .iter()
+            .flat_map(|file| &file.trees)
+            .filter(|model| model.role == role);
+        let model = models
+            .next()
+            .ok_or_else(|| VoiceError::new(format!("声库缺少本地 {role} 模型")))?;
+        if models.next().is_some() {
+            return Err(VoiceError::new(format!(
+                "声库包含多个 {role} 模型，无法确定执行目标"
+            )));
+        }
+        Ok(model)
+    }
+
+    pub fn tree(&self, file: usize, tree: usize) -> Result<&PreparedTree> {
+        self.files
+            .get(file)
+            .and_then(|file| file.trees.get(tree))
+            .map(|model| model.tree.as_ref())
+            .ok_or_else(|| VoiceError::new("Prepared model file/tree index is out of range"))
+    }
+
+    /// Diagnostic execution of one identified module.
+    pub fn execute_module(
+        &self,
+        file: usize,
+        tree: usize,
+        node: usize,
+        input: &[f32],
+    ) -> Result<Vec<f32>> {
+        self.tree(file, tree)?.execute_node(node, input)
+    }
+}

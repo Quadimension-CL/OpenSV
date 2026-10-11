@@ -1,0 +1,122 @@
+use super::Editor;
+use crate::model::*;
+
+impl Editor {
+    /// Incoming time and pitch are in project coordinates.
+    pub fn add_note(&mut self, global: i64, duration: i64, pitch: i32) -> Option<EntityId> {
+        let global = global.max(0);
+        if !self.prepare_note_target(global) {
+            return None;
+        }
+        let reference = self.active_ref()?;
+        // The instance boundary clips the display, not the requested note duration.
+        let note = Note::new(
+            global - reference.blick_offset,
+            duration.max(1),
+            (pitch - reference.pitch_offset).clamp(0, 127),
+        );
+        let id = note.id;
+        self.group_mut()?.notes.push(note);
+        self.selected.clear();
+        self.selected.insert(id);
+        Some(id)
+    }
+    pub fn delete_selected(&mut self) {
+        self.begin("删除音符");
+        let selected = self.selected.clone();
+        if let Some(group) = self.group_mut() {
+            group.notes.retain(|n| !selected.contains(&n.id));
+        }
+        self.selected.clear();
+        self.finish();
+    }
+    pub fn copy(&mut self) {
+        self.clipboard = self
+            .notes()
+            .iter()
+            .filter(|n| self.selected.contains(&n.id))
+            .cloned()
+            .collect();
+    }
+    pub fn paste(&mut self, at: i64) {
+        if self.clipboard.is_empty() {
+            return;
+        }
+        self.begin("粘贴音符");
+        if !self.prepare_note_target(at.max(0)) {
+            self.finish();
+            return;
+        }
+        let reference = self.active_ref().unwrap();
+        let first = self.clipboard.iter().map(|n| n.onset).min().unwrap();
+        let local = at.max(0) - reference.blick_offset;
+        let mut notes = self.clipboard.clone();
+        for n in &mut notes {
+            n.id = new_id();
+            n.onset = n.onset - first + local;
+        }
+        self.selected = notes.iter().map(|n| n.id).collect();
+        self.group_mut().unwrap().notes.extend(notes);
+        self.finish();
+    }
+    pub fn transpose(&mut self, amount: i32) {
+        self.begin("移调");
+        let selected = self.selected.clone();
+        if let Some(group) = self.group_mut() {
+            for n in &mut group.notes {
+                if selected.contains(&n.id) {
+                    n.pitch = (n.pitch + amount).clamp(0, 127);
+                }
+            }
+        }
+        self.finish();
+    }
+    pub fn mute_selected(&mut self) {
+        self.begin("静音音符");
+        let selected = self.selected.clone();
+        let mute = self
+            .notes()
+            .iter()
+            .filter(|n| selected.contains(&n.id))
+            .any(|n| !n.muted());
+        if let Some(group) = self.group_mut() {
+            for n in &mut group.notes {
+                if selected.contains(&n.id) {
+                    n.attributes.insert("muted".into(), mute.into());
+                }
+            }
+        }
+        self.finish();
+    }
+    pub fn add_track(&mut self) {
+        self.begin("创建音轨");
+        let mut t = Track::new(self.project.tracks.len());
+        t.disp_color = self.project.next_track_color();
+        self.track = t.id;
+        self.reference = None;
+        self.project.tracks.push(t);
+        self.selected.clear();
+        self.finish();
+    }
+    pub fn set_track_color(&mut self, id: EntityId, color: TrackColor) {
+        let Some(index) = self.project.tracks.iter().position(|t| t.id == id) else {
+            return;
+        };
+        if self.project.tracks[index].disp_color == color {
+            return;
+        }
+        self.begin("修改音轨颜色");
+        self.project.tracks[index].disp_color = color;
+        self.finish();
+    }
+    pub fn set_lyric(&mut self, id: EntityId, lyric: String) {
+        self.begin("填入歌词");
+        if let Some(n) = self
+            .group_mut()
+            .and_then(|g| g.notes.iter_mut().find(|n| n.id == id))
+        {
+            n.lyrics = lyric;
+        }
+        self.finish();
+    }
+}

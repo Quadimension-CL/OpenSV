@@ -1,0 +1,38 @@
+//! Platform-specific locations for RynthV's persistent user configuration.
+
+use std::path::PathBuf;
+
+/// The current user's configuration directory. Resource libraries are selected
+/// separately and are never inferred from another platform's environment.
+pub fn config_directory() -> Result<PathBuf, String> {
+    config_root().map(|root| root.join("RynthV"))
+}
+
+#[cfg(windows)]
+fn config_root() -> Result<PathBuf, String> {
+    std::env::var_os("LOCALAPPDATA")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .ok_or_else(|| "LOCALAPPDATA 未设置，无法定位用户配置目录。".into())
+}
+
+#[cfg(target_os = "linux")]
+fn config_root() -> Result<PathBuf, String> {
+    // XDG specifies that unset, empty, and relative values use $HOME/.config.
+    if let Some(root) = std::env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .filter(|path| path.is_absolute())
+    {
+        return Ok(root);
+    }
+    std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .filter(|path| path.is_absolute())
+        .map(|home| home.join(".config"))
+        .ok_or_else(|| "XDG_CONFIG_HOME 和 HOME 未设置为绝对路径，无法定位用户配置目录。".into())
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
+fn config_root() -> Result<PathBuf, String> {
+    Err("当前平台尚未支持用户配置目录。".into())
+}

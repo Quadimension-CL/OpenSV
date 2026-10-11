@@ -1,0 +1,112 @@
+use std::{
+    fs::{File, OpenOptions},
+    io::Read,
+    os::windows::fs::OpenOptionsExt,
+    path::Path,
+};
+
+use sha2::{Digest, Sha256};
+use zeroize::Zeroizing;
+
+use super::{OnlineContextSource, Result, VoiceError};
+
+mod access;
+mod memory;
+mod native;
+mod process;
+
+use native::Handle;
+
+// Supported Synthesizer V Studio 2.1.2 x64 executable.
+// These offsets are used only after an exact binary digest match.
+const EXECUTABLE_SHA256: [u8; 32] = [
+    0x35, 0x25, 0xe9, 0x84, 0x19, 0x1a, 0xb8, 0x06, 0xc9, 0xab, 0xb7, 0x04, 0xb0, 0xd6, 0xe3, 0x57,
+    0x6f, 0xc0, 0x0a, 0xe4, 0x71, 0xf7, 0x98, 0x7c, 0x03, 0x9e, 0xeb, 0x09, 0x99, 0x32, 0x4f, 0x04,
+];
+const SESSION_SINGLETON_RVA: usize = 0x175b3f8;
+
+pub(super) fn sources() -> Result<Vec<OnlineContextSource>> {
+    let mut sources = Vec::new();
+    for process_id in process::candidate_process_ids()? {
+        // Processes can exit or become inaccessible between snapshot and open.
+        // Inaccessible/different-user/session entries must never be offered.
+        let Ok(process) = Handle::process(process_id, false) else {
+            continue;
+        };
+        if !access::same_user_and_session(&process).unwrap_or(false) {
+            continue;
+        }
+        let Ok(path) = process::image_path(&process) else {
+            continue;
+        };
+        sources.push(OnlineContextSource {
+            process_id,
+            label: format!(
+                "Synthesizer V Studio · PID {process_id} · {}",
+                path.display()
+            ),
+        });
+    }
+    sources.sort_by_key(|source| source.process_id);
+    Ok(sources)
+}
+
+pub(super) fn read_field(process_id: u32) -> Result<Zeroizing<Vec<u8>>> {
+    let process = Handle::process(process_id, true)?;
+    if !access::same_user_and_session(&process)? {
+        return Err(VoiceError::new(
+            "只能从当前 Windows 用户、当前会话的原编辑器导入模型上下文。",
+        ));
+    }
+    let path = process::image_path(&process)?;
+    // Keep this read-only handle alive through the read to deny file mutation
+    // after version verification. No executable is started or modified.
+    let _verified_executable = verify_executable(&path)?;
+    let (base, size) = process::main_module(process_id, &path)?;
+    if SESSION_SINGLETON_RVA + size_of::<u64>() > size {
+        return Err(VoiceError::new("原编辑器的主模块范围不符合已验证版本。"));
+    }
+    let slot = base
+        .checked_add(SESSION_SINGLETON_RVA)
+        .ok_or_else(|| VoiceError::new("原编辑器的主模块地址无效。"))?;
+    let field = memory::session_field(&process, slot)?;
+    // Revalidate the source while the same process handle remains alive.
+    // Zeroizing drops field even when any of these checks fails.
+    if process::main_module(process_id, &path)? != (base, size)
+        || !access::same_user_and_session(&process)?
+    {
+        return Err(VoiceError::new(
+            "原编辑器进程在导入期间发生变化，请重新选择来源。",
+        ));
+    }
+    Ok(field)
+}
+
+fn verify_executable(path: &Path) -> Result<File> {
+    const FILE_SHARE_READ: u32 = 1;
+    const MAXIMUM_EXECUTABLE_BYTES: u64 = 512 * 1024 * 1024;
+    let mut file = OpenOptions::new()
+        .read(true)
+        .share_mode(FILE_SHARE_READ)
+        .open(path)?;
+    if file.metadata()?.len() > MAXIMUM_EXECUTABLE_BYTES {
+        return Err(VoiceError::new(
+            "所选原编辑器的可执行文件大小超出已支持范围。",
+        ));
+    }
+    let mut hash = Sha256::new();
+    let mut bytes = [0; 64 * 1024];
+    loop {
+        let count = file.read(&mut bytes)?;
+        if count == 0 {
+            break;
+        }
+        hash.update(&bytes[..count]);
+    }
+    if hash.finalize()[..] != EXECUTABLE_SHA256 {
+        return Err(VoiceError::new(
+            "所选原编辑器版本尚未支持上下文导入；当前只支持已验证的 Windows x64 2.1.2。",
+        ));
+    }
+    Ok(file)
+}

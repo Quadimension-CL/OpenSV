@@ -1,0 +1,203 @@
+use super::{group_edit, theme::*, timeline::*, track_color::TrackColors};
+use crate::{app::App, editor::GroupEdit, model::*};
+use eframe::egui::*;
+
+pub fn show(app: &mut App, ui: &mut Ui, timeline_left: f32, scroll: f32) {
+    let rect = ui.max_rect();
+    let tracks = app.editor.project.tracks.clone();
+    let mut track_rects = Vec::new();
+    for (index, track) in tracks.iter().enumerate() {
+        let colors = TrackColors::new(track);
+        let y = rect.top() + index as f32 * 56.0 - scroll;
+        let head = Rect::from_min_size(
+            pos2(rect.left(), y),
+            vec2(timeline_left - rect.left(), 56.0),
+        );
+        let body = Rect::from_min_max(pos2(timeline_left, y), pos2(rect.right(), y + 56.0));
+        track_rects.push((track.id, body));
+        if !head.intersects(rect) {
+            continue;
+        }
+        ui.painter().rect_filled(
+            head,
+            0,
+            if track.id == app.editor.track && !track.is_instrumental() {
+                Color32::from_rgb(57, 55, 60)
+            } else {
+                PANEL
+            },
+        );
+        ui.painter().rect_filled(
+            Rect::from_min_size(head.min, vec2(5.0, head.height())),
+            0,
+            colors.accent,
+        );
+        super::track_header::show(app, ui, head, track);
+        if track.is_instrumental() {
+            super::instrumental::show(app, ui, body, track);
+            continue;
+        }
+        let response = ui.interact(body, Id::new(("track-body", track.id)), Sense::click());
+        let pointer = response.interact_pointer_pos();
+        let at = pointer.map(|p| {
+            ticks(
+                app.view
+                    .snap_beat(beat_at(body, &app.view.arrangement, p.x)),
+            )
+            .max(0)
+        });
+        // The context position must survive while its popup owns the pointer.
+        let context_id = Id::new(("insert-group-position", track.id));
+        if response.secondary_clicked()
+            && let Some(at) = at
+        {
+            ui.ctx().data_mut(|d| d.insert_temp(context_id, at));
+        }
+        if response.double_clicked()
+            && let Some(at) = at
+        {
+            app.commit_lyric();
+            app.editor.add_group_at(track.id, at);
+        } else if response.clicked() {
+            app.commit_lyric();
+            app.editor.select_track(track.id);
+        }
+        response.context_menu(|ui| {
+            if ui.button("插入新的音符组").clicked() {
+                let at = ui
+                    .ctx()
+                    .data(|d| d.get_temp::<i64>(context_id))
+                    .unwrap_or(0);
+                app.commit_lyric();
+                app.editor.add_group_at(track.id, at);
+                ui.close();
+            }
+            ui.separator();
+            ui.add_enabled(false, Button::new("粘贴"));
+            ui.add_enabled(false, Button::new("作为链接音符组粘贴"));
+        });
+        let mut references: Vec<_> = track.visible_references().collect();
+        references.sort_by_key(|r| app.editor.reference == Some(r.id));
+        for reference in references {
+            group(app, ui, body, track, reference);
+        }
+    }
+    if app.group_gesture.as_ref().is_some_and(|g| g.arrangement) {
+        let target = ui.input(|i| i.pointer.interact_pos()).and_then(|p| {
+            track_rects
+                .iter()
+                .find(|(_, r)| r.contains(p))
+                .map(|(id, _)| *id)
+        });
+        group_edit::update(app, ui.ctx(), target);
+    }
+}
+fn group(app: &mut App, ui: &mut Ui, body: Rect, track: &Track, reference: &GroupRef) {
+    let colors = TrackColors::new(track);
+    let Some(group) = app.editor.project.group(&reference.group_id) else {
+        return;
+    };
+    let end = if reference.blick_absolute_end < 0 {
+        group
+            .notes
+            .iter()
+            .filter_map(|n| reference.note_range(n).map(|r| r.1))
+            .max()
+            .unwrap_or(0)
+    } else {
+        reference.blick_absolute_end
+    };
+    let region = Rect::from_min_max(
+        pos2(
+            x_at(
+                body,
+                &app.view.arrangement,
+                beats(reference.blick_absolute_begin),
+            ),
+            body.top() + 1.0,
+        ),
+        pos2(
+            x_at(body, &app.view.arrangement, beats(end)),
+            body.bottom() - 1.0,
+        ),
+    );
+    let clip = region.intersect(body).intersect(ui.clip_rect());
+    if !clip.is_positive() {
+        return;
+    }
+    let selected = app.editor.reference == Some(reference.id);
+    let painter = ui.painter().with_clip_rect(body.intersect(ui.clip_rect()));
+    let fill = if selected {
+        colors.accent.lerp_to_gamma(CANVAS, 0.15)
+    } else {
+        colors.note
+    };
+    painter.rect_filled(region, 3, fill);
+    let content = painter.with_clip_rect(clip);
+    content.text(
+        pos2(region.left() + 6.0, region.top() + 5.0),
+        Align2::LEFT_TOP,
+        &group.name,
+        FontId::proportional(11.0),
+        Color32::WHITE,
+    );
+    for note in &group.notes {
+        if let Some((start, end)) = reference.note_range(note) {
+            let y = (body.top() + 40.0 - (note.pitch + reference.pitch_offset - 60) as f32 * 0.6)
+                .clamp(body.top() + 22.0, body.bottom() - 5.0);
+            content.line_segment(
+                [
+                    pos2(x_at(body, &app.view.arrangement, beats(start)), y),
+                    pos2(x_at(body, &app.view.arrangement, beats(end)), y),
+                ],
+                Stroke::new(1.5, colors.highlight),
+            );
+        }
+    }
+    let editable = reference.blick_absolute_end >= 0;
+    let response = ui.interact(
+        clip,
+        Id::new(("arrangement-group", reference.id)),
+        if editable {
+            Sense::click_and_drag()
+        } else {
+            Sense::click()
+        },
+    );
+    if response.clicked() || response.secondary_clicked() {
+        app.commit_lyric();
+        app.editor.select_reference(track.id, reference.id);
+    }
+    let kind_at = |p: Pos2| {
+        if (p.x - region.left()).abs() < 6.0 {
+            GroupEdit::Left
+        } else if (p.x - region.right()).abs() < 6.0 {
+            GroupEdit::Right
+        } else {
+            GroupEdit::Move
+        }
+    };
+    if editable
+        && let Some(p) = ui.input(|i| i.pointer.hover_pos())
+        && clip.contains(p)
+    {
+        response.clone().on_hover_cursor(match kind_at(p) {
+            GroupEdit::Move => CursorIcon::Grab,
+            _ => CursorIcon::ResizeHorizontal,
+        });
+    }
+    if response.drag_started_by(PointerButton::Primary)
+        && let Some(origin) = ui.input(|i| i.pointer.press_origin())
+    {
+        group_edit::start(
+            app,
+            reference,
+            track.id,
+            origin,
+            kind_at(origin),
+            app.view.arrangement.beat_width,
+            true,
+        );
+    }
+    response.context_menu(|ui| group_edit::context_menu(app, ui, reference));
+}
