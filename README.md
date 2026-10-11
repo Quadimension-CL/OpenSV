@@ -1,6 +1,8 @@
 # RynthV
 
-<img src="assets/branding/app-icon.png" alt="RynthV 图标" width="96" height="96">
+<p align="center">
+  <img src="assets/branding/app-icon.png" alt="RynthV 图标" width="96" height="96">
+</p>
 
 使用 Rust + egui 开发的歌声合成引擎。
 
