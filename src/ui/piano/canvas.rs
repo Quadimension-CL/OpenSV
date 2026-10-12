@@ -246,8 +246,29 @@ fn interaction(
         ui.separator();
         crate::ui::retakes::commands(app, ui);
         ui.separator();
-        if ui.add_enabled(selected, Button::new("复制")).clicked() {
-            app.editor.copy();
+        if ui
+            .add_enabled(selected, Button::new("复制").shortcut_text("Ctrl+C"))
+            .clicked()
+        {
+            crate::ui::chrome::edit::copy(app, ui.ctx());
+            ui.close();
+        }
+        if ui
+            .add_enabled(selected, Button::new("剪切").shortcut_text("Ctrl+X"))
+            .clicked()
+        {
+            crate::ui::chrome::edit::cut(app, ui.ctx());
+            ui.close();
+        }
+        if ui
+            .add_enabled(
+                crate::ui::chrome::edit::can_paste(app),
+                Button::new("粘贴").shortcut_text("Ctrl+V"),
+            )
+            .on_hover_text("在播放游标处粘贴音符")
+            .clicked()
+        {
+            crate::ui::chrome::edit::paste(app, ui.ctx());
             ui.close();
         }
         if ui

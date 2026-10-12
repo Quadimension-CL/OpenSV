@@ -1,4 +1,4 @@
-mod edit;
+pub(crate) mod edit;
 use super::state::Column;
 use crate::{
     app::{App, FileAction, MidiImportMode},
@@ -76,13 +76,13 @@ pub fn menus(app: &mut App, ui: &mut Ui) {
             }
             ui.separator();
             if item(ui, "复制", "Ctrl+C", selected) {
-                edit::copy(app);
+                edit::copy(app, &ctx);
             }
             if item(ui, "剪切", "Ctrl+X", selected) {
-                edit::cut(app);
+                edit::cut(app, &ctx);
             }
             if item(ui, "粘贴", "Ctrl+V", edit::can_paste(app)) {
-                edit::paste(app);
+                edit::paste(app, &ctx);
             }
         });
         ui.menu_button("查看", |ui| {
@@ -175,9 +175,6 @@ pub fn menus(app: &mut App, ui: &mut Ui) {
         });
     });
 }
-fn paste(app: &mut App) {
-    app.editor.paste(app.editor.transport.position);
-}
 pub fn shortcuts(app: &mut App, ctx: &Context) {
     if app.editor.has_performance_edit() {
         return;
@@ -189,6 +186,14 @@ pub fn shortcuts(app: &mut App, ctx: &Context) {
         if ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Escape)) {
             app.view_pan.cancel(ctx);
         }
+        return;
+    }
+    if !ctx.text_edit_focused()
+        && app.lyric.is_none()
+        && app.gesture.is_none()
+        && app.group_gesture.is_none()
+        && edit::clipboard_events(app, ctx)
+    {
         return;
     }
     if ctx.egui_wants_keyboard_input() || app.lyric.is_some() {
@@ -243,27 +248,8 @@ pub fn shortcuts(app: &mut App, ctx: &Context) {
     if command(Key::A, ctrl) {
         app.editor.select_all_notes();
     }
-    if command(Key::C, ctrl) {
-        app.editor.copy();
-    }
-    if command(Key::X, ctrl) {
-        app.editor.copy();
-        app.editor.delete_selected();
-    }
-    if command(Key::V, ctrl) {
-        paste(app);
-    }
     if command(Key::D, ctrl) {
-        app.editor.copy();
-        let at = app
-            .editor
-            .clipboard
-            .iter()
-            .map(|n| n.onset + n.duration)
-            .max()
-            .unwrap_or(0);
-        app.editor
-            .paste(at + app.editor.active_ref().map_or(0, |r| r.blick_offset));
+        edit::duplicate(app);
     }
     if app.piano_tool != super::piano::Tool::PitchAnchor && command(Key::L, ctrl) {
         super::fill_lyrics::open(app);

@@ -1,5 +1,6 @@
 //! Edit menu commands follow the active piano tool's selection domain.
 use crate::{app::App, ui::piano};
+use eframe::egui::{Context, Event, ViewportCommand};
 
 fn anchors(app: &App) -> bool {
     app.piano_tool == piano::Tool::PitchAnchor
@@ -13,11 +14,11 @@ pub(super) fn selected(app: &App) -> bool {
     }
 }
 
-pub(super) fn can_paste(app: &App) -> bool {
+pub(crate) fn can_paste(app: &App) -> bool {
     if anchors(app) {
         piano::anchor_has_clipboard(app)
     } else {
-        !app.editor.clipboard.is_empty()
+        !app.editor.current_track().is_instrumental() && !app.editor.is_editing()
     }
 }
 
@@ -45,28 +46,90 @@ pub(super) fn delete(app: &mut App) {
     }
 }
 
-pub(super) fn copy(app: &mut App) {
+pub(crate) fn copy(app: &mut App, ctx: &Context) {
     if anchors(app) {
         piano::anchor_copy(app);
     } else {
-        app.editor.copy();
+        copy_notes(app, ctx);
     }
 }
 
-pub(super) fn cut(app: &mut App) {
+pub(crate) fn cut(app: &mut App, ctx: &Context) {
     if anchors(app) {
         piano::anchor_cut(app);
-    } else {
-        app.editor.copy();
+    } else if copy_notes(app, ctx) {
         app.editor.delete_selected();
     }
 }
 
-pub(super) fn paste(app: &mut App) {
+pub(crate) fn paste(app: &mut App, ctx: &Context) {
     if anchors(app) {
         piano::anchor_paste(app);
-    } else {
-        app.editor.paste(app.editor.transport.position);
+    } else if can_paste(app) {
+        // Menus and the platform shortcut read the same system clipboard.
+        ctx.send_viewport_cmd(ViewportCommand::RequestPaste);
+    }
+}
+
+fn copy_notes(app: &mut App, ctx: &Context) -> bool {
+    match app.editor.copy() {
+        Ok(Some(text)) => {
+            ctx.copy_text(text);
+            app.status = "已复制音符".into();
+            true
+        }
+        Ok(None) => false,
+        Err(error) => {
+            app.status = error;
+            false
+        }
+    }
+}
+
+/// Clipboard commands arrive as platform events, without C/X/V key events.
+/// The caller leaves these events to text editors and dialogs while focused.
+pub(super) fn clipboard_events(app: &mut App, ctx: &Context) -> bool {
+    if anchors(app) {
+        return false;
+    }
+    let events = ctx.input_mut(|input| {
+        let mut commands = Vec::new();
+        input.events.retain(|event| {
+            if matches!(event, Event::Copy | Event::Cut | Event::Paste(_)) {
+                commands.push(event.clone());
+                false
+            } else {
+                true
+            }
+        });
+        commands
+    });
+    let handled = !events.is_empty();
+    for event in events {
+        match event {
+            Event::Copy => copy(app, ctx),
+            Event::Cut => cut(app, ctx),
+            Event::Paste(text) => {
+                let at = app.editor.transport.position;
+                let result = app.editor.paste_text(&text, at);
+                report_paste(app, result);
+            }
+            _ => unreachable!(),
+        }
+    }
+    handled
+}
+
+pub(super) fn duplicate(app: &mut App) {
+    let result = app.editor.duplicate_selected();
+    report_paste(app, result);
+}
+
+fn report_paste(app: &mut App, result: Result<usize, String>) {
+    match result {
+        Ok(0) => {}
+        Ok(count) => app.status = format!("已粘贴 {count} 个音符"),
+        Err(error) => app.status = error,
     }
 }
 

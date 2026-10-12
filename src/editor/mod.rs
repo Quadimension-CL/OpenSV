@@ -1,3 +1,4 @@
+mod clipboard;
 mod commands;
 mod dictionary;
 mod groups;
@@ -35,7 +36,6 @@ pub struct Editor {
     pub track: EntityId,
     pub reference: Option<EntityId>,
     pub selected: BTreeSet<EntityId>,
-    pub clipboard: Vec<Note>,
     pub revision: u64,
     pub transport: Transport,
     history: History,
@@ -54,7 +54,6 @@ impl Editor {
             reference,
             project,
             selected: BTreeSet::new(),
-            clipboard: Vec::new(),
             revision: 0,
             transport: Transport::default(),
             history: History::default(),

@@ -30,35 +30,6 @@ impl Editor {
         self.selected.clear();
         self.finish();
     }
-    pub fn copy(&mut self) {
-        self.clipboard = self
-            .notes()
-            .iter()
-            .filter(|n| self.selected.contains(&n.id))
-            .cloned()
-            .collect();
-    }
-    pub fn paste(&mut self, at: i64) {
-        if self.clipboard.is_empty() {
-            return;
-        }
-        self.begin("粘贴音符");
-        if !self.prepare_note_target(at.max(0)) {
-            self.finish();
-            return;
-        }
-        let reference = self.active_ref().unwrap();
-        let first = self.clipboard.iter().map(|n| n.onset).min().unwrap();
-        let local = at.max(0) - reference.blick_offset;
-        let mut notes = self.clipboard.clone();
-        for n in &mut notes {
-            n.renew_identity();
-            n.onset = n.onset - first + local;
-        }
-        self.selected = notes.iter().map(|n| n.id).collect();
-        self.group_mut().unwrap().notes.extend(notes);
-        self.finish();
-    }
     pub fn transpose(&mut self, amount: i32) {
         self.begin("移调");
         let selected = self.selected.clone();
