@@ -4,10 +4,39 @@ use eframe::egui::*;
 
 pub(super) fn show(ui: &mut Ui, dialog: &mut ContextImportDialog) -> bool {
     match dialog.source {
+        ContextImportSource::SessionFile => session_file(ui, dialog),
         ContextImportSource::File => file(ui, dialog),
         ContextImportSource::Manual => manual(ui, dialog),
         ContextImportSource::Online => online(ui, dialog),
     }
+}
+
+fn session_file(ui: &mut Ui, dialog: &mut ContextImportDialog) -> bool {
+    text(
+        ui,
+        "选择本机 Synthesizer V Studio 2 的 session 登录会话文件，无需启动原编辑器。",
+    );
+    weak(
+        ui,
+        "点击“导入”后才会读取，并将此声库的上下文保存到 RV 的 context.json。",
+    );
+    if let Some(path) = &dialog.session_path {
+        ui.add(Label::new(path.display().to_string()).wrap());
+    } else {
+        weak(ui, "尚未选择会话文件");
+    }
+    if !ui.button("选择会话文件…").clicked() {
+        return false;
+    }
+    let mut picker = rfd::FileDialog::new().set_title("选择 Synthesizer V Studio 2 的会话文件");
+    if let Some(parent) = dialog.session_path.as_ref().and_then(|path| path.parent()) {
+        picker = picker.set_directory(parent);
+    }
+    if let Some(path) = picker.pick_file() {
+        dialog.session_path = Some(path);
+        return true;
+    }
+    false
 }
 
 fn file(ui: &mut Ui, dialog: &mut ContextImportDialog) -> bool {

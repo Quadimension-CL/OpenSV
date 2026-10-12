@@ -1,6 +1,8 @@
 use crate::model::{Parameter, new_id};
 use serde::{Deserialize, Serialize};
 
+use super::scale::ScaleDisplay;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Column {
     Editor,
@@ -78,6 +80,7 @@ pub struct ViewState {
     pub grid: i32,
     pub triplet: bool,
     pub snap: bool,
+    pub scale: ScaleDisplay,
     pub lanes: Vec<Lane>,
     pub phonemes: bool,
 }
@@ -102,6 +105,7 @@ impl Default for ViewState {
             grid: 16,
             triplet: false,
             snap: true,
+            scale: ScaleDisplay::default(),
             lanes: vec![Lane {
                 visible: false,
                 ..Lane::new()

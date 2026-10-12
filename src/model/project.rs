@@ -8,6 +8,7 @@ use std::collections::BTreeMap;
 pub struct Note {
     #[serde(skip, default = "new_id")]
     pub id: EntityId,
+    pub uuid: String,
     pub onset: i64,
     pub duration: i64,
     pub pitch: i32,
@@ -22,6 +23,7 @@ impl Note {
     pub fn new(onset: i64, duration: i64, pitch: i32) -> Self {
         Self {
             id: new_id(),
+            uuid: fresh_note_uuid(),
             onset,
             duration,
             pitch,
@@ -39,6 +41,10 @@ impl Note {
             ]),
         }
     }
+    pub fn renew_identity(&mut self) {
+        self.id = new_id();
+        self.uuid = fresh_note_uuid();
+    }
     pub fn muted(&self) -> bool {
         self.attributes
             .get("muted")
@@ -46,6 +52,11 @@ impl Note {
             .unwrap_or(false)
     }
 }
+
+fn fresh_note_uuid() -> String {
+    format!("{:016x}", uuid::Uuid::new_v4().as_u64_pair().0)
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Group {
@@ -68,7 +79,10 @@ impl Group {
                 .map(|p| (p.key().into(), Automation::default()))
                 .collect(),
             pitch_controls: Vec::new(),
-            extra: BTreeMap::from([("vocalModes".into(), json!({}))]),
+            extra: BTreeMap::from([
+                ("vocalModes".into(), json!({})),
+                ("musicalScale".into(), json!({"type": "Major", "root": "C"})),
+            ]),
         }
     }
 }
@@ -77,6 +91,7 @@ impl Group {
 pub struct GroupRef {
     #[serde(skip, default = "new_id")]
     pub id: EntityId,
+    pub uuid: String,
     #[serde(rename = "groupID")]
     pub group_id: String,
     pub blick_absolute_begin: i64,
@@ -89,6 +104,10 @@ pub struct GroupRef {
     pub extra: Extra,
 }
 impl GroupRef {
+    pub fn renew_identity(&mut self) {
+        self.id = new_id();
+        self.uuid = uuid::Uuid::new_v4().to_string();
+    }
     pub fn visible_end(&self) -> i64 {
         if self.blick_absolute_end < 0 {
             i64::MAX
@@ -107,6 +126,7 @@ impl GroupRef {
     pub fn new(group: &Group, end: i64) -> Self {
         Self {
             id: new_id(),
+            uuid: uuid::Uuid::new_v4().to_string(),
             group_id: group.uuid.clone(),
             blick_absolute_begin: 0,
             blick_absolute_end: end,
@@ -189,6 +209,7 @@ impl Track {
 #[serde(rename_all = "camelCase")]
 pub struct Project {
     pub version: i32,
+    pub uuid: String,
     pub time: TimeAxis,
     pub library: Vec<Group>,
     pub tracks: Vec<Track>,
@@ -205,7 +226,8 @@ pub struct Project {
 impl Default for Project {
     fn default() -> Self {
         Self {
-            version: 187,
+            version: SVP_VERSION,
+            uuid: uuid::Uuid::new_v4().to_string(),
             time: TimeAxis::default(),
             library: Vec::new(),
             tracks: vec![Track::new(0)],

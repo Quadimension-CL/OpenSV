@@ -1,8 +1,6 @@
+use super::looping::{LoopControl, POSITION_BITS, POSITION_MASK};
 use crate::synthesis::audio::{AudioError, live::LIVE_SAMPLE_RATE};
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicU64, Ordering};
-
-const POSITION_BITS: u32 = 44;
-const POSITION_MASK: u64 = (1 << POSITION_BITS) - 1;
 
 pub(super) struct Controls {
     pub playing: AtomicBool,
@@ -14,12 +12,18 @@ pub(super) struct Controls {
     /// under UI input; 44 frame bits hold years of project audio.
     pub position: AtomicU64,
     pub device_frames: u64,
+    pub looping: LoopControl,
     sample_rate: u32,
     end_seconds: f64,
 }
 
 impl Controls {
-    pub fn new(gain: f32, total_frames: usize, sample_rate: u32) -> Result<Self, AudioError> {
+    pub fn new(
+        gain: f32,
+        total_frames: usize,
+        sample_rate: u32,
+        looping: LoopControl,
+    ) -> Result<Self, AudioError> {
         let end_seconds = total_frames as f64 / f64::from(LIVE_SAMPLE_RATE);
         let device_frames =
             (total_frames as u128 * u128::from(sample_rate)).div_ceil(u128::from(LIVE_SAMPLE_RATE));
@@ -34,6 +38,7 @@ impl Controls {
             gain: AtomicU32::new(gain.to_bits()),
             position: AtomicU64::new(0),
             device_frames: device_frames as u64,
+            looping,
             sample_rate,
             end_seconds,
         })
@@ -45,9 +50,15 @@ impl Controls {
                 "Seek time must be finite and nonnegative".into(),
             ));
         }
+        let limit = self
+            .looping
+            .frames(self.sample_rate)
+            .map_or(self.device_frames, |range| {
+                self.device_frames.max(range.end)
+            });
         let frame = (seconds * f64::from(self.sample_rate))
             .round()
-            .min(self.device_frames as f64) as u64;
+            .min(limit as f64) as u64;
         let _ = self
             .position
             .try_update(Ordering::AcqRel, Ordering::Acquire, |old| {
@@ -58,13 +69,18 @@ impl Controls {
     }
 
     pub fn position_seconds(&self) -> f64 {
-        (Self::frame(self.position.load(Ordering::Acquire)) as f64 / f64::from(self.sample_rate))
-            .min(self.end_seconds)
+        let frame = Self::frame(self.position.load(Ordering::Acquire));
+        if let Some(range) = self.looping.frames(self.sample_rate) {
+            range.wrap(frame) as f64 / f64::from(self.sample_rate)
+        } else {
+            (frame as f64 / f64::from(self.sample_rate)).min(self.end_seconds)
+        }
     }
 
     pub fn is_playing(&self) -> bool {
         self.playing.load(Ordering::Acquire)
-            && Self::frame(self.position.load(Ordering::Acquire)) < self.device_frames
+            && (self.looping.frames(self.sample_rate).is_some()
+                || Self::frame(self.position.load(Ordering::Acquire)) < self.device_frames)
     }
 
     pub fn frame(position: u64) -> u64 {

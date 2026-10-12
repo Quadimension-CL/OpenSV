@@ -8,6 +8,7 @@ mod pitch_anchor;
 mod pitch_edit;
 mod rendered;
 mod retakes;
+mod scale_guide;
 mod scene;
 mod toolbar;
 use crate::model::*;

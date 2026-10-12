@@ -9,6 +9,15 @@ use crate::{
 use eframe::egui::*;
 
 pub fn toolbar(app: &mut App, ui: &mut Ui) {
+    ui.style_mut().always_scroll_the_only_direction = true;
+    ScrollArea::horizontal()
+        .id_salt("piano-toolbar-scroll")
+        .scroll_bar_visibility(scroll_area::ScrollBarVisibility::AlwaysHidden)
+        .auto_shrink([false, false])
+        .show(ui, |ui| contents(app, ui));
+}
+
+fn contents(app: &mut App, ui: &mut Ui) {
     ui.horizontal_centered(|ui| {
         ui.spacing_mut().item_spacing.x = 0.0;
         title(app, ui);
@@ -32,6 +41,8 @@ pub fn toolbar(app: &mut App, ui: &mut Ui) {
             }
             ui.add_space(7.0);
         }
+        super::scale_guide::toggle(app, ui);
+        ui.add_space(7.0);
         ui.label(RichText::new("网格").color(MUTED));
         ui.add_space(8.0);
         ComboBox::from_id_salt("grid")
@@ -83,6 +94,7 @@ pub fn toolbar(app: &mut App, ui: &mut Ui) {
         {
             app.view.snap = !app.view.snap;
         }
+        crate::ui::scale::controls::toolbar(app, ui);
     });
 }
 

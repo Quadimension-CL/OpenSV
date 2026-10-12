@@ -4,6 +4,7 @@ use crate::synthesis::{
     voice::session_identity,
 };
 use std::{
+    collections::BTreeSet,
     sync::mpsc::{self, TryRecvError},
     thread,
 };
@@ -18,6 +19,7 @@ impl Runtime {
             return;
         }
         let source = dialog.source;
+        let session_path = dialog.session_path.clone();
         let path = dialog.file_path.clone();
         let identity = Zeroizing::new(dialog.manual_identity.clone());
         let process_id = dialog.selected_process;
@@ -28,6 +30,11 @@ impl Runtime {
         self.context_import.feedback = None;
         self.start_context_task("model-context-import", move || {
             let result = match source {
+                ContextImportSource::SessionFile => session_identity::import_session_context(
+                    &voice_name,
+                    model_version,
+                    &session_path.expect("validated session path"),
+                ),
                 ContextImportSource::File => session_identity::import_context_file(
                     &voice_name,
                     model_version,
@@ -104,9 +111,29 @@ impl Runtime {
             }
             ContextEvent::Imported(Ok(_)) => {
                 let voice_name = dialog.voice_name.clone();
+                let model_version = dialog.model_version;
                 let selection = dialog.selection.clone();
                 self.context_import.dialog = None;
-                self.reload_voice(&selection);
+                // Revisions of the same singer share one saved model context.
+                let mut reload: BTreeSet<_> = self
+                    .voices
+                    .keys()
+                    .filter(|key| {
+                        self.library.entry(key).is_some_and(|entry| {
+                            entry.display_name == voice_name
+                                && entry.model_version == Some(model_version)
+                                && entry
+                                    .family
+                                    .is_some_and(|family| family.requires_identity())
+                        })
+                    })
+                    .cloned()
+                    .collect();
+                reload.insert(selection);
+                for selection in reload {
+                    self.reload_voice(&selection);
+                }
+                self.aggregate_voices();
                 self.context_import.feedback =
                     Some(Ok(format!("已导入 {voice_name} 的模型上下文。")));
             }

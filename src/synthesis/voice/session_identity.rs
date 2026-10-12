@@ -1,4 +1,4 @@
-//! Identity conditioning from user-provided or existing local model contexts.
+//! Identity conditioning from explicitly imported model contexts.
 //!
 //! This value is an acoustic model input, not a generated note seed. Raw session
 //! and platform identifiers must remain private and must never enter reports.
@@ -8,49 +8,35 @@ mod online;
 #[cfg(windows)]
 mod persisted;
 mod platform;
+mod session;
 
 #[cfg(windows)]
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 #[cfg(windows)]
-use zeroize::{Zeroize, Zeroizing};
+use zeroize::Zeroize;
 
 use super::{Result, VoiceError};
 
 pub use online::{
     OnlineContextSource, import_online_context, online_context_sources, supports_online_import,
 };
+pub use session::{import_session_context, supports_session_import};
 
-/// Reads a saved model context first, including portable manual contexts. On
-/// Windows, an absent record can instead use the existing local installation.
-///
-/// This never creates or changes local authorization state, and it never calls
-/// an authorization server. Missing or unreadable context is an error.
-pub fn installed_local_identity(voice_name: &str, model_version: u8) -> Result<u64> {
+/// Voice preparation only reads contexts explicitly saved in RynthV.
+pub fn saved_identity(voice_name: &str, model_version: u8) -> Result<u64> {
     validate_voice_name(voice_name)?;
     model_suffix(model_version)?;
     if let Some(identity) = imported::read(voice_name, model_version)? {
         return Ok(identity);
     }
-    #[cfg(windows)]
-    {
-        let session_field = persisted::read_session_field().map_err(|error| {
-            VoiceError::new(format!(
-                "未保存该声库的模型上下文，且无法读取本机会话：{error}。请手动提供模型上下文。"
-            ))
-        })?;
-        if let Some(session_field) = session_field {
-            let session_field = Zeroizing::new(session_field);
-            return derive_local_identity(&session_field, voice_name, model_version);
-        }
-    }
     Err(VoiceError::new(format!(
-        "未找到声库 {voice_name}（模型版本 {model_version}）的模型上下文。请手动导入上下文文件或输入对应的模型 identity。"
+        "未找到声库 {voice_name}（模型版本 {model_version}）已导入的模型上下文。请先导入此声库的模型上下文。"
     )))
 }
 
-/// Explicitly stores a condition already derived from a legitimate online
-/// session. Only the model value, voice name, model generation and a machine-
+/// Explicitly stores a condition derived from a selected session file or a
+/// running session. Only the model value, voice name, model generation and a machine-
 /// condition fingerprint are saved. This function does not inspect or contact
 /// the original editor.
 pub fn save_imported_identity(

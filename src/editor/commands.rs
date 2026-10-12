@@ -52,7 +52,7 @@ impl Editor {
         let local = at.max(0) - reference.blick_offset;
         let mut notes = self.clipboard.clone();
         for n in &mut notes {
-            n.id = new_id();
+            n.renew_identity();
             n.onset = n.onset - first + local;
         }
         self.selected = notes.iter().map(|n| n.id).collect();

@@ -38,7 +38,10 @@ pub fn settings(app: &mut App, ui: &mut Ui) {
     if let Some(error) = app.synthesis.library.settings_error() {
         error_label(ui, error);
     }
-    weak(ui, "路径和所选歌声会自动保存，下次启动恢复。");
+    weak(
+        ui,
+        "请手动选择资源目录。路径和所选歌声会自动保存，下次启动恢复。",
+    );
 }
 
 pub(super) fn choose_databases(app: &mut App) {

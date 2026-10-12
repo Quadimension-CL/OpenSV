@@ -190,6 +190,7 @@ fn native_bound(project_sample: i64, project_rate: u32) -> Result<usize, String>
 
 impl Controls {
     fn read(extra: &Extra) -> Result<Self, String> {
+        crate::synthesis::mixing_options::validate_mixer(extra)?;
         let mute = boolean(extra, "mute")?;
         let solo = boolean(extra, "solo")?;
         let decibels = number(extra, "gainDecibel")?;

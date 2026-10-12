@@ -64,6 +64,7 @@ pub struct Runtime {
     request_serial: u64,
     desired_playing: bool,
     desired_seconds: f64,
+    loop_range: Option<(f64, f64)>,
     demand_block: Option<u64>,
     solo_tracks: BTreeSet<u64>,
     repaint: eframe::egui::Context,
@@ -98,6 +99,7 @@ impl Runtime {
             request_serial: 0,
             desired_playing: false,
             desired_seconds: 0.0,
+            loop_range: None,
             demand_block: None,
             solo_tracks: BTreeSet::new(),
             repaint,
@@ -166,6 +168,8 @@ impl Runtime {
         self.visuals.clear();
         self.desired_playing = false;
         self.desired_seconds = 0.0;
+        self.loop_range = None;
+        let _ = self.playback.set_loop_range(None);
         self.playback.clear();
     }
     pub fn retry(&mut self) {

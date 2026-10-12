@@ -5,7 +5,7 @@ use crate::{
     app::App,
     synthesis::{
         runtime::{ContextImportPhase, ContextImportSource},
-        voice::{VoiceFamily, session_identity},
+        voice::session_identity,
     },
 };
 use eframe::egui::*;
@@ -15,11 +15,12 @@ pub(super) fn controls(
     ui: &mut Ui,
     selection: &crate::synthesis::settings::VoiceSelection,
 ) {
-    if app
+    if !app
         .synthesis
         .library
         .entry(selection)
-        .is_some_and(|entry| entry.family == Some(VoiceFamily::Sv1))
+        .and_then(|entry| entry.family)
+        .is_some_and(|family| family.requires_identity())
     {
         return;
     }
@@ -29,15 +30,21 @@ pub(super) fn controls(
             Err(error) => error_label(ui, error),
         }
     }
-    let can_import = app
-        .synthesis
-        .inventory(selection)
-        .is_some_and(|voice| voice.configuration.is_some());
-    if can_import
-        && ui
-            .button("导入模型上下文…")
-            .on_hover_text("为当前歌声导入上下文文件，或手动填写模型条件值")
-            .clicked()
+    let label = if app.synthesis.needs_context_import(selection) {
+        "导入模型上下文…"
+    } else {
+        "重新导入上下文…"
+    };
+    if ui
+        .add_enabled(
+            app.synthesis.can_import_context(selection),
+            Button::new(label),
+        )
+        .on_hover_text(
+            "从本地会话文件、上下文文件、手动输入或原编辑器进程重新导入此歌声的模型上下文",
+        )
+        .on_disabled_hover_text("当前声库不可用，或正在扫描声库、导入上下文")
+        .clicked()
     {
         app.synthesis.open_context_import(selection.clone());
     }
@@ -68,14 +75,26 @@ pub(super) fn dialog(app: &mut App, ctx: &Context) {
         );
         ui.add_enabled_ui(!importing, |ui| {
             ui.horizontal(|ui| {
-                ui.selectable_value(&mut source, ContextImportSource::File, "上下文文件");
-                ui.selectable_value(&mut source, ContextImportSource::Manual, "手动输入");
+                ui.add_enabled_ui(session_identity::supports_session_import(), |ui| {
+                    ui.selectable_value(
+                        &mut source,
+                        ContextImportSource::SessionFile,
+                        "本地会话文件",
+                    )
+                    .on_disabled_hover_text(
+                        "导入本地会话文件仅支持 Windows x64；当前平台可导入上下文文件或手动输入",
+                    );
+                });
                 ui.add_enabled_ui(session_identity::supports_online_import(), |ui| {
                     ui.selectable_value(&mut source, ContextImportSource::Online, "从原版获取")
                         .on_disabled_hover_text(
-                            "从原版获取仅支持 Windows x64；当前平台可导入文件或手动输入",
+                            "从原版获取仅支持 Windows x64；当前平台可导入上下文文件或手动输入",
                         );
                 });
+            });
+            ui.horizontal(|ui| {
+                ui.selectable_value(&mut source, ContextImportSource::File, "上下文文件");
+                ui.selectable_value(&mut source, ContextImportSource::Manual, "手动输入");
             });
         });
         ui.separator();

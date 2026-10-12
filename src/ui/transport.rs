@@ -47,7 +47,11 @@ pub fn show(app: &mut App, ui: &mut Ui) {
             transport.position = app.editor.project.end();
         }
         if ui
-            .add(button(Icon::Loop, "循环播放所选音符").selected(transport.looping))
+            .add(
+                button(Icon::Loop, "显示循环标记 / 循环播放")
+                    .selected(transport.looping)
+                    .background(BACKGROUND),
+            )
             .clicked()
         {
             transport.looping = !transport.looping;

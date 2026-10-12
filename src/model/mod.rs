@@ -22,6 +22,7 @@ pub use track_color::*;
 
 use std::sync::atomic::{AtomicU64, Ordering};
 pub type EntityId = u64;
+pub const SVP_VERSION: i32 = 196;
 pub fn new_id() -> EntityId {
     static NEXT: AtomicU64 = AtomicU64::new(1);
     NEXT.fetch_add(1, Ordering::Relaxed)

@@ -66,14 +66,30 @@ pub fn show(app: &mut App, ui: &mut Ui) {
             && app.audio_drag.is_none()
             && !app.view_pan.is_active(),
     );
-    super::background::draw(ui, canvas, app.view.top_pitch, app.view.row_height);
+    super::background::draw(app, ui, canvas);
     super::keyboard::show(app, ui, all, canvas);
+    super::scale_guide::draw_tonic_lines(app, ui, canvas);
     grid(
         ui,
         Rect::from_min_max(pos2(ruler.left(), ruler.bottom()), canvas.max),
         &app.view.piano,
         &app.editor.project.time,
         app.view.step(),
+    );
+    loop_region::show(
+        ui,
+        Id::new("piano-ruler"),
+        ruler,
+        &app.view.piano,
+        &mut app.editor.transport,
+        loop_region::RulerOptions {
+            marker_step: app.view.snap.then_some(app.view.step()),
+            seek_step: app.view.snap.then_some(app.view.step()),
+            enabled: !app.view_pan.is_active()
+                && app.gesture.is_none()
+                && app.group_gesture.is_none()
+                && app.audio_drag.is_none(),
+        },
     );
     draw_ruler(
         ui,
@@ -82,17 +98,6 @@ pub fn show(app: &mut App, ui: &mut Ui) {
         &app.editor.project.time,
         app.view.step(),
     );
-    let ruler_response = ui.interact(ruler, Id::new("piano-ruler"), Sense::click_and_drag());
-    if !app.view_pan.is_active()
-        && (ruler_response.clicked() || ruler_response.dragged_by(PointerButton::Primary))
-        && let Some(p) = ruler_response.interact_pointer_pos()
-    {
-        app.editor.transport.position = ticks(
-            app.view
-                .snap_beat(beat_at(ruler, &app.view.piano, p.x))
-                .max(0.0),
-        );
-    }
     let groups = scene::snapshot(app);
     if !app.editor.current_track().is_instrumental()
         && app.group_gesture.is_none()

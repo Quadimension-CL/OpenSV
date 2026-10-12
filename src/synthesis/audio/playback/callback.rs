@@ -18,6 +18,7 @@ pub(super) fn build<T: SizedSample + FromSample<f32>>(
     let channels = usize::from(config.channels);
     let step = f64::from(LIVE_SAMPLE_RATE) / f64::from(config.sample_rate);
     let mut piano = PianoSynth::new(config.sample_rate, piano);
+    let mut loop_range = None;
     device.build_output_stream(
         config,
         move |output: &mut [T], _| {
@@ -42,6 +43,14 @@ pub(super) fn build<T: SizedSample + FromSample<f32>>(
             let controls = session.map(|session| &session.controls);
             let start = controls.map_or(0, |controls| controls.position.load(Ordering::Acquire));
             let mut cursor = Controls::frame(start);
+            if let Some(controls) = controls {
+                controls
+                    .looping
+                    .update_frames(config.sample_rate, &mut loop_range);
+                if let Some(range) = loop_range {
+                    cursor = range.wrap(cursor);
+                }
+            }
             let gain = controls.map_or(1.0, |controls| {
                 f32::from_bits(controls.gain.load(Ordering::Relaxed))
             });
@@ -53,7 +62,7 @@ pub(super) fn build<T: SizedSample + FromSample<f32>>(
                 if project_active
                     && let (Some(controls), Some(sampler)) = (controls, sampler.as_mut())
                 {
-                    if cursor >= controls.device_frames
+                    if (loop_range.is_none() && cursor >= controls.device_frames)
                         || !controls.playing.load(Ordering::Acquire)
                         || controls.position.load(Ordering::Acquire) != start
                     {
@@ -61,6 +70,9 @@ pub(super) fn build<T: SizedSample + FromSample<f32>>(
                     } else if let Some(sample) = sampler.sample(cursor as f64 * step) {
                         stereo = sample;
                         cursor += 1;
+                        if let Some(range) = loop_range {
+                            cursor = range.wrap(cursor);
+                        }
                     } else {
                         // A PCM hole freezes only project playback. Audition
                         // continues independently while its next block loads.

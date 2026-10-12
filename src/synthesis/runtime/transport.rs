@@ -1,6 +1,20 @@
 use super::{Runtime, worker};
 
 impl Runtime {
+    pub fn set_loop_range(&mut self, range: Option<(f64, f64)>) {
+        if range == self.loop_range {
+            return;
+        }
+        if let Err(error) = self.playback.set_loop_range(range) {
+            self.error = Some(error);
+            return;
+        }
+        self.loop_range = range;
+        if range.is_some() && self.playback.snapshot().position_seconds.is_none() {
+            self.refresh_playback();
+        }
+    }
+
     pub fn playback_clock(&self, playing: bool) -> Option<f64> {
         if !playing || !self.desired_playing {
             return None;
@@ -17,7 +31,8 @@ impl Runtime {
         // the worker or device is still preparing the first requested block.
         (!self.planner.plan().requests.is_empty()
             || self.recordings.end > 0
-            || self.metronome_enabled())
+            || self.metronome_enabled()
+            || self.loop_range.is_some())
         .then_some(self.desired_seconds)
     }
 
@@ -28,16 +43,19 @@ impl Runtime {
             0.0
         };
         let changed = playing != self.desired_playing;
+        // The device wraps independently. Only synthesis priority needs a
+        // seek notification when its clock jumps back to the loop entrance.
+        let wrapped = playing && self.loop_range.is_some() && seconds < self.desired_seconds;
         if changed || seek {
             self.playback.control(playing, Some(seconds));
         }
         let block = (seconds * 2.0).floor() as u64;
-        if changed || seek || self.demand_block != Some(block) {
+        if changed || seek || wrapped || self.demand_block != Some(block) {
             for worker in self.voices.values().filter_map(|v| v.worker.as_ref()) {
                 worker.send(worker::Command::Demand {
                     seconds,
                     playing,
-                    seek: changed || seek,
+                    seek: changed || seek || wrapped,
                 });
             }
             self.demand_block = Some(block);

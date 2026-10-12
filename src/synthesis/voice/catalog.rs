@@ -50,17 +50,6 @@ pub struct VoiceCatalog {
     pub warnings: Vec<String>,
 }
 
-#[cfg(windows)]
-pub fn default_databases_path() -> Option<PathBuf> {
-    std::env::var_os("APPDATA")
-        .map(|base| PathBuf::from(base).join("Dreamtonics/Synthesizer V Studio 2/databases"))
-}
-
-#[cfg(not(windows))]
-pub fn default_databases_path() -> Option<PathBuf> {
-    None
-}
-
 impl VoiceCatalog {
     /// Discover supported DNNI revisions and original SV1 AI NOFS files without
     /// reading weights. A root can also be one SV1 voice folder or NOFS file.

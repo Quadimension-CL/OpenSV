@@ -11,6 +11,7 @@ pub const HELP: &str = r#"RynthV synthesis tools
   rynthv-synth import-context --context-file CONTEXT.json [OPTIONS]
   rynthv-synth import-context --identity U64 [OPTIONS]
   rynthv-synth import-context --process-id PID [OPTIONS] (Windows x64 only)
+  rynthv-synth import-context --session-file PATH [OPTIONS] (Windows x64 only)
   rynthv-synth plan-project --project SVP [OPTIONS]
   rynthv-synth run-module --file INDEX --tree INDEX --node INDEX --input JSON [OPTIONS]
   rynthv-synth resolve-phone --file INDEX --tree INDEX --language NAME --phone TOKEN [OPTIONS]
@@ -23,12 +24,16 @@ import-context saves a model condition for the selected SV2 or SV2-compatible
 voice. Provide exactly one source: --context-file reads a RynthV context file;
 --identity accepts a decimal or 0x-prefixed hexadecimal U64. Both work on all
 supported platforms. --process-id reads an already-running supported SV2 online
-session on Windows x64. Native SV1 voices do not need model contexts.
+session on Windows x64. --session-file reads an explicitly supplied SV2 session
+file on Windows x64 without requiring a running editor. A file path is required;
+no default directory is searched. Contexts are imported only on request; loading
+a voice reads only the saved RynthV context. Native SV1 voices do not need model
+contexts.
 Only the matching voice and model generation are imported; raw session data and
 model-condition values are not printed in the report.
 render-score: --profile FILE (requires a build with --features synth-profile)
               --duration-identity U64 (explicit research conditioning;
-              otherwise uses the saved context or local installation identity;
+              otherwise uses the saved RynthV context;
               not used by original SV1 models)
 
 render-score takes explicit note/phone records and writes native float32 WAV.
@@ -111,6 +116,7 @@ impl Args {
                     [
                         "--voice",
                         "--process-id",
+                        "--session-file",
                         "--context-file",
                         "--identity",
                         "--output",

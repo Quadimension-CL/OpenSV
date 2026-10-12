@@ -1,5 +1,5 @@
 use super::{Command, Snapshot, Transport};
-use crate::synthesis::audio::{PianoControl, Player};
+use crate::synthesis::audio::{LoopControl, PianoControl, Player};
 use std::{
     sync::{
         Arc, Mutex,
@@ -14,6 +14,7 @@ pub(super) fn run(
     published: Arc<Mutex<Snapshot>>,
     pending: Arc<AtomicU64>,
     piano: PianoControl,
+    looping: LoopControl,
     repaint: eframe::egui::Context,
 ) {
     let mut player = None;
@@ -22,7 +23,7 @@ pub(super) fn run(
         match rx.recv_timeout(Duration::from_millis(10)) {
             Ok(Command::Quit) | Err(RecvTimeoutError::Disconnected) => break,
             Ok(Command::Audition) => {
-                let result = ensure_player(&mut player, &piano)
+                let result = ensure_player(&mut player, &piano, &looping)
                     .and_then(|player| player.start_output().map_err(|error| error.to_string()));
                 if let Ok(mut status) = published.lock() {
                     status.audition_error =
@@ -32,7 +33,7 @@ pub(super) fn run(
             }
             Ok(Command::Transport(serial, command)) => {
                 let resets_error = !matches!(&command, Transport::Control { .. });
-                let result = apply(command, &mut player, serial, &pending, &piano);
+                let result = apply(command, &mut player, serial, &pending, &piano, &looping);
                 match result {
                     Err(error) => command_error = Some(error),
                     Ok(())
@@ -75,10 +76,13 @@ pub(super) fn run(
 fn ensure_player<'a>(
     player: &'a mut Option<Player>,
     piano: &PianoControl,
+    looping: &LoopControl,
 ) -> Result<&'a mut Player, String> {
     if player.is_none() {
-        *player =
-            Some(Player::new_default_with_piano(piano.clone()).map_err(|error| error.to_string())?);
+        *player = Some(
+            Player::new_default_with_controls(piano.clone(), looping.clone())
+                .map_err(|error| error.to_string())?,
+        );
     }
     Ok(player.as_mut().expect("created player"))
 }
@@ -89,10 +93,11 @@ fn apply(
     serial: u64,
     latest: &AtomicU64,
     piano: &PianoControl,
+    looping: &LoopControl,
 ) -> Result<(), String> {
     match command {
         Transport::Load(audio, seconds, playing) => {
-            let player = ensure_player(player, piano)?;
+            let player = ensure_player(player, piano, looping)?;
             player.pause();
             if let Err(error) = player.load_project(audio) {
                 player.clear();

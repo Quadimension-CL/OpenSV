@@ -135,6 +135,21 @@ pub fn show(app: &mut App, ui: &mut Ui) {
             && app.audio_drag.is_none()
             && !app.view_pan.is_active(),
     );
+    loop_region::show(
+        ui,
+        Id::new("arrangement-ruler"),
+        ruler,
+        &app.view.arrangement,
+        &mut app.editor.transport,
+        loop_region::RulerOptions {
+            marker_step: app.view.snap.then_some(ARRANGEMENT_GRID),
+            seek_step: None,
+            enabled: !app.view_pan.is_active()
+                && app.gesture.is_none()
+                && app.group_gesture.is_none()
+                && app.audio_drag.is_none(),
+        },
+    );
     draw_ruler(
         ui,
         ruler,
@@ -196,13 +211,6 @@ pub fn show(app: &mut App, ui: &mut Ui) {
         &mut app.view.arrangement,
         beats(app.editor.project.end()) + 32.0,
     );
-    let ruler_response = ui.interact(ruler, Id::new("arrangement-ruler"), Sense::click_and_drag());
-    if !app.view_pan.is_active()
-        && (ruler_response.clicked() || ruler_response.dragged_by(PointerButton::Primary))
-        && let Some(p) = ruler_response.interact_pointer_pos()
-    {
-        app.editor.transport.position = ticks(beat_at(ruler, &app.view.arrangement, p.x).max(0.0));
-    }
     playhead(
         ui,
         Rect::from_min_max(ruler.min, body.max),

@@ -23,8 +23,8 @@ struct VoiceContext {
     voice_name: String,
     model_version: u8,
     identity: u64,
-    /// None is an explicitly supplied portable condition. Automatic Windows
-    /// imports remain tied to their original local user and processor.
+    /// None is an explicitly supplied portable condition. Session-file
+    /// and process imports remain tied to their original local user and processor.
     #[serde(default)]
     machine_fingerprint: Option<String>,
 }
@@ -124,16 +124,9 @@ fn validate(context: &Context) -> Result<()> {
 }
 
 fn context_path() -> Result<PathBuf> {
-    #[cfg(windows)]
-    {
-        Ok(super::persisted::roaming_directory()?.join("RynthV/context.json"))
-    }
-    #[cfg(not(windows))]
-    {
-        crate::platform::config_directory()
-            .map(|directory| directory.join("context.json"))
-            .map_err(VoiceError::new)
-    }
+    crate::platform::context_directory()
+        .map(|directory| directory.join("context.json"))
+        .map_err(VoiceError::new)
 }
 
 fn machine_fingerprint() -> Result<String> {

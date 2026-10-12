@@ -3,6 +3,7 @@ use crate::model::{TimeAxis, beats, ticks};
 use eframe::egui::*;
 
 mod drawing;
+pub mod loop_region;
 pub use drawing::{draw_ruler, grid, playhead, playhead_line};
 
 pub const GUTTER: f32 = 48.0;

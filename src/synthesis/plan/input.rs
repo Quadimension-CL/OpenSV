@@ -188,6 +188,9 @@ impl OwnerInput {
             "sampleRate",
             "numChannels",
             "aspirationFormat",
+            "bypassPan",
+            "bypassGain",
+            "bypassEffects",
         ] {
             output_options.remove(key);
         }
@@ -204,13 +207,13 @@ impl OwnerInput {
             notes: group.notes.iter().map(NoteInput::from).collect(),
             automation: group.parameters.clone(),
             pitch_controls: group.pitch_controls.clone(),
-            group_options: synthesis_extensions(&group.extra),
+            group_options: group_extensions(&group.extra),
             voice: VoiceInput {
                 model_content_identity: voice_identity.map(str::to_owned),
                 database: reference.database.clone(),
-                instance_options: synthesis_extensions(&reference.extra),
+                instance_options: reference_extensions(&reference.extra),
                 track_default_database: track.main_ref.database.clone(),
-                track_default_options: synthesis_extensions(&track.main_ref.extra),
+                track_default_options: reference_extensions(&track.main_ref.extra),
                 track_options,
                 dictionary: project.dictionary_for(track, reference).cloned(),
             },
@@ -219,7 +222,7 @@ impl OwnerInput {
             // does not invalidate neural inference or interrupt preview.
             sample_rate: crate::synthesis::score::SAMPLE_RATE,
             output_options,
-            project_options: synthesis_extensions(&project.extra),
+            project_options: project_extensions(&project.extra),
         }
     }
 
@@ -270,4 +273,33 @@ fn synthesis_extensions(extra: &Extra) -> Extra {
         .filter(|(key, _)| key.as_str() != "scriptData")
         .map(|(key, value)| (key.clone(), value.clone()))
         .collect()
+}
+
+fn group_extensions(extra: &Extra) -> Extra {
+    let mut options = synthesis_extensions(extra);
+    // Scale highlighting changes the editor grid, not the rendered pitch.
+    options.remove("musicalScale");
+    options
+}
+
+fn reference_extensions(extra: &Extra) -> Extra {
+    let mut options = synthesis_extensions(extra);
+    options.remove("timestampLMR");
+    options.remove("timestampLRSR");
+    options
+}
+
+fn project_extensions(extra: &Extra) -> Extra {
+    let mut options = synthesis_extensions(extra);
+    // Linking room controls is editor state; retain unsupported mixer fields
+    // so they cannot silently disappear from synthesis validation.
+    if let Some(Value::Object(mixer)) = options.get_mut("projectMixer") {
+        if mixer.get("linkRoomSettings").is_some_and(Value::is_boolean) {
+            mixer.remove("linkRoomSettings");
+        }
+        if mixer.is_empty() {
+            options.remove("projectMixer");
+        }
+    }
+    options
 }

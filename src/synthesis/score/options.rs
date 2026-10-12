@@ -84,6 +84,9 @@ pub(super) fn validate_owner(input: &OwnerInput, family: VoiceFamily) -> Result<
     if !input.voice.track_options.is_empty() || !input.project_options.is_empty() {
         return unsupported("additional track/project synthesis options");
     }
+    if let Some(key) = input.output_options.keys().next() {
+        return unsupported(format!("render option {key}"));
+    }
     if !input.tempo.extensions.is_empty() || !input.tempo.event_extensions.is_empty() {
         return unsupported("additional tempo mapping options");
     }
@@ -197,6 +200,7 @@ fn validate_voice(value: &Value, scope: &str) -> Result<()> {
             "vocalModeInherited" => value.is_boolean(),
             "vocalModePreset" => value.as_str() == Some(""),
             "vocalModeParams" => empty_object(value),
+            "choirSeatingSeparation" => value.as_f64() == Some(f64::from(0.7_f32)),
             _ => false,
         };
         if !supported {

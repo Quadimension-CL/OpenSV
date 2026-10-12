@@ -20,6 +20,7 @@ pub struct ContextImportDialog {
     pub voice_name: String,
     pub model_version: u8,
     pub source: ContextImportSource,
+    pub session_path: Option<PathBuf>,
     pub file_path: Option<PathBuf>,
     pub manual_identity: String,
     pub sources: Vec<OnlineContextSource>,
@@ -30,6 +31,7 @@ pub struct ContextImportDialog {
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum ContextImportSource {
+    SessionFile,
     File,
     Manual,
     Online,
@@ -57,6 +59,9 @@ impl ContextImportDialog {
     pub fn can_import(&self) -> bool {
         self.phase == ContextImportPhase::Ready
             && match self.source {
+                ContextImportSource::SessionFile => {
+                    session_identity::supports_session_import() && self.session_path.is_some()
+                }
                 ContextImportSource::File => self.file_path.is_some(),
                 ContextImportSource::Manual => !self.manual_identity.trim().is_empty(),
                 ContextImportSource::Online => self
@@ -67,6 +72,24 @@ impl ContextImportDialog {
 }
 
 impl Runtime {
+    pub fn can_import_context(&self, selection: &VoiceSelection) -> bool {
+        !self.library.is_scanning()
+            && self.library.settings_error().is_none()
+            && !self
+                .context_import
+                .dialog
+                .as_ref()
+                .is_some_and(|dialog| dialog.phase == ContextImportPhase::Importing)
+            && self.library.entry(selection).is_some_and(|entry| {
+                entry.availability.is_loadable()
+                    && !entry.display_name.trim().is_empty()
+                    && entry.family.is_some_and(|family| {
+                        family.requires_identity()
+                            && entry.model_version == Some(family.model_version())
+                    })
+            })
+    }
+
     pub fn needs_context_import(&self, selection: &VoiceSelection) -> bool {
         self.library
             .entry(selection)
@@ -97,33 +120,28 @@ impl Runtime {
             .collect()
     }
 
-    /// Opening the dialog never inspects another application's processes.
+    /// Opening the dialog never reads another application's session or processes.
     pub fn open_context_import(&mut self, selection: VoiceSelection) {
-        if !self
-            .library
-            .entry(&selection)
-            .and_then(|entry| entry.family)
-            .is_some_and(|family| family.requires_identity())
-            || self
-                .context_import
-                .dialog
-                .as_ref()
-                .is_some_and(|dialog| dialog.phase == ContextImportPhase::Importing)
-        {
+        if !self.can_import_context(&selection) {
             return;
         }
-        let Some(configuration) = self
-            .inventory(&selection)
-            .and_then(|voice| voice.configuration.as_ref())
-        else {
+        let Some(entry) = self.library.entry(&selection) else {
+            return;
+        };
+        let Some(model_version) = entry.model_version else {
             return;
         };
         self.context_import = ContextImport {
             dialog: Some(ContextImportDialog {
-                voice_name: configuration.name.clone(),
-                model_version: configuration.model_version,
+                voice_name: entry.display_name.clone(),
+                model_version,
                 selection,
-                source: ContextImportSource::File,
+                source: if session_identity::supports_session_import() {
+                    ContextImportSource::SessionFile
+                } else {
+                    ContextImportSource::File
+                },
+                session_path: None,
                 file_path: None,
                 manual_identity: String::new(),
                 sources: Vec::new(),
@@ -141,6 +159,8 @@ impl Runtime {
         };
         if dialog.phase == ContextImportPhase::Importing
             || source == dialog.source
+            || (source == ContextImportSource::SessionFile
+                && !session_identity::supports_session_import())
             || (source == ContextImportSource::Online
                 && !session_identity::supports_online_import())
         {

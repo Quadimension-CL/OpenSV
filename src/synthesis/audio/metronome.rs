@@ -66,7 +66,11 @@ impl<'a> MetronomeSampler<'a> {
         if !self.metronome.enabled.load(Ordering::Relaxed) {
             return 0.0;
         }
-        if self.beat.as_ref().is_none_or(|beat| position >= beat.next) {
+        if self
+            .beat
+            .as_ref()
+            .is_none_or(|beat| position < beat.frame || position >= beat.next)
+        {
             self.beat = Some(self.metronome.beat_at(position));
         }
         let beat = self.beat.as_ref().expect("beat was located");

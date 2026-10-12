@@ -13,6 +13,14 @@ pub struct ExportRequest {
 impl ExportRequest {
     pub fn from_project(project: &Project) -> Result<Self, String> {
         let config = &project.render_config;
+        crate::synthesis::mixing_options::validate_export_bypass(config)?;
+        crate::synthesis::mixing_options::validate_project_mixer(
+            project.extra.get("projectMixer"),
+        )?;
+        for track in &project.tracks {
+            crate::synthesis::mixing_options::validate_mixer(&track.mixer)
+                .map_err(|error| format!("音轨 {}：{error}", track.name))?;
+        }
         let text = |key: &str| {
             config
                 .get(key)

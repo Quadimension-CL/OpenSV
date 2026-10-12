@@ -1,8 +1,6 @@
 //! Portable resource locations and the selected voice relative to its library.
 
-mod paths;
-
-use super::voice::{VoiceCatalog, default_databases_path};
+use super::voice::VoiceCatalog;
 use serde::{Deserialize, Serialize};
 use std::{
     fs,
@@ -17,25 +15,13 @@ pub struct VoiceSelection {
     pub revision: u32,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SynthesisSettings {
     pub databases: Option<PathBuf>,
-    #[serde(default = "paths::default_sv1_databases")]
     pub sv1_databases: Option<PathBuf>,
     pub dictionaries: Option<PathBuf>,
     pub selected_voice: Option<VoiceSelection>,
-}
-
-impl Default for SynthesisSettings {
-    fn default() -> Self {
-        Self {
-            databases: default_databases_path().filter(|path| path.is_dir()),
-            sv1_databases: paths::default_sv1_databases(),
-            dictionaries: paths::default_dictionaries(),
-            selected_voice: None,
-        }
-    }
 }
 
 impl SynthesisSettings {

@@ -1,4 +1,8 @@
-use crate::ui::theme::{BLACK_ROW, GREEN};
+use super::decoration::KeyboardDecoration;
+use crate::ui::{
+    scale::ScaleGuide,
+    theme::{BLACK_ROW, GREEN},
+};
 use eframe::egui::*;
 
 const WHITE_KEY: Color32 = Color32::from_rgb(147, 145, 155);
@@ -16,10 +20,10 @@ pub(in crate::ui::piano) fn white_index(pitch: i32) -> Option<i32> {
     }
 }
 
-struct Key {
-    pitch: i32,
-    rect: Rect,
-    label_y: f32,
+pub(super) struct Key {
+    pub pitch: i32,
+    pub rect: Rect,
+    pub label_y: f32,
 }
 
 pub(super) struct KeyboardLayout {
@@ -84,11 +88,12 @@ impl KeyboardLayout {
             .map(|key| key.pitch as u8)
     }
 
-    pub fn draw(&self, ui: &Ui, active: Option<u8>) {
+    pub fn draw(&self, ui: &Ui, active: Option<u8>, scale: ScaleGuide, accent: Color32) {
         let painter = ui
             .painter()
             .with_clip_rect(self.rect.intersect(ui.clip_rect()));
         painter.rect_filled(self.rect, 0, WHITE_KEY);
+        let decoration = KeyboardDecoration::new(scale, accent);
         let fill = |key: &Key, normal| {
             if active.is_some_and(|pitch| i32::from(pitch) == key.pitch) {
                 GREEN
@@ -98,33 +103,23 @@ impl KeyboardLayout {
         };
         for key in &self.white {
             painter.rect_filled(key.rect, 2, fill(key, WHITE_KEY));
+            decoration.draw(&painter, key, false, CornerRadius::same(2));
             painter.rect_stroke(
                 key.rect,
                 2,
                 Stroke::new(0.6, Color32::from_rgb(79, 77, 84)),
                 StrokeKind::Inside,
             );
-            if key.pitch.rem_euclid(12) == 0 {
-                painter.text(
-                    pos2(key.rect.right() - 7.0, key.label_y),
-                    Align2::RIGHT_CENTER,
-                    format!("C{}", key.pitch.div_euclid(12) - 1),
-                    FontId::proportional(10.0),
-                    Color32::from_rgb(68, 66, 72),
-                );
-            }
         }
         for key in &self.black {
-            painter.rect_filled(
-                key.rect,
-                CornerRadius {
-                    nw: 0,
-                    ne: 2,
-                    sw: 0,
-                    se: 2,
-                },
-                fill(key, BLACK_ROW),
-            );
+            let rounding = CornerRadius {
+                nw: 0,
+                ne: 2,
+                sw: 0,
+                se: 2,
+            };
+            painter.rect_filled(key.rect, rounding, fill(key, BLACK_ROW));
+            decoration.draw(&painter, key, true, rounding);
         }
     }
 }

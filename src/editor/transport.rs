@@ -1,3 +1,4 @@
+use super::LoopRegion;
 use crate::model::TimeAxis;
 use std::time::Instant;
 
@@ -5,6 +6,7 @@ pub struct Transport {
     pub position: i64,
     pub playing: bool,
     pub looping: bool,
+    pub loop_region: LoopRegion,
     pub return_on_pause: bool,
     start_position: i64,
     last: Option<Instant>,
@@ -15,6 +17,7 @@ impl Default for Transport {
             position: 0,
             playing: false,
             looping: false,
+            loop_region: LoopRegion::default(),
             return_on_pause: true,
             start_position: 0,
             last: None,
@@ -29,6 +32,7 @@ impl Transport {
                 self.position = self.start_position;
             }
         } else {
+            self.constrain_to_loop();
             self.start_position = self.position;
             self.playing = true;
         }
@@ -40,35 +44,52 @@ impl Transport {
         self.start_position = 0;
         self.last = None;
     }
-    /// Returns true when a loop needs an explicit device seek.
-    pub fn update(
-        &mut self,
-        time: &TimeAxis,
-        end: i64,
-        selection: Option<(i64, i64)>,
-        audio_seconds: Option<f64>,
-    ) -> bool {
+    /// Keep an active loop's playback start inside its half-open interval.
+    pub fn constrain_to_loop(&mut self) {
+        if self.looping && !self.loop_region.contains(self.position) {
+            self.position = self.loop_region.start();
+        }
+    }
+
+    pub fn loop_seconds(&self, time: &TimeAxis) -> Option<(f64, f64)> {
+        self.looping.then(|| {
+            (
+                time.seconds_at(self.loop_region.start()).max(0.0),
+                time.seconds_at(self.loop_region.end()).max(0.0),
+            )
+        })
+    }
+
+    /// Returns true when the wall clock crosses a loop boundary. An audio
+    /// device wraps its own clock and does not need a second seek from the UI.
+    pub fn update(&mut self, time: &TimeAxis, end: i64, audio_seconds: Option<f64>) -> bool {
         let now = Instant::now();
         let mut looped = false;
         if self.playing
             && let Some(last) = self.last
         {
-            self.position = time.position_at(audio_seconds.unwrap_or_else(|| {
+            let seconds = audio_seconds.unwrap_or_else(|| {
                 time.seconds_at(self.position) + now.duration_since(last).as_secs_f64()
-            }));
-            let (start, end) = if self.looping {
-                selection.unwrap_or((0, end))
-            } else {
-                (0, end)
-            };
-            if self.position >= end {
-                if self.looping && end > start {
-                    self.position = start;
+            });
+            self.position = time.position_at(seconds);
+            if let Some((start_seconds, end_seconds)) = self.loop_seconds(time) {
+                if audio_seconds.is_some() {
+                    // Conversion from device samples may round one blick past
+                    // a boundary. The device already owns loop wrapping.
+                    self.position = self
+                        .position
+                        .clamp(self.loop_region.start(), self.loop_region.end() - 1);
+                } else if seconds >= end_seconds && end_seconds > start_seconds {
+                    let wrapped = start_seconds
+                        + (seconds - start_seconds).rem_euclid(end_seconds - start_seconds);
+                    self.position = time
+                        .position_at(wrapped)
+                        .clamp(self.loop_region.start(), self.loop_region.end() - 1);
                     looped = true;
-                } else {
-                    self.position = end;
-                    self.playing = false;
                 }
+            } else if self.position >= end {
+                self.position = end;
+                self.playing = false;
             }
         }
         self.last = Some(now);

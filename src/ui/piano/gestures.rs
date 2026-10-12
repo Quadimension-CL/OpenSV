@@ -45,7 +45,7 @@ pub(super) fn start_gesture(
             .collect();
         if modifiers.alt && !modifiers.ctrl && matches!(kind, NoteDrag::Move) {
             for n in &mut selected {
-                n.id = new_id();
+                n.renew_identity();
             }
             app.editor.selected = selected.iter().map(|n| n.id).collect();
             app.editor

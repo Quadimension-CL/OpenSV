@@ -55,6 +55,9 @@ pub fn show(app: &mut App, ui: &mut Ui) {
         widgets::slider(ui, "音高转换");
         widgets::slider(ui, "调性转换");
     });
+    section(ui, "调式音阶", |ui| {
+        crate::ui::scale::controls::panel(app, ui);
+    });
 }
 
 fn version(app: &mut App, ui: &mut Ui) {

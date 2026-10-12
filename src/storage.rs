@@ -1,9 +1,11 @@
 use crate::model::*;
 use std::{collections::HashSet, fs, io::Write, path::Path};
 
+mod identity;
+
 pub fn load(path: &Path) -> Result<Project, String> {
     if fs::metadata(path).map_err(|e| e.to_string())?.len() > 64 * 1024 * 1024 {
-        return Err("工程超过首版的 64 MiB 读取上限".into());
+        return Err("工程超过 64 MiB 读取上限".into());
     }
     let bytes = fs::read(path).map_err(|e| e.to_string())?;
     let mut project: Project =
@@ -74,9 +76,13 @@ pub fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), String> {
 
 fn validate(p: &Project) -> Result<(), String> {
     let bad = |s: &str| Err(format!("工程校验失败：{s}"));
-    if p.version != 187 {
-        return bad("当前仅实现 SVP version 187");
+    if p.version != SVP_VERSION {
+        return bad(&format!(
+            "当前支持 SVP version {SVP_VERSION}，文件版本为 {}",
+            p.version
+        ));
     }
+    identity::validate(p)?;
     if p.tracks.is_empty() {
         return bad("至少需要一条音轨");
     }

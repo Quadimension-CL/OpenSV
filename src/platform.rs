@@ -2,6 +2,21 @@
 
 use std::path::PathBuf;
 
+#[cfg(windows)]
+mod windows;
+
+/// RynthV's saved model contexts use the user's roaming directory on Windows.
+pub fn context_directory() -> Result<PathBuf, String> {
+    #[cfg(windows)]
+    {
+        windows::roaming_directory().map(|root| root.join("RynthV"))
+    }
+    #[cfg(not(windows))]
+    {
+        config_directory()
+    }
+}
+
 /// The current user's configuration directory. Resource libraries are selected
 /// separately and are never inferred from another platform's environment.
 pub fn config_directory() -> Result<PathBuf, String> {

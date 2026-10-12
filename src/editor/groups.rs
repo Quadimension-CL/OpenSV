@@ -19,7 +19,7 @@ impl Editor {
             .expect("target track exists");
         let group = Group::new(&track.name);
         let mut reference = track.main_ref.clone();
-        reference.id = new_id();
+        reference.renew_identity();
         reference.group_id = group.uuid.clone();
         reference.blick_absolute_begin = start.max(0);
         reference.blick_absolute_end = start.max(0).saturating_add(duration.max(1));

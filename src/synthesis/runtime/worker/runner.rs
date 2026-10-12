@@ -92,11 +92,8 @@ pub(super) fn run(
         loading_checkpoint()?;
         let identity = if voice.family.requires_identity() {
             Some(
-                voice::session_identity::installed_local_identity(
-                    &name,
-                    voice.family.model_version(),
-                )
-                .inspect_err(|_| context_required = true)?,
+                voice::session_identity::saved_identity(&name, voice.family.model_version())
+                    .inspect_err(|_| context_required = true)?,
             )
         } else {
             None

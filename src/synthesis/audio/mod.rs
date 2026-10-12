@@ -12,6 +12,7 @@ mod wav;
 
 pub use live::LiveAudio;
 pub use piano::PianoControl;
+pub(crate) use playback::LoopControl;
 pub use playback::{OutputFormat, PlaybackControl, Player};
 pub use source::{AudioLayer, PlaybackSource};
 pub use wav::{WaveFormat, save_wav, save_wav_as};

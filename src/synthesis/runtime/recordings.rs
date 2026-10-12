@@ -54,7 +54,9 @@ impl Runtime {
                 pending.push(start..last);
             }
         }
-        if (end == 0 && !self.metronome_enabled()) || self.recording_error.is_some() {
+        if (end == 0 && !self.metronome_enabled() && self.loop_range.is_none())
+            || self.recording_error.is_some()
+        {
             self.playback.clear();
         } else {
             let source = PlaybackSource::new(

@@ -1,8 +1,9 @@
 //! Transient piano audition, independent of note selection and project edits.
 
+mod decoration;
 mod layout;
 
-use crate::app::App;
+use crate::{app::App, ui::track_color::TrackColors};
 use eframe::egui::*;
 use layout::KeyboardLayout;
 pub(super) use layout::white_index;
@@ -95,7 +96,12 @@ pub(super) fn show(app: &mut App, ui: &mut Ui, all: Rect, canvas: Rect) {
             set_note(app, note);
         }
     }
-    layout.draw(ui, app.piano_audition.note);
+    layout.draw(
+        ui,
+        app.piano_audition.note,
+        super::scale_guide::effective(app),
+        TrackColors::new(app.editor.current_track()).accent,
+    );
     if enabled && note.is_some() {
         response
             .on_hover_cursor(CursorIcon::PointingHand)

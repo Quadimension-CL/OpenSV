@@ -156,7 +156,7 @@ pub fn menus(app: &mut App, ui: &mut Ui) {
             if item(ui, "停止", "Ctrl+Space", true) {
                 app.editor.transport.stop();
             }
-            ui.checkbox(&mut app.editor.transport.looping, "循环播放所选音符");
+            ui.checkbox(&mut app.editor.transport.looping, "循环播放");
             if item(ui, "跳到开头", "", true) {
                 app.editor.transport.position = 0;
             }

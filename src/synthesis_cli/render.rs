@@ -37,7 +37,7 @@ pub fn run(
     let identity = if voice.family.requires_identity() {
         Some(match args.duration_identity {
             Some(identity) => identity,
-            None => session_identity::installed_local_identity(name, voice.family.model_version())
+            None => session_identity::saved_identity(name, voice.family.model_version())
                 .map_err(|error| error.to_string())?,
         })
     } else if args.duration_identity.is_some() {
@@ -91,7 +91,7 @@ pub fn run(
         "render_ms": render_ms,
         "wav_write_ms": wav_write_ms,
         "stage_timings": output.timings,
-        "identity_source": if args.duration_identity.is_some() { "explicit model conditioning" } else if voice.family.requires_identity() { "saved context or local installation" } else { "not required" },
+        "identity_source": if args.duration_identity.is_some() { "explicit model conditioning" } else if voice.family.requires_identity() { "saved RynthV context" } else { "not required" },
         "original_engine_bit_exact_verified": false,
     }))
 }

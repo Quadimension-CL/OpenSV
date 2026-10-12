@@ -8,6 +8,7 @@ pub enum ContextImport {
     File(PathBuf),
     Identity(u64),
     Process(u32),
+    SessionFile(PathBuf),
 }
 
 impl ContextImport {
@@ -15,20 +16,21 @@ impl ContextImport {
         let file = values.remove("--context-file");
         let identity = values.remove("--identity");
         let process = values.remove("--process-id");
-        match (file, identity, process) {
-            (Some(path), None, None) => {
+        let session_file = values.remove("--session-file");
+        match (file, identity, process, session_file) {
+            (Some(path), None, None, None) => {
                 if path.is_empty() {
                     return Err("--context-file requires a nonempty path".into());
                 }
                 Ok(Self::File(PathBuf::from(path)))
             }
-            (None, Some(value), None) => {
+            (None, Some(value), None, None) => {
                 let text = value.to_str().ok_or("--identity must be UTF-8")?;
                 session_identity::parse_identity(text)
                     .map(Self::Identity)
                     .map_err(|error| error.to_string())
             }
-            (None, None, Some(value)) => {
+            (None, None, Some(value), None) => {
                 if !session_identity::supports_online_import() {
                     return Err(
                         "--process-id is available only on Windows x64; use --context-file or --identity"
@@ -42,8 +44,20 @@ impl ContextImport {
                     .ok_or("--process-id requires a positive process ID")?;
                 Ok(Self::Process(process_id))
             }
+            (None, None, None, Some(path)) => {
+                if path.is_empty() {
+                    return Err("--session-file requires a nonempty path".into());
+                }
+                if !session_identity::supports_session_import() {
+                    return Err(
+                        "--session-file is available only on Windows x64; use --context-file or --identity"
+                            .into(),
+                    );
+                }
+                Ok(Self::SessionFile(PathBuf::from(path)))
+            }
             _ => Err(
-                "import-context requires exactly one of --context-file, --identity, or --process-id"
+                "import-context requires exactly one of --context-file, --identity, --process-id, or --session-file"
                     .into(),
             ),
         }
@@ -66,6 +80,9 @@ impl ContextImport {
             }
             Self::Process(process_id) => {
                 session_identity::import_online_context(name, version, process_id)
+            }
+            Self::SessionFile(path) => {
+                session_identity::import_session_context(name, version, &path)
             }
         }
         .map_err(|error| error.to_string())?;

@@ -114,6 +114,19 @@ pub(super) fn menu(
             }
             ui.close();
         }
+        if entry.family.is_some_and(VoiceFamily::requires_identity)
+            && ui
+                .add_enabled(
+                    app.synthesis.can_import_context(&entry.selection()),
+                    Button::new("重新导入上下文…"),
+                )
+                .on_hover_text("重新选择上下文来源，导入成功后重新加载使用此上下文的歌声")
+                .on_disabled_hover_text("当前声库不可用，或正在扫描声库、导入上下文")
+                .clicked()
+        {
+            app.synthesis.open_context_import(entry.selection());
+            ui.close();
+        }
         if !matches!(
             app.synthesis.voice_state(&entry.selection()),
             VoiceState::Unloaded

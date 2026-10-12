@@ -377,23 +377,10 @@ impl eframe::App for App {
             ctx.send_viewport_cmd(ViewportCommand::CancelClose);
             self.request_file(FileAction::Close, &ctx);
         }
-        let selected: Vec<_> = self
-            .editor
-            .notes()
-            .iter()
-            .filter(|n| self.editor.selected.contains(&n.id))
-            .filter_map(|n| self.editor.active_ref()?.note_range(n))
-            .collect();
-        let selection = selected
-            .iter()
-            .map(|range| range.0)
-            .min()
-            .zip(selected.iter().map(|range| range.1).max());
         let audio_seconds = self.synthesis.playback_clock(self.editor.transport.playing);
         let looped = self.editor.transport.update(
             &self.editor.project.time,
             self.editor.project.end().max(32 * QUARTER),
-            selection,
             audio_seconds,
         );
         let transport_position = self.editor.transport.position;
@@ -489,6 +476,14 @@ impl eframe::App for App {
             self.synthesis
                 .sync_project(&self.editor.project, self.editor.revision);
         }
+        if self.editor.transport.playing {
+            self.editor.transport.constrain_to_loop();
+        }
+        self.synthesis.set_loop_range(
+            self.editor
+                .transport
+                .loop_seconds(&self.editor.project.time),
+        );
         self.synthesis.sync_transport(
             self.editor.transport.playing,
             self.editor

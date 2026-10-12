@@ -4,6 +4,7 @@ pub mod engine;
 pub mod execution;
 pub mod inference;
 pub mod instrumental;
+mod mixing_options;
 pub mod plan;
 #[cfg(feature = "synth-profile")]
 pub mod profiling;

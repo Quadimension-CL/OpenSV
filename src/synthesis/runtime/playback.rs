@@ -1,6 +1,6 @@
 mod worker;
 
-use crate::synthesis::audio::{PianoControl, PlaybackControl, PlaybackSource};
+use crate::synthesis::audio::{LoopControl, PianoControl, PlaybackControl, PlaybackSource};
 use std::{
     sync::{
         Arc, Mutex,
@@ -41,6 +41,7 @@ pub(super) struct Playback {
     state: Arc<Mutex<Snapshot>>,
     latest: Arc<AtomicU64>,
     piano: PianoControl,
+    looping: LoopControl,
 }
 
 impl Playback {
@@ -52,9 +53,20 @@ impl Playback {
         let pending = Arc::clone(&latest);
         let published = Arc::clone(&state);
         let output_piano = piano.clone();
+        let looping = LoopControl::default();
+        let output_looping = looping.clone();
         if let Err(error) = thread::Builder::new()
             .name("audio-control".into())
-            .spawn(move || worker::run(rx, published, pending, output_piano, repaint))
+            .spawn(move || {
+                worker::run(
+                    rx,
+                    published,
+                    pending,
+                    output_piano,
+                    output_looping,
+                    repaint,
+                )
+            })
         {
             state.lock().expect("new playback state").error =
                 Some(format!("无法启动音频线程：{error}"));
@@ -64,6 +76,7 @@ impl Playback {
             state,
             latest,
             piano,
+            looping,
         }
     }
 
@@ -90,6 +103,12 @@ impl Playback {
 
     pub fn load_source(&self, audio: Arc<PlaybackSource>, seconds: f64, playing: bool) {
         self.send(Transport::Load(audio, seconds, playing));
+    }
+
+    pub fn set_loop_range(&self, range: Option<(f64, f64)>) -> Result<(), String> {
+        self.looping
+            .set_range(range)
+            .map_err(|error| error.to_string())
     }
 
     pub fn audition_key(&self, note: Option<u8>) {

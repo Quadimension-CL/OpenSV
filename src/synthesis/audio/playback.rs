@@ -1,10 +1,12 @@
 mod callback;
 mod controls;
+mod looping;
 mod sampler;
 
 use super::{AudioError, LiveAudio, PianoControl, PlaybackSource, RenderedAudio};
 use controls::{Controls, DeviceState};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+pub(crate) use looping::LoopControl;
 use std::sync::{Arc, RwLock, atomic::Ordering};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -69,6 +71,7 @@ pub struct Player {
     source: Arc<SharedSource>,
     state: Arc<DeviceState>,
     piano: PianoControl,
+    looping: LoopControl,
     device: cpal::Device,
     config: cpal::StreamConfig,
     sample_format: cpal::SampleFormat,
@@ -81,6 +84,13 @@ impl Player {
     }
 
     pub fn new_default_with_piano(piano: PianoControl) -> Result<Self, AudioError> {
+        Self::new_default_with_controls(piano, LoopControl::default())
+    }
+
+    pub(crate) fn new_default_with_controls(
+        piano: PianoControl,
+        looping: LoopControl,
+    ) -> Result<Self, AudioError> {
         let device = cpal::default_host()
             .default_output_device()
             .ok_or_else(|| AudioError::Device("No default output device is available".into()))?;
@@ -107,6 +117,7 @@ impl Player {
             source: Arc::new(RwLock::new(None)),
             state: Arc::new(DeviceState::default()),
             piano,
+            looping,
             device,
             config,
             sample_format,
@@ -155,6 +166,7 @@ impl Player {
             self.gain,
             audio.total_frames(),
             self.config.sample_rate,
+            self.looping.clone(),
         )?);
         let previous = {
             let mut source = self
