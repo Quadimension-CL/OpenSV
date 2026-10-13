@@ -1,6 +1,9 @@
 use std::sync::Arc;
 
-use crate::synthesis::voice::{PreparedTree, Result, VoiceError};
+use crate::synthesis::{
+    inference::Sequence,
+    voice::{PreparedTree, Result, VoiceError},
+};
 
 /// Form each style vector as the neutral row plus weighted style rows.
 pub struct TimbreStyles {
@@ -53,6 +56,49 @@ impl TimbreStyles {
         for (row, &weight) in self.variants.iter().zip(weights) {
             for (target, &value) in output.iter_mut().zip(row.iter()) {
                 *target += value * weight;
+            }
+        }
+        Ok(output)
+    }
+
+    /// Read weights at absolute source frames, preserving the acoustic stride
+    /// phase when a stream resumes partway through an owner.
+    pub fn sample_frames(
+        &self,
+        weights: Option<&Sequence>,
+        source_frames: usize,
+        positions: &[usize],
+    ) -> Result<Sequence> {
+        if positions.iter().any(|&position| position >= source_frames) {
+            return Err(VoiceError::new("Vocal-mode frame lies outside its owner"));
+        }
+        if let Some(weights) = weights {
+            weights.validate()?;
+            if weights.frames != source_frames
+                || weights.channels != self.variants.len()
+                || weights.values.iter().any(|value| !value.is_finite())
+            {
+                return Err(VoiceError::new(
+                    "Vocal-mode weights differ from the acoustic timeline",
+                ));
+            }
+        }
+        let mut output = Sequence::zeros(positions.len(), self.neutral.len())?;
+        for (target, &position) in output
+            .values
+            .chunks_exact_mut(self.neutral.len())
+            .zip(positions)
+        {
+            target.copy_from_slice(&self.neutral);
+            if let Some(weights) = weights {
+                for (variant, &weight) in self.variants.iter().zip(weights.frame(position)?) {
+                    if weight == 0.0 {
+                        continue;
+                    }
+                    for (value, &offset) in target.iter_mut().zip(variant.iter()) {
+                        *value += offset * weight;
+                    }
+                }
             }
         }
         Ok(output)

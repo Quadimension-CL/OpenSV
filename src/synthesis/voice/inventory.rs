@@ -141,6 +141,7 @@ impl VoiceInventory {
                     files,
                     configuration.family,
                     configuration.f0_enhancement,
+                    configuration.styles.clone(),
                 )))
             })
             .clone()

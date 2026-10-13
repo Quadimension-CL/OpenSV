@@ -176,7 +176,7 @@ pub fn menus(app: &mut App, ui: &mut Ui) {
     });
 }
 pub fn shortcuts(app: &mut App, ctx: &Context) {
-    if app.editor.has_performance_edit() {
+    if app.editor.has_performance_edit() || app.editor.has_voice_edit() {
         return;
     }
     if app.audio_drag.is_some() {

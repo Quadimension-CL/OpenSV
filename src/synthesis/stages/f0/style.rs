@@ -2,7 +2,10 @@
 
 use std::sync::Arc;
 
-use crate::synthesis::voice::{PreparedTree, Result, VoiceError};
+use crate::synthesis::{
+    inference::Sequence,
+    voice::{PreparedTree, Result, VoiceError},
+};
 
 const STYLE_TYPE: [u8; 16] = [
     0x04, 0x12, 0x46, 0xa2, 0xe5, 0x5c, 0xb3, 0x12, 0x2b, 0xb6, 0xb8, 0x27, 0x1c, 0x2a, 0x10, 0xff,
@@ -84,12 +87,50 @@ impl StyleBasis {
             return Err(VoiceError::new("Invalid vocal-mode coefficient vector"));
         }
         let mut output = self.base.to_vec();
+        self.add_offsets(&mut output, coefficients);
+        Ok(output)
+    }
+
+    pub(super) fn validate_weights(&self, frames: usize, weights: Option<&Sequence>) -> Result<()> {
+        let Some(weights) = weights else {
+            return Ok(());
+        };
+        weights.validate()?;
+        if weights.frames != frames
+            || weights.channels != self.names.len()
+            || weights.values.iter().any(|value| !value.is_finite())
+        {
+            return Err(VoiceError::new(
+                "F0 vocal-mode weights do not match the complete note timeline or model styles",
+            ));
+        }
+        Ok(())
+    }
+
+    /// Build the complete owner embedding before a bounded sampler interval is cropped.
+    pub fn weighted_frames(&self, frames: usize, weights: Option<&Sequence>) -> Result<Vec<f32>> {
+        self.validate_weights(frames, weights)?;
+        let mut output = self.neutral_frames(frames)?;
+        if let Some(weights) = weights {
+            for (frame, coefficients) in output
+                .chunks_exact_mut(self.dimensions)
+                .zip(weights.values.chunks_exact(weights.channels))
+            {
+                self.add_offsets(frame, coefficients);
+            }
+        }
+        Ok(output)
+    }
+
+    fn add_offsets(&self, output: &mut [f32], coefficients: &[f32]) {
         for (values, &scale) in self.offsets.iter().zip(coefficients) {
+            if scale == 0.0 {
+                continue;
+            }
             for (target, &value) in output.iter_mut().zip(values.iter()) {
                 *target += value * scale;
             }
         }
-        Ok(output)
     }
 
     pub fn neutral_frames(&self, frames: usize) -> Result<Vec<f32>> {

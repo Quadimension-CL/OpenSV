@@ -1,6 +1,6 @@
 //! Voice-family dispatch for the shared demand-driven PCM pipeline.
 use crate::synthesis::{
-    engine::{PreparedRenderAcoustics, models},
+    engine::{PreparedRenderAcoustics, models, voice_controls::AcousticControls},
     stages::{
         sv1_timbre::{PreparedSv1TimbreFrames, Sv1TimbreNetwork, Sv1TimbreStream},
         timbre::{
@@ -19,7 +19,10 @@ pub enum Network<'tree> {
 
 pub(super) enum PreparedFrames {
     Dds(Arc<PreparedSv1TimbreFrames>),
-    Sv2(Arc<PreparedTimbreFrames>),
+    Sv2 {
+        features: Arc<PreparedTimbreFrames>,
+        controls: AcousticControls,
+    },
 }
 
 pub(super) enum Stream<'network, 'tree> {
@@ -41,11 +44,18 @@ impl<'tree> Network<'tree> {
     pub(super) fn prepare_frames(
         &self,
         acoustic: &PreparedRenderAcoustics,
+        voice: &PreparedVoice,
     ) -> Result<PreparedFrames> {
         let prepared = &acoustic.prepared;
         match self {
             Self::Dds(network) => {
                 let modulation = acoustic.modulation();
+                let controls = AcousticControls::sample(
+                    &prepared.phrase,
+                    &voice.style_names,
+                    network.frame_seconds(),
+                    prepared.phones.iter().map(|phone| phone.frames).sum(),
+                )?;
                 let frames = network.prepare_frame_features(
                     &TimbreRequest {
                         notes: &prepared.phrase.notes,
@@ -53,20 +63,32 @@ impl<'tree> Network<'tree> {
                         midi_pitch: &acoustic.pitch.pitch,
                         note_modulation: &modulation,
                         phone_impulses: None,
-                        frame_controls: None,
+                        frame_controls: controls.frames.as_deref(),
+                        primary_style_weights: controls.pronunciation.as_ref(),
+                        secondary_style_weights: controls.timbre.as_ref(),
                         requested_frame: 0,
                     },
                     &acoustic.pitch,
                 )?;
                 Ok(PreparedFrames::Dds(Arc::new(frames)))
             }
-            Self::Sv2(network) => network
-                .prepare_frame_features(
+            Self::Sv2(network) => {
+                let controls = AcousticControls::sample(
+                    &prepared.phrase,
+                    &voice.style_names,
+                    crate::synthesis::score::FRAME_SECONDS,
+                    acoustic.pitch.pitch.len(),
+                )?;
+                let features = network.prepare_frame_features(
                     &prepared.phrase.notes,
                     &prepared.phones,
                     prepared.sv2_features()?.1,
-                )
-                .map(|frames| PreparedFrames::Sv2(Arc::new(frames))),
+                )?;
+                Ok(PreparedFrames::Sv2 {
+                    features: Arc::new(features),
+                    controls,
+                })
+            }
         }
     }
 
@@ -86,20 +108,25 @@ impl<'tree> Network<'tree> {
             note_modulation: &modulation,
             phone_impulses: None,
             frame_controls: None,
+            primary_style_weights: None,
+            secondary_style_weights: None,
             requested_frame,
         };
         match (self, frames) {
             (Self::Dds(network), PreparedFrames::Dds(frames)) => network
                 .start_prepared(request, Arc::clone(frames))
                 .map(|stream| Stream::Dds(Box::new(stream))),
-            (Self::Sv2(network), PreparedFrames::Sv2(frames)) => network
+            (Self::Sv2(network), PreparedFrames::Sv2 { features, controls }) => network
                 .start_prepared(
                     &TimbreRequest {
                         phone_impulses: Some(&impulses),
+                        frame_controls: controls.frames.as_deref(),
+                        primary_style_weights: controls.pronunciation.as_ref(),
+                        secondary_style_weights: controls.timbre.as_ref(),
                         ..request
                     },
                     &RecordsConfig::default(),
-                    Arc::clone(frames),
+                    Arc::clone(features),
                 )
                 .map(|stream| Stream::Sv2(Box::new(stream))),
             _ => Err(VoiceError::new(

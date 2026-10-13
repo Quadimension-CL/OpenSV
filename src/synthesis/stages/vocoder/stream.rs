@@ -3,7 +3,7 @@
 use std::collections::VecDeque;
 
 use super::{
-    output::FrameMetadata, render::VocoderOutput, stage::VocoderStage,
+    VoiceControl, output::FrameMetadata, render::VocoderOutput, stage::VocoderStage,
     stream_parameters::ParameterStream, stream_signals::SignalStream,
 };
 use crate::synthesis::{
@@ -44,6 +44,7 @@ impl VocoderStream<'_> {
         &mut self,
         physical: &Sequence,
         controls: Option<&Sequence>,
+        voice_controls: Option<&[VoiceControl]>,
         final_batch: bool,
     ) -> Result<VocoderOutput> {
         #[cfg(feature = "synth-profile")]
@@ -51,7 +52,9 @@ impl VocoderStream<'_> {
         if self.finished {
             return Err(VoiceError::new("Vocoder stream has already finished"));
         }
-        let parameters = self.parameters.process(physical, controls, final_batch)?;
+        let parameters =
+            self.parameters
+                .process(physical, controls, voice_controls, final_batch)?;
         self.input_frames = self
             .input_frames
             .checked_add(physical.frames)

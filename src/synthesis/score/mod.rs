@@ -16,6 +16,7 @@ mod records;
 mod retakes;
 mod types;
 mod voice_binding;
+mod voice_controls;
 
 pub use lyrics::LyricFrontend;
 pub use owner::prepare_owner;
@@ -23,6 +24,7 @@ pub use performance::PreparedPerformanceControls;
 pub use pitch::PreparedPitchControls;
 pub use types::{ExplicitScore, PreparedPhrase, ScoreNote, ScorePhone};
 pub use voice_binding::validate_voice;
+pub use voice_controls::PreparedVoiceControls;
 
 pub const SAMPLE_RATE: u32 = 48_000;
 pub const HOP_SAMPLES: usize = 240;

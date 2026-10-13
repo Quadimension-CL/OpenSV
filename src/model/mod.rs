@@ -8,6 +8,7 @@ mod project;
 mod retakes;
 mod time;
 mod track_color;
+mod voice;
 
 pub use automation::*;
 pub use dictionary::*;
@@ -19,6 +20,7 @@ pub use project::*;
 pub use retakes::*;
 pub use time::*;
 pub use track_color::*;
+pub use voice::*;
 
 use std::sync::atomic::{AtomicU64, Ordering};
 pub type EntityId = u64;

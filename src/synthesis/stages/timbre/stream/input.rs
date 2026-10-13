@@ -82,6 +82,8 @@ impl Input {
         network: &TimbreNetwork<'_>,
         features: Features,
         records: &AcousticRecords,
+        primary_style_weights: Option<&Sequence>,
+        secondary_style_weights: Option<&Sequence>,
     ) -> Result<Self> {
         let frames = records.total_frames - records.first_frame;
         if features.frames() != frames
@@ -140,11 +142,11 @@ impl Input {
         require(&controls, frames, 2)?;
         require(&ppg_noise, low, network.layout.ppg_noise_channels)?;
         require(&timbre_noise, low, network.layout.timbre_noise_channels)?;
-        let neutral = Sequence::new(
-            low,
-            network.styles.neutral.len(),
-            network.styles.neutral.repeat(low),
-        )?;
+        let style = |weights| {
+            network
+                .styles
+                .sample_frames(weights, records.total_frames, &records.low_rate_positions)
+        };
         Ok(Self {
             first_frame: records.first_frame,
             features,
@@ -157,8 +159,8 @@ impl Input {
             ppg_shape: records.ppg_shape.clone(),
             ppg_intensity: records.ppg_intensity.clone(),
             timbre_shape: records.timbre_shape.clone(),
-            primary_style: neutral.clone(),
-            secondary_style: neutral,
+            primary_style: style(primary_style_weights)?,
+            secondary_style: style(secondary_style_weights)?,
         })
     }
 }

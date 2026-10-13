@@ -1,4 +1,4 @@
-use super::{language, selected_entry, selector, weak, widgets};
+use super::{language, parameters, selected_entry, selector, weak, widgets};
 use crate::{
     app::App,
     synthesis::{runtime::VoiceState, settings::VoiceSelection},
@@ -26,35 +26,9 @@ pub fn show(app: &mut App, ui: &mut Ui) {
         status(app, ui);
     });
     section(ui, "语言", |ui| language::show(app, ui));
-    section(ui, "唱法", |ui| {
-        let configuration = app
-            .voice_inventory()
-            .and_then(|voice| voice.configuration.as_ref());
-        if let Some(config) = configuration {
-            if config.styles.is_empty() {
-                weak(ui, "此歌声没有可用的唱法");
-            }
-            ui.spacing_mut().item_spacing.y = 2.0;
-            for style in &config.styles {
-                let value = style_value(app, style);
-                widgets::style(ui, style, value);
-            }
-        } else {
-            weak(ui, "加载歌声后显示支持的唱法");
-        }
-    });
-    section(ui, "参数", |ui| {
-        ui.spacing_mut().item_spacing.y = 0.0;
-        for label in ["响度", "张力", "气声", "性别", "声区转换"] {
-            widgets::slider(ui, label);
-        }
-    });
-    section(ui, "调音", |ui| {
-        widgets::field(ui, "调性: C，A4 = 440 Hz", false, "调音设置尚未接入合成");
-        ui.add_space(10.0);
-        widgets::slider(ui, "音高转换");
-        widgets::slider(ui, "调性转换");
-    });
+    section(ui, "唱法", |ui| parameters::styles(app, ui));
+    section(ui, "参数", |ui| parameters::scalars(app, ui));
+    section(ui, "调音", |ui| parameters::tuning(app, ui));
     section(ui, "调式音阶", |ui| {
         crate::ui::scale::controls::panel(app, ui);
     });
@@ -151,24 +125,4 @@ fn section(ui: &mut Ui, title: &str, content: impl FnOnce(&mut Ui)) {
                     content(ui);
                 });
         });
-}
-
-fn style_value(app: &App, style: &str) -> f32 {
-    let track = &app.editor.current_track().main_ref;
-    let voice = app
-        .editor
-        .active_ref()
-        .and_then(|r| r.extra.get("voice"))
-        .filter(|voice| {
-            voice
-                .get("vocalModeInherited")
-                .and_then(serde_json::Value::as_bool)
-                == Some(false)
-        })
-        .or_else(|| track.extra.get("voice"));
-    voice
-        .and_then(|voice| voice.get("vocalModeParams"))
-        .and_then(|params| params.get(style))
-        .and_then(serde_json::Value::as_f64)
-        .unwrap_or(0.0) as f32
 }

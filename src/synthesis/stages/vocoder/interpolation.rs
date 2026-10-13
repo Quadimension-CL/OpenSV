@@ -8,7 +8,10 @@ use crate::synthesis::{
     voice::{PreparedTree, Result, VoiceError},
 };
 
-use super::filter_kernel::DynamicFilter;
+use super::{
+    filter_kernel::DynamicFilter,
+    voice_control::{Component, SpectralControl},
+};
 
 pub const SPECTRAL_FILTER_TYPE_ID: [u8; 16] = [
     0x8b, 0xc8, 0x4f, 0xda, 0x18, 0xb0, 0x19, 0xb5, 0x57, 0xef, 0x3c, 0x9c, 0x38, 0x28, 0x88, 0xf1,
@@ -83,24 +86,33 @@ pub struct SpectralFilterStream {
 }
 
 impl SpectralFilterStream {
-    pub fn new(config: SpectralFilterConfig, frame_samples: usize) -> Result<Self> {
+    pub(crate) fn new(
+        config: SpectralFilterConfig,
+        frame_samples: usize,
+        sample_rate: u32,
+        component: Component,
+    ) -> Result<Self> {
         Ok(Self {
             filter: DynamicFilter::new(
                 frame_samples,
                 config.window_samples(frame_samples)?,
                 config.fft_size(frame_samples)?,
+                sample_rate,
+                component,
             )?,
         })
     }
 
     /// Input frames are paired in order. A non-final batch can retain analysis
     /// context for the next call; only the explicit final batch flushes it.
-    pub fn process(
+    pub(crate) fn process(
         &mut self,
         parameters: &Sequence,
         excitation: &Sequence,
+        controls: &[SpectralControl],
         final_batch: bool,
     ) -> Result<Sequence> {
-        self.filter.process(parameters, excitation, final_batch)
+        self.filter
+            .process(parameters, excitation, controls, final_batch)
     }
 }

@@ -10,6 +10,7 @@ mod pitch;
 mod prepared;
 pub mod progressive;
 mod render;
+mod voice_controls;
 
 pub use acoustics::{
     AcousticRender, PreparedRenderAcoustics, StageTimings, prepare_acoustics, synthesize_acoustics,

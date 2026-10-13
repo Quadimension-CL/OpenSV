@@ -4,7 +4,7 @@
 use crate::synthesis::{
     execution::{self, Cancellation},
     inference::Sequence,
-    stages::vocoder::{VocoderOutput, VocoderStage},
+    stages::vocoder::{VocoderOutput, VocoderStage, VoiceControl},
     voice::{PreparedTree, Result, VoiceError},
 };
 use std::{
@@ -25,6 +25,7 @@ struct Input {
     sequence: usize,
     physical: Sequence,
     controls: Option<Sequence>,
+    voice_controls: Option<Vec<VoiceControl>>,
     natural_final: bool,
 }
 
@@ -90,6 +91,7 @@ impl Pipeline {
         &mut self,
         physical: Sequence,
         controls: Option<Sequence>,
+        voice_controls: Option<Vec<VoiceControl>>,
         natural_final: bool,
     ) -> Result<()> {
         if !self.can_submit()
@@ -98,6 +100,9 @@ impl Pipeline {
             || controls.as_ref().is_some_and(|controls| {
                 controls.channels != 2 || physical.frames != controls.frames
             })
+            || voice_controls
+                .as_ref()
+                .is_some_and(|controls| controls.len() != physical.frames)
         {
             return Err(VoiceError::new("Invalid progressive vocoder submission"));
         }
@@ -106,6 +111,7 @@ impl Pipeline {
             sequence: self.submitted,
             physical,
             controls,
+            voice_controls,
             natural_final,
         };
         match self.input.as_ref().expect("open pipeline").try_send(input) {
@@ -211,6 +217,7 @@ fn run(
             vocoder.process(
                 &input.physical,
                 input.controls.as_ref(),
+                input.voice_controls.as_deref(),
                 input.natural_final,
             )
         })?;
@@ -218,6 +225,7 @@ fn run(
         let pcm = vocoder.process(
             &input.physical,
             input.controls.as_ref(),
+            input.voice_controls.as_deref(),
             input.natural_final,
         )?;
         let elapsed_ms = started.elapsed().as_secs_f64() * 1000.0 + std::mem::take(&mut setup_ms);

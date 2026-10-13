@@ -17,7 +17,20 @@ pub fn prepare_owner(
 ) -> Result<PreparedPhrase> {
     let mut phrase = ExplicitScore::from_owner(input, lexicon, duration_tree, family)?
         .prepare(duration_tree, family)?;
-    phrase.pitch_controls = super::PreparedPitchControls::new(input);
+    phrase.voice_controls = super::PreparedVoiceControls::new(input, family)?;
+    let tuning = phrase
+        .voice_controls
+        .as_ref()
+        .map_or(0.0, super::PreparedVoiceControls::tuning_semitones);
+    if tuning != 0.0 {
+        // Apply tuning to model conditions after validating the score's MIDI
+        // pitches. Rest and boundary records share the same group tuning.
+        for (record, note) in phrase.records.iter_mut().zip(&mut phrase.notes) {
+            record.pitch_offset += tuning as f32;
+            note.pitch_offset += tuning as f32;
+        }
+    }
+    phrase.pitch_controls = super::PreparedPitchControls::new(input, tuning);
     phrase.performance_controls = super::PreparedPerformanceControls::new(input)?;
     Ok(phrase)
 }

@@ -68,6 +68,8 @@ pub struct PreparedPhrase {
     pub pitch_controls: Option<super::PreparedPitchControls>,
     /// Note modulation sampled on the editor's tempo-aware parameter grid.
     pub performance_controls: Option<super::PreparedPerformanceControls>,
+    /// Resolved instance settings for each model stage.
+    pub voice_controls: Option<super::PreparedVoiceControls>,
     /// These two arrays have identical indexing, including silence records.
     pub records: Vec<DurationRecord>,
     pub notes: Vec<FrontendNote>,
@@ -196,6 +198,7 @@ impl ExplicitScore {
         Ok(PreparedPhrase {
             pitch_controls: None,
             performance_controls: None,
+            voice_controls: None,
             records,
             notes,
             source_note_ids: source.iter().map(|note| note.source_note_id).collect(),

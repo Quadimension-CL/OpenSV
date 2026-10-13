@@ -63,6 +63,9 @@ impl OwnerSynthesis {
         if let Some(controls) = &phrase.performance_controls {
             bytes = bytes.saturating_add(controls.memory_bytes());
         }
+        if let Some(controls) = &phrase.voice_controls {
+            bytes = bytes.saturating_add(controls.memory_bytes());
+        }
         for record in &phrase.records {
             bytes = bytes
                 .saturating_add(vector_bytes(&record.phones))

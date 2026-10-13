@@ -31,9 +31,23 @@ pub fn synthesize(
     #[cfg(feature = "synth-profile")]
     let profile = crate::synthesis::profiling::span("stage.vocoder");
     let mut vocoder = VocoderStage::prepare(voice.model("vocoder")?)?;
+    let voice_controls = phrase
+        .voice_controls
+        .as_ref()
+        .map(|controls| {
+            controls.sample_vocoder_controls(
+                phrase.start_seconds
+                    + acoustic.timbre.first_frame as f64 * crate::synthesis::score::FRAME_SECONDS,
+                crate::synthesis::score::FRAME_SECONDS,
+                acoustic.timbre.acoustics.frames,
+            )
+        })
+        .transpose()?
+        .flatten();
     let output = vocoder.render_components(
         &acoustic.timbre.acoustics,
         acoustic.timbre.controls.as_ref(),
+        voice_controls.as_deref(),
     )?;
     let mut timings = acoustic.timings;
     timings.vocoder_ms = started.elapsed().as_secs_f64() * 1000.0;

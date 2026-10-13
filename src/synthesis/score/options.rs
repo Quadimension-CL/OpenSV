@@ -4,7 +4,10 @@
 use serde_json::Value;
 
 use crate::{
-    model::{Extra, Language, NoteMode, NotePerformance, database_language, pitch::PitchControl},
+    model::{
+        Extra, Language, NoteMode, NotePerformance, VocalModeComponent, VoiceParameter,
+        VoiceSettings, database_language, pitch::PitchControl,
+    },
     synthesis::{
         plan::{NoteInput, OwnerInput},
         voice::{Result, VoiceError, VoiceFamily},
@@ -42,6 +45,7 @@ pub(super) fn validate_owner(input: &OwnerInput, family: VoiceFamily) -> Result<
         ("instance", &input.voice.instance_options),
         ("track default", &input.voice.track_default_options),
     ] {
+        VoiceSettings::from_extra(values).map_err(VoiceError::new)?;
         for (key, value) in values {
             let supported = match key.as_str() {
                 "isInstrumental" => value.as_bool() == Some(false),
@@ -190,21 +194,45 @@ fn validate_voice(value: &Value, scope: &str) -> Result<()> {
         return unsupported(format!("{scope} non-object voice"));
     };
     for (key, value) in object {
+        if VoiceParameter::ALL
+            .iter()
+            .any(|parameter| parameter.key() == key)
+        {
+            // The typed parser above validates the supported scalar range.
+            continue;
+        }
         let supported = match key.as_str() {
-            // Explicit zero values are the neutral settings already consumed
-            // by the pipeline; nonzero controls still require DSP support.
-            "paramLoudness" | "paramTension" | "paramBreathiness" | "paramGender"
-            | "paramToneShift" | "transposeCents" | "transposeSemitones" => {
-                value.as_f64() == Some(0.0)
-            }
             "vocalModeInherited" => value.is_boolean(),
             "vocalModePreset" => value.as_str() == Some(""),
-            "vocalModeParams" => empty_object(value),
+            "vocalModeParams" => {
+                validate_vocal_modes(value, scope)?;
+                true
+            }
             "choirSeatingSeparation" => value.as_f64() == Some(f64::from(0.7_f32)),
             _ => false,
         };
         if !supported {
             return unsupported(format!("{scope} voice.{key} = {value}"));
+        }
+    }
+    Ok(())
+}
+
+fn validate_vocal_modes(value: &Value, scope: &str) -> Result<()> {
+    let Some(modes) = value.as_object() else {
+        return unsupported(format!("{scope} non-object vocal mode parameters"));
+    };
+    for (name, values) in modes {
+        let Some(values) = values.as_object() else {
+            return unsupported(format!("{scope} non-object vocal mode {name}"));
+        };
+        for key in values.keys() {
+            if !VocalModeComponent::ALL
+                .iter()
+                .any(|component| component.key() == key)
+            {
+                return unsupported(format!("{scope} vocal mode {name}.{key}"));
+            }
         }
     }
     Ok(())

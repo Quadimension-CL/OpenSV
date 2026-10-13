@@ -31,7 +31,7 @@ impl<'network, 'tree> TimbreStream<'network, 'tree> {
         Ok(Self {
             program: Program::new(
                 network,
-                Input::from_records(network, Features::Dense(features), records)?,
+                Input::from_records(network, Features::Dense(features), records, None, None)?,
             ),
         })
     }
@@ -40,6 +40,8 @@ impl<'network, 'tree> TimbreStream<'network, 'tree> {
         network: &'network TimbreNetwork<'tree>,
         source: Arc<PreparedTimbreFrames>,
         records: &AcousticRecords,
+        primary_style_weights: Option<&Sequence>,
+        secondary_style_weights: Option<&Sequence>,
     ) -> Result<Self> {
         if records.first_frame > source.len() || records.total_frames != source.len() {
             return Err(VoiceError::new(
@@ -51,7 +53,16 @@ impl<'network, 'tree> TimbreStream<'network, 'tree> {
             first_frame: records.first_frame,
         };
         Ok(Self {
-            program: Program::new(network, Input::from_records(network, features, records)?),
+            program: Program::new(
+                network,
+                Input::from_records(
+                    network,
+                    features,
+                    records,
+                    primary_style_weights,
+                    secondary_style_weights,
+                )?,
+            ),
         })
     }
 

@@ -51,7 +51,7 @@ impl PreparedRender {
             .floor()
             .max(0.0) as usize;
         if self.timbre_frames.get().is_none() {
-            let frames = network.prepare_frames(&self.acoustic)?;
+            let frames = network.prepare_frames(&self.acoustic, voice)?;
             let _ = self.timbre_frames.set(frames);
         }
         let timbre = network.start(
@@ -128,7 +128,23 @@ impl PreparedRender {
             .transpose()?;
         let drained = end == pending.acoustics.frames;
         let natural_final = drained && cursor.timbre.is_finished();
-        cursor.vocoder.submit(acoustics, controls, natural_final)?;
+        let phrase = &self.acoustic.prepared.phrase;
+        let voice_controls = phrase
+            .voice_controls
+            .as_ref()
+            .map(|controls| {
+                controls.sample_vocoder_controls(
+                    phrase.start_seconds
+                        + (pending.first_frame + cursor.pending_offset) as f64 * FRAME_SECONDS,
+                    FRAME_SECONDS,
+                    acoustics.frames,
+                )
+            })
+            .transpose()?
+            .flatten();
+        cursor
+            .vocoder
+            .submit(acoustics, controls, voice_controls, natural_final)?;
         cursor.pending_offset = end;
         if drained {
             cursor.pending = None;

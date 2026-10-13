@@ -83,6 +83,7 @@ impl F0Stage<'_> {
                 "F0 controls do not match the note timeline",
             ));
         }
+        self.style.validate_weights(frames, request.style_weights)?;
         if frame_range.is_empty() {
             return Ok(PitchResult {
                 pitch: Vec::new(),
@@ -167,7 +168,7 @@ impl F0Stage<'_> {
                     .collect()
             },
         )?;
-        let style = self.style.neutral_frames(frames)?;
+        let style = self.style.weighted_frames(frames, request.style_weights)?;
         let style_condition = super::window::matrix(&style, frames, &frame_range)?;
         let mut runtime = ModelRuntime::new(self.tree);
         let sampled = self.sampler.predict(

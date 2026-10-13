@@ -13,6 +13,7 @@ mod retakes;
 mod time_events;
 mod transport;
 mod voice;
+mod voice_parameters;
 pub use groups::GroupEdit;
 pub use loop_region::LoopRegion;
 pub use lyrics::{LyricSelection, split_lyrics};
@@ -20,6 +21,7 @@ pub use midi::ImportSummary;
 pub use performance::{PerformanceParameter, PerformanceSelection};
 pub use retakes::RetakeSelection;
 pub use transport::Transport;
+pub use voice_parameters::{VoiceEditParameter, VoiceParameterState};
 
 use crate::model::*;
 use history::History;
@@ -40,6 +42,7 @@ pub struct Editor {
     pub transport: Transport,
     history: History,
     performance_edit: Option<performance::PerformanceEdit>,
+    voice_edit: Option<voice_parameters::VoiceEdit>,
 }
 impl Editor {
     pub fn new(project: Project) -> Self {
@@ -58,6 +61,7 @@ impl Editor {
             transport: Transport::default(),
             history: History::default(),
             performance_edit: None,
+            voice_edit: None,
         }
     }
     pub fn current_track(&self) -> &Track {
@@ -116,6 +120,7 @@ impl Editor {
     }
     pub fn finish(&mut self) {
         self.performance_edit = None;
+        self.voice_edit = None;
         if self.history.finish(&self.project) {
             self.revision += 1;
             self.reconcile();
@@ -123,6 +128,7 @@ impl Editor {
     }
     pub fn cancel(&mut self) {
         self.performance_edit = None;
+        self.voice_edit = None;
         if let Some(selection) = self.history.cancel(&mut self.project) {
             self.restore_selection(selection);
         }
@@ -144,6 +150,7 @@ impl Editor {
     }
     pub fn undo(&mut self) {
         self.performance_edit = None;
+        self.voice_edit = None;
         let selection = self.selection();
         if let Some(selection) = self.history.undo(&mut self.project, selection) {
             self.revision += 1;
@@ -152,6 +159,7 @@ impl Editor {
     }
     pub fn redo(&mut self) {
         self.finish_performance_edit();
+        self.finish_voice_edit();
         let selection = self.selection();
         if let Some(selection) = self.history.redo(&mut self.project, selection) {
             self.revision += 1;

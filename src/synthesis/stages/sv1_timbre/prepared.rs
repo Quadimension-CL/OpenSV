@@ -3,6 +3,7 @@ use super::{
     frontend::ContextInput,
     pitch,
     records::{self, Records},
+    styles,
 };
 use crate::synthesis::{
     inference::Sequence,
@@ -31,21 +32,26 @@ impl PreparedSv1TimbreFrames {
             .iter()
             .try_fold(0_usize, |total, &count| total.checked_add(count))
             .ok_or_else(|| VoiceError::new("DDS acoustic phone timeline overflows"))?;
-        let log_hz = pitch::sample_log_hz(
+        let frame_styles = styles::prepare(&network.styles, request, frames)?;
+        let sampled_pitch = pitch::sample(
             pitch,
             frames,
             network.frontend.frame_seconds,
             network.contract,
+            request.frame_controls,
         )?;
-        let records = records::prepare(request, network.contract, log_hz)?;
+        let records = records::prepare(request, network.contract, sampled_pitch.raw_log_hz)?;
         let linguistic = network.frontend.linguistic(request.phones)?;
-        let normalized_pitch = network.frontend.normalize_pitch(&records.log_hz)?;
+        let normalized_pitch = network
+            .frontend
+            .normalize_pitch(&sampled_pitch.conditioning_log_hz)?;
         let expanded = network.context.prepare_frames(&ContextInput {
             phones: request.phones,
             linguistic: &linguistic,
             normalized_pitch: &normalized_pitch,
             bank: &network.bank,
             style: &network.styles.neutral,
+            frame_styles: frame_styles.as_ref(),
             phone_factors: None,
         })?;
         expanded.validate()?;

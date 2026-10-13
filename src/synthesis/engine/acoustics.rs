@@ -3,7 +3,9 @@ mod prepare;
 
 pub use prepare::prepare_acoustics;
 
-use super::{PreparedAcoustics, PreparedModelFeatures, RenderStage, models};
+use super::{
+    PreparedAcoustics, PreparedModelFeatures, RenderStage, models, voice_controls::AcousticControls,
+};
 use crate::synthesis::{
     score::PreparedPhrase,
     stages::{
@@ -67,17 +69,52 @@ pub fn synthesize_acoustics(
         note_modulation: &modulation,
         phone_impulses: (voice.family == VoiceFamily::Sv2).then_some(impulses.as_slice()),
         frame_controls: None,
+        primary_style_weights: None,
+        secondary_style_weights: None,
         requested_frame: 0,
     };
     let timbre = match &render.prepared.features {
         PreparedModelFeatures::Sv1Local => {
             let stage = models::dds_timbre(voice)?;
-            stage.render(&request, &render.pitch)?
+            let controls = AcousticControls::sample(
+                &render.prepared.phrase,
+                &voice.style_names,
+                stage.frame_seconds(),
+                render
+                    .prepared
+                    .phones
+                    .iter()
+                    .map(|phone| phone.frames)
+                    .sum(),
+            )?;
+            stage.render(
+                &TimbreRequest {
+                    frame_controls: controls.frames.as_deref(),
+                    primary_style_weights: controls.pronunciation.as_ref(),
+                    secondary_style_weights: controls.timbre.as_ref(),
+                    ..request
+                },
+                &render.pitch,
+            )?
         }
-        PreparedModelFeatures::Sv2 { timbre, .. } => TimbreNetwork::prepare(
-            voice.model("timbre")?,
-        )?
-        .render_prepared(&request, &RecordsConfig::default(), timbre)?,
+        PreparedModelFeatures::Sv2 { timbre, .. } => {
+            let controls = AcousticControls::sample(
+                &render.prepared.phrase,
+                &voice.style_names,
+                crate::synthesis::score::FRAME_SECONDS,
+                render.pitch.pitch.len(),
+            )?;
+            TimbreNetwork::prepare(voice.model("timbre")?)?.render_prepared(
+                &TimbreRequest {
+                    frame_controls: controls.frames.as_deref(),
+                    primary_style_weights: controls.pronunciation.as_ref(),
+                    secondary_style_weights: controls.timbre.as_ref(),
+                    ..request
+                },
+                &RecordsConfig::default(),
+                timbre,
+            )?
+        }
     };
     if timbre
         .acoustics

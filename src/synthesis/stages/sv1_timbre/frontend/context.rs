@@ -21,6 +21,7 @@ pub struct ContextInput<'a> {
     pub normalized_pitch: &'a [f32],
     pub bank: &'a [f32],
     pub style: &'a [f32],
+    pub frame_styles: Option<&'a Sequence>,
     pub phone_factors: Option<&'a [f32]>,
 }
 
@@ -63,6 +64,17 @@ impl<'a> Context<'a> {
             .iter()
             .try_fold(0_usize, |sum, phone| sum.checked_add(phone.frames))
             .ok_or_else(|| VoiceError::new("SV1 acoustic frame count overflows"))?;
+        if let Some(styles) = input.frame_styles {
+            styles.validate()?;
+            if styles.frames != frames
+                || styles.channels != input.style.len()
+                || styles.values.iter().any(|value| !value.is_finite())
+            {
+                return Err(VoiceError::new(
+                    "SV1 acoustic frame styles are not aligned with the context",
+                ));
+            }
+        }
         if input.linguistic.normalized.frames != input.phones.len()
             || input.linguistic.language_ids.len() != input.phones.len()
             || input.normalized_pitch.len() != frames
@@ -140,7 +152,12 @@ impl<'a> Context<'a> {
                     row[cursor..cursor + 4].copy_from_slice(&cosine_bank(scalar));
                     cursor += 4;
                 }
-                for values in [input.bank, language, input.style] {
+                let style = input
+                    .frame_styles
+                    .map(|styles| styles.frame(frame_index))
+                    .transpose()?
+                    .unwrap_or(input.style);
+                for values in [input.bank, language, style] {
                     row[cursor..cursor + values.len()].copy_from_slice(values);
                     cursor += values.len();
                 }

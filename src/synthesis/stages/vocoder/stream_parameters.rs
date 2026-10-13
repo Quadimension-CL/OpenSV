@@ -16,6 +16,7 @@ use super::{
     spectral_heads::SpectralHeads,
     stage::{VocoderParameters, VocoderStage},
     stream_queue::FrameQueue,
+    voice_control::{SpectralControl, VoiceControl},
 };
 
 /// All queues share input-frame zero. A branch may get ahead of another, but
@@ -35,6 +36,7 @@ pub(crate) struct ParameterStream<'a> {
     harmonic: FrameQueue,
     excitation: VecDeque<ExcitationFrame>,
     metadata: VecDeque<FrameMetadata>,
+    voice_controls: VecDeque<SpectralControl>,
 }
 
 impl<'a> ParameterStream<'a> {
@@ -62,6 +64,7 @@ impl<'a> ParameterStream<'a> {
             harmonic: FrameQueue::new(10),
             excitation: VecDeque::new(),
             metadata: VecDeque::new(),
+            voice_controls: VecDeque::new(),
         })
     }
 
@@ -72,6 +75,7 @@ impl<'a> ParameterStream<'a> {
         &mut self,
         physical: &Sequence,
         controls: Option<&Sequence>,
+        voice_controls: Option<&[VoiceControl]>,
         final_batch: bool,
     ) -> Result<VocoderParameters> {
         #[cfg(feature = "synth-profile")]
@@ -84,6 +88,24 @@ impl<'a> ParameterStream<'a> {
         physical.validate()?;
         let metadata = metadata::from_timbre(controls, physical.frames)?;
         let normalized = self.stage.condition.normalize(physical)?;
+        if voice_controls.is_some_and(|values| values.len() != physical.frames) {
+            return Err(VoiceError::new(
+                "Vocoder voice controls do not align with acoustic frames",
+            ));
+        }
+        for frame in 0..physical.frames {
+            let voice = voice_controls.map_or_else(VoiceControl::default, |values| values[frame]);
+            voice.validate()?;
+            let row = physical.frame(frame)?;
+            if !row[2].is_finite() {
+                return Err(VoiceError::new("Invalid vocoder physical source shape"));
+            }
+            self.voice_controls.push_back(SpectralControl {
+                voice,
+                f0_hz: row[1],
+                shape: row[2],
+            });
+        }
         let input_frames = self
             .input_frames
             .checked_add(physical.frames)
@@ -177,6 +199,7 @@ impl<'a> ParameterStream<'a> {
                 self.harmonic.frames(),
                 self.excitation.len(),
                 self.metadata.len(),
+                self.voice_controls.len(),
             ])
             .min()
             .expect("vocoder has output branches");
@@ -197,7 +220,8 @@ impl<'a> ParameterStream<'a> {
                 || self.normalized.frames() != frames
                 || self.harmonic.frames() != frames
                 || self.excitation.len() != frames
-                || self.metadata.len() != frames)
+                || self.metadata.len() != frames
+                || self.voice_controls.len() != frames)
         {
             return Err(VoiceError::new(
                 "Vocoder parameter branches ended with unaligned frame counts",
@@ -212,6 +236,7 @@ impl<'a> ParameterStream<'a> {
         let harmonic_parameters = self.harmonic.take(frames)?;
         let excitation = self.excitation.drain(..frames).collect();
         let metadata = self.metadata.drain(..frames).collect();
+        let voice_controls = self.voice_controls.drain(..frames).collect();
         self.output_frames = output_frames;
         Ok(VocoderParameters {
             normalized,
@@ -219,6 +244,7 @@ impl<'a> ParameterStream<'a> {
             harmonic_parameters,
             excitation,
             metadata,
+            voice_controls,
         })
     }
 }

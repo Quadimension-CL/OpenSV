@@ -15,15 +15,17 @@ pub struct PreparedPitchControls {
     tempo: TempoMapping,
     content_offset: GlobalBlick,
     pitch_offset: i32,
+    tuning_semitones: f64,
 }
 
 impl PreparedPitchControls {
-    pub(super) fn new(input: &OwnerInput) -> Option<Self> {
+    pub(super) fn new(input: &OwnerInput, tuning_semitones: f64) -> Option<Self> {
         (!input.pitch_controls.is_empty()).then(|| Self {
             controls: input.pitch_controls.clone(),
             tempo: input.tempo.clone(),
             content_offset: input.content_offset,
             pitch_offset: input.pitch_offset,
+            tuning_semitones,
         })
     }
 
@@ -94,6 +96,10 @@ impl PreparedPitchControls {
         if !pitch.is_finite() || !(0.0..=127.0).contains(&pitch) {
             return Err(VoiceError::new("Pitch control is outside MIDI range"));
         }
-        Ok(pitch as f32)
+        let tuned = pitch + self.tuning_semitones;
+        if !tuned.is_finite() {
+            return Err(VoiceError::new("Pitch control tuning is not finite"));
+        }
+        Ok(tuned as f32)
     }
 }

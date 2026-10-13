@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use crate::synthesis::{
+    inference::Sequence,
     stages::f0::{TimedPhone, features::FrameFeatureInputs, frontend::FrontendNote},
     voice::{Result, VoiceError},
 };
@@ -21,6 +22,9 @@ pub struct TimbreRequest<'a> {
     /// The duration model's paired boundary/transition predictions.
     pub phone_impulses: Option<&'a [Option<PhoneImpulse>]>,
     pub frame_controls: Option<&'a [FrameControl]>,
+    /// Full-rate, full-owner vocal-mode weights in the model's style order.
+    pub primary_style_weights: Option<&'a Sequence>,
+    pub secondary_style_weights: Option<&'a Sequence>,
     pub requested_frame: usize,
 }
 
@@ -170,6 +174,12 @@ impl<'tree> TimbreNetwork<'tree> {
             controls: request.frame_controls,
             requested_frame: request.requested_frame,
         })?;
-        TimbreStream::from_prepared(self, features, &records)
+        TimbreStream::from_prepared(
+            self,
+            features,
+            &records,
+            request.primary_style_weights,
+            request.secondary_style_weights,
+        )
     }
 }

@@ -17,12 +17,9 @@ pub(super) fn prepare(
     contract: Contract,
     log_hz: Vec<f32>,
 ) -> Result<Records> {
-    if input.notes.len() != input.note_modulation.len()
-        || input.phone_impulses.is_some()
-        || input.frame_controls.is_some()
-    {
+    if input.notes.len() != input.note_modulation.len() || input.phone_impulses.is_some() {
         return Err(VoiceError::new(
-            "Compatible acoustics requires unmodified frame conditions",
+            "DDS acoustics requires aligned note modulation and no phone impulses",
         ));
     }
     let mut note_frames = vec![0_usize; input.notes.len()];

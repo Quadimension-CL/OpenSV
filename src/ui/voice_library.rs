@@ -3,6 +3,7 @@ mod context;
 mod language;
 mod management;
 mod panel;
+mod parameters;
 mod paths;
 mod selector;
 mod widgets;
@@ -16,6 +17,7 @@ use eframe::egui::*;
 
 pub use management::dialogs;
 pub use panel::show;
+pub(crate) use parameters::end_frame as end_parameter_frame;
 pub use paths::settings;
 pub use selector::popup;
 

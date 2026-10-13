@@ -9,6 +9,7 @@ mod queue;
 mod records;
 mod sampling;
 mod stream;
+mod styles;
 
 use std::sync::Arc;
 
@@ -43,6 +44,10 @@ pub struct Sv1TimbreNetwork<'a> {
 }
 
 impl<'a> Sv1TimbreNetwork<'a> {
+    pub fn frame_seconds(&self) -> f64 {
+        f64::from(self.frontend.frame_seconds)
+    }
+
     pub fn prepare(tree: &'a PreparedTree) -> Result<Self> {
         Self::prepare_contract(tree, Contract::Compatible)
     }

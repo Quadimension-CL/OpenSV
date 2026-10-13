@@ -1,5 +1,7 @@
 //! Persistent source/filter program, joined by acoustic frame index.
 
+use std::collections::VecDeque;
+
 use crate::synthesis::{
     inference::{ModelRuntime, Sequence},
     voice::{Result, VoiceError},
@@ -12,6 +14,7 @@ use super::{
     postfilter::Postfilter,
     stage::{VocoderParameters, VocoderStage},
     stream_queue::{FrameQueue, paired},
+    voice_control::{Component, SpectralControl},
 };
 
 pub(crate) struct SignalStream {
@@ -24,6 +27,7 @@ pub(crate) struct SignalStream {
     hop: usize,
     trailing_scalar: f32,
     spectra: [FrameQueue; 3],
+    controls: [VecDeque<SpectralControl>; 3],
     normalized: FrameQueue,
     source_harmonic: FrameQueue,
     source_modulated: FrameQueue,
@@ -38,14 +42,20 @@ impl SignalStream {
     pub(crate) fn new(stage: &VocoderStage<'_>) -> Result<Self> {
         let hop = stage.condition.frame_samples;
         let period = stage.condition.frame_seconds;
-        let make_filter =
-            |node| SpectralFilterStream::new(SpectralFilterConfig::prepare(stage.tree, node)?, hop);
+        let make_filter = |node, component| {
+            SpectralFilterStream::new(
+                SpectralFilterConfig::prepare(stage.tree, node)?,
+                hop,
+                stage.condition.sample_rate,
+                component,
+            )
+        };
         Ok(Self {
             source: Excitation::new(hop, period, stage.config.excitation_log_gain.exp())?,
             gain: GainFilter::prepare(stage.tree, stage.modules.coefficients, hop, period)?,
-            harmonic_filter: make_filter(stage.modules.harmonic_filter)?,
-            modulated_filter: make_filter(stage.modules.third_filter)?,
-            noise_filter: make_filter(stage.modules.noise_filter)?,
+            harmonic_filter: make_filter(stage.modules.harmonic_filter, Component::Primary)?,
+            modulated_filter: make_filter(stage.modules.third_filter, Component::Primary)?,
+            noise_filter: make_filter(stage.modules.noise_filter, Component::Secondary)?,
             postfilter: Postfilter::prepare(
                 stage.tree,
                 &stage.modules,
@@ -55,6 +65,7 @@ impl SignalStream {
             hop,
             trailing_scalar: stage.config.trailing_scalar,
             spectra: std::array::from_fn(|_| FrameQueue::new(512)),
+            controls: std::array::from_fn(|_| VecDeque::new()),
             normalized: FrameQueue::new(72),
             source_harmonic: FrameQueue::new(hop),
             source_modulated: FrameQueue::new(hop),
@@ -74,6 +85,9 @@ impl SignalStream {
     ) -> Result<(Sequence, Sequence)> {
         if parameters.normalized.frames == 0 && !end {
             return Ok((Sequence::zeros(0, self.hop)?, Sequence::zeros(0, self.hop)?));
+        }
+        for queue in &mut self.controls {
+            queue.extend(parameters.voice_controls.iter().copied());
         }
         self.normalized.push(parameters.normalized)?;
         for (queue, spectrum) in self.spectra.iter_mut().zip(parameters.spectra) {
@@ -119,13 +133,23 @@ impl SignalStream {
         self.filtered[0].push({
             #[cfg(feature = "synth-profile")]
             let _profile = crate::synthesis::profiling::span("vocoder.spectral_filter.harmonic");
-            self.harmonic_filter.process(&spectrum, &source, end)?
+            self.harmonic_filter.process(
+                &spectrum,
+                &source,
+                &take_controls(&mut self.controls[0], spectrum.frames)?,
+                end,
+            )?
         })?;
         let (spectrum, source) = paired(&mut self.spectra[2], &mut self.modulated, end)?;
         self.filtered[2].push({
             #[cfg(feature = "synth-profile")]
             let _profile = crate::synthesis::profiling::span("vocoder.spectral_filter.modulated");
-            self.modulated_filter.process(&spectrum, &source, end)?
+            self.modulated_filter.process(
+                &spectrum,
+                &source,
+                &take_controls(&mut self.controls[2], spectrum.frames)?,
+                end,
+            )?
         })?;
 
         let (condition, source) = paired(&mut self.normalized, &mut self.source_postfilter, end)?;
@@ -135,10 +159,18 @@ impl SignalStream {
         self.filtered[1].push({
             #[cfg(feature = "synth-profile")]
             let _profile = crate::synthesis::profiling::span("vocoder.spectral_filter.noise");
-            self.noise_filter.process(&spectrum, &noise, end)?
+            self.noise_filter.process(
+                &spectrum,
+                &noise,
+                &take_controls(&mut self.controls[1], spectrum.frames)?,
+                end,
+            )?
         })?;
         let frames = self.filtered.iter().map(FrameQueue::frames).min().unwrap();
-        if end && self.filtered.iter().any(|queue| queue.frames() != frames) {
+        if end
+            && (self.filtered.iter().any(|queue| queue.frames() != frames)
+                || self.controls.iter().any(|queue| !queue.is_empty()))
+        {
             return Err(VoiceError::new("Vocoder final PCM branches do not align"));
         }
         let mut primary = self.filtered[0].take(frames)?;
@@ -148,4 +180,16 @@ impl SignalStream {
         }
         Ok((primary, self.filtered[1].take(frames)?))
     }
+}
+
+fn take_controls(
+    queue: &mut VecDeque<SpectralControl>,
+    frames: usize,
+) -> Result<Vec<SpectralControl>> {
+    if queue.len() < frames {
+        return Err(VoiceError::new(
+            "Vocoder spectral controls lost frame alignment",
+        ));
+    }
+    Ok(queue.drain(..frames).collect())
 }

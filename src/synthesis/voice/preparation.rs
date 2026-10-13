@@ -8,6 +8,7 @@ pub struct PreparedVoice {
     files: Vec<PreparedFile>,
     pub family: VoiceFamily,
     pub f0_enhancement: Option<f32>,
+    pub style_names: Vec<String>,
     summary: OnceLock<PreparationSummary>,
 }
 
@@ -47,11 +48,13 @@ impl PreparedVoice {
         files: Vec<PreparedFile>,
         family: VoiceFamily,
         f0_enhancement: Option<f32>,
+        style_names: Vec<String>,
     ) -> Self {
         let model = Self {
             files,
             family,
             f0_enhancement,
+            style_names,
             summary: OnceLock::new(),
         };
         // Metadata is prepared with weights on the loader thread, not per UI frame.

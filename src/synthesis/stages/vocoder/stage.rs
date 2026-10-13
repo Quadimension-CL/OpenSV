@@ -12,6 +12,7 @@ use super::{
     output::FrameMetadata,
     sampling::PositionalGru,
     stream_parameters::ParameterStream,
+    voice_control::{SpectralControl, VoiceControl},
 };
 
 #[derive(Clone)]
@@ -31,6 +32,7 @@ pub struct VocoderParameters {
     pub harmonic_parameters: Sequence,
     pub excitation: Vec<ExcitationFrame>,
     pub metadata: Vec<FrameMetadata>,
+    pub(crate) voice_controls: Vec<SpectralControl>,
 }
 
 impl<'a> VocoderStage<'a> {
@@ -88,7 +90,8 @@ impl<'a> VocoderStage<'a> {
         &self,
         physical: &Sequence,
         controls: Option<&Sequence>,
+        voice_controls: Option<&[VoiceControl]>,
     ) -> Result<VocoderParameters> {
-        ParameterStream::new(self.clone())?.process(physical, controls, true)
+        ParameterStream::new(self.clone())?.process(physical, controls, voice_controls, true)
     }
 }

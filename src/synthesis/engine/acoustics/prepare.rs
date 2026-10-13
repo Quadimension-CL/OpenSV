@@ -172,6 +172,13 @@ pub fn prepare_acoustics(
                 crate::synthesis::score::FRAME_SECONDS,
                 note_frames.iter().sum(),
             )?;
+            let styles = crate::synthesis::engine::voice_controls::sample_styles(
+                phrase,
+                stage.style_names(),
+                crate::model::VocalModeComponent::Pitch,
+                crate::synthesis::score::FRAME_SECONDS,
+                note_frames.iter().sum(),
+            )?;
             let pitch = stage.predict_singing_prepared(
                 &phrase.notes,
                 &phones,
@@ -180,6 +187,7 @@ pub fn prepare_acoustics(
                     pitch_seeds: Some(&pitch_seeds),
                     absolute_pitch: controls.as_deref(),
                     expressiveness: expressiveness.as_deref(),
+                    style_weights: styles.as_ref(),
                 },
                 None,
             )?;

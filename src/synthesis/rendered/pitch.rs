@@ -5,8 +5,8 @@ use crate::synthesis::{
 };
 use std::{ops::Range, sync::Arc};
 
-/// Final model pitch on the same frame clock used by timbre synthesis.
-/// Values are absolute MIDI pitches, including the group's pitch offset.
+/// Pitch on the model's frame clock, expressed in editor score coordinates.
+/// The group's pitch offset is included; voice tuning is removed for display.
 #[derive(Clone, Debug)]
 pub struct PitchTrack {
     pub start_seconds: f64,
@@ -31,7 +31,7 @@ impl PitchTrack {
     /// uses cumulative model-frame boundaries; version 2 uses per-record counts.
     pub(crate) fn from_phrase_with_frames(
         phrase: &PreparedPhrase,
-        prediction: PitchResult,
+        mut prediction: PitchResult,
         frames: &[usize],
     ) -> Result<Self> {
         if frames.len() != phrase.notes.len() {
@@ -73,6 +73,15 @@ impl PitchTrack {
             return Err(VoiceError::new(
                 "Rendered pitch does not cover the prepared note timeline",
             ));
+        }
+        let tuning = phrase
+            .voice_controls
+            .as_ref()
+            .map_or(0.0, |controls| controls.tuning_semitones() as f32);
+        if tuning != 0.0 {
+            for value in &mut prediction.pitch {
+                *value -= tuning;
+            }
         }
         Ok(Self {
             start_seconds: phrase.start_seconds,

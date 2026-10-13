@@ -16,7 +16,7 @@ mod window;
 pub use prepared::PreparedPitchFeatures;
 
 use crate::synthesis::{
-    inference::ops::range_normalizer::RangeNormalizer,
+    inference::{Sequence, ops::range_normalizer::RangeNormalizer},
     voice::{PreparedTree, Result, VoiceError},
 };
 
@@ -48,6 +48,8 @@ pub struct PitchRequest<'a> {
     pub absolute_controls: &'a [f32],
     /// The pitch-expressiveness parameter sampled on the 5 ms frame grid.
     pub expressiveness: &'a [f32],
+    /// Vocal-mode weights for every owner frame, in model style-name order.
+    pub style_weights: Option<&'a Sequence>,
 }
 
 #[derive(Default)]
@@ -55,6 +57,7 @@ pub struct PitchInputControls<'a> {
     pub pitch_seeds: Option<&'a [Option<u32>]>,
     pub absolute_pitch: Option<&'a [f32]>,
     pub expressiveness: Option<&'a [f32]>,
+    pub style_weights: Option<&'a Sequence>,
 }
 
 #[derive(Clone, Debug)]
@@ -79,6 +82,10 @@ pub struct F0Stage<'a> {
 }
 
 impl<'a> F0Stage<'a> {
+    pub fn style_names(&self) -> &[String] {
+        &self.style.names
+    }
+
     pub fn prepare(tree: &'a PreparedTree) -> Result<Self> {
         #[cfg(feature = "synth-profile")]
         let _profile = crate::synthesis::profiling::span("f0.prepare");
@@ -174,6 +181,7 @@ impl<'a> F0Stage<'a> {
             pitch_seeds,
             absolute_pitch: absolute_controls,
             expressiveness,
+            style_weights,
         } = controls;
         if pitch_seeds.is_some_and(|seeds| seeds.len() != notes.len()) {
             return Err(VoiceError::new(
@@ -238,6 +246,7 @@ impl<'a> F0Stage<'a> {
             modulation: &modulation,
             absolute_controls,
             expressiveness,
+            style_weights,
         };
         match frame_range {
             Some(frames) => self.predict_prepared_frames(&request, prepared, frames),
