@@ -36,7 +36,11 @@ pub fn show(app: &mut App, ui: &mut Ui) {
         {
             transport.toggle();
         }
-        if ui.add(button(Icon::Stop, "停止（Ctrl+Space）")).clicked() {
+        if ui
+            .add(button(Icon::Stop, "停止（Ctrl+Space）"))
+            .on_hover_text(crate::ui::chrome::shortcut_text("Ctrl+Space"))
+            .clicked()
+        {
             transport.stop();
         }
         ui.add_enabled(false, button(Icon::Record, "录制（尚未接入）"));

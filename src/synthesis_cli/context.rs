@@ -1,4 +1,4 @@
-//! Explicit model-context imports, shared by Windows and Linux CLI entry points.
+//! Explicit model-context imports, shared by the Windows, Linux and macOS CLI entry points.
 
 use rynthv::synthesis::voice::{VoiceInventory, session_identity};
 use serde_json::{Value, json};

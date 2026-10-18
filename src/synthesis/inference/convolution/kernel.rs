@@ -2,6 +2,11 @@
 //! dimension always traverses taps, then inputs; no horizontal sum or FMA.
 
 mod parallel;
+#[cfg(target_arch = "x86_64")]
+mod sse2;
+
+#[cfg(not(target_arch = "x86_64"))]
+#[path = "kernel/portable.rs"]
 mod sse2;
 
 use super::{
