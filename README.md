@@ -1,18 +1,24 @@
 # RynthV
 
 <p align="center">
-  <img src="assets/branding/app-icon.png" alt="RynthV 图标" width="96" height="96">
+  <img src="assets/branding/app-icon.png" alt="RynthV icon" width="96" height="96">
 </p>
 
-使用 Rust + egui 开发的歌声合成引擎。
+A singing voice synthesis engine built with Rust and egui.
 
-## 构建与运行
+[简体中文](README.zh-CN.md) · [日本語](README.ja.md) · [한국어](README.ko.md) · [Русский](README.ru.md)
 
-需要 Rust 1.99.0，版本由 `rust-toolchain.toml` 指定。
+> **This fork adds macOS support.** See [macOS](#macos) below and
+> [MACOS-SUPPORT.md](MACOS-SUPPORT.md) for what changed and why.
+> Upstream: [cubeww/rynthv](https://github.com/cubeww/rynthv).
+
+## Building and running
+
+Requires Rust 1.99.0, pinned by `rust-toolchain.toml`.
 
 ### Windows
 
-需要 MSVC、Windows SDK 和支持 DX12 的显卡。
+Needs MSVC, the Windows SDK and a GPU with DX12 support.
 
 ```powershell
 cargo run --release
@@ -20,7 +26,7 @@ cargo run --release
 
 ### Linux
 
-支持 X11 / Wayland，使用 Vulkan 或 OpenGL。Ubuntu 24.04 构建示例：
+Supports X11 and Wayland with Vulkan or OpenGL. Build example for Ubuntu 24.04:
 
 ```sh
 sudo apt install build-essential pkg-config libasound2-dev libwayland-dev libxkbcommon-dev \
@@ -29,17 +35,72 @@ cargo build --release --locked --bins
 ./target/release/rynthv
 ```
 
-需要可用的图形驱动、ALSA 音频设备和桌面对应的 XDG 门户后端（KDE 使用 `xdg-desktop-portal-kde`）。
+Requires a working graphics driver, an ALSA audio device and a desktop XDG portal backend
+(`xdg-desktop-portal-kde` on KDE).
 
-## 声库与配置
+### macOS
 
-首次使用请在设置中手动选择声库目录和发音词典目录，程序不会自动探测资源路径，也不附带声库、词典或用户模型上下文。
+Needs macOS 11 or newer and a GPU with Metal support. On Apple Silicon the build is native arm64.
 
-| 声库类型 | Windows | Linux |
+```sh
+cargo build --release --bins
+./target/release/rynthv
+```
+
+No extra system packages are required: Metal is the rendering backend, CoreAudio provides audio
+output, and the UI font is loaded from the system (PingFang SC, falling back to Hiragino Sans GB
+and then STHeiti).
+
+Because the project pins Rust 1.99.0 in `rust-toolchain.toml`, `rustup` installs that toolchain
+automatically on first build.
+
+## Voice libraries and configuration
+
+On first launch, select the voice library directory and the pronunciation dictionary directory
+in Settings. The program never probes resource paths automatically and ships without voice
+libraries, dictionaries or user model contexts.
+
+| Voice type | Windows | Linux | macOS |
+| --- | --- | --- | --- |
+| First-generation voices | Supported | Supported | Supported |
+| Second-generation voices | Model context required | Model context required | Model context required |
+
+Configuration directories:
+
+| Platform | Configuration | Model context |
 | --- | --- | --- |
-| 一代声库 | 支持 | 支持 |
-| 二代声库 | 需要导入模型上下文 | 需要导入模型上下文 |
+| Windows | `%LOCALAPPDATA%/RynthV` | `%APPDATA%/RynthV/context.json` |
+| Linux | `$XDG_CONFIG_HOME/RynthV` (or `$HOME/.config/RynthV`) | `context.json` in the configuration directory |
+| macOS | `~/Library/Application Support/RynthV` | `context.json` in the configuration directory |
 
-配置目录：Windows 为 `%LOCALAPPDATA%/RynthV`，Linux 为 `$XDG_CONFIG_HOME/RynthV`（未设置时为 `$HOME/.config/RynthV`）。模型上下文在 Windows 保存在 `%APPDATA%/RynthV/context.json`，Linux 保存在上述配置目录的 `context.json`。
+The command-line synthesis and diagnostic tools are documented under
+`cargo run --release --locked --bin rynthv-synth -- --help`.
 
-命令行合成与诊断工具的用法可通过 `cargo run --release --locked --bin rynthv-synth -- --help` 查看。
+## Importing a model context on macOS
+
+Second-generation voices need a model context. Three of the four sources work on macOS:
+
+| Source | Windows | Linux | macOS |
+| --- | --- | --- | --- |
+| Context file | Yes | Yes | Yes |
+| Manual entry | Yes | Yes | Yes |
+| Local session file | Yes | No | No |
+| From the original editor (online) | Yes | No | No |
+
+The last two read the original editor's session file or process memory, which only exists on
+Windows x64. On macOS the UI disables those two sources and points at the context-file and
+manual-entry paths instead.
+
+## Platform support at a glance
+
+| Feature | Windows | Linux | macOS |
+| --- | --- | --- | --- |
+| Editor UI | DX12 | Vulkan / OpenGL | Metal |
+| Audio output | WASAPI | ALSA | CoreAudio |
+| UI font | Microsoft YaHei | fontconfig (`zh-cn`) | PingFang SC / Hiragino Sans GB / STHeiti |
+| Primary shortcut modifier | Ctrl | Ctrl | ⌘ Command |
+| Native CPU | x86-64 | x86-64 / arm64 | arm64 (Apple Silicon) |
+
+## License
+
+MIT. This fork keeps the original copyright notice; see [LICENSE](LICENSE).
