@@ -53,7 +53,7 @@ impl F0Stage<'_> {
         let mut tokens = Vec::with_capacity(phones.len());
         let mut vowel_mask = Vec::with_capacity(frames);
         let mut last_note = 0;
-        let mut per_note_frames = vec![0_usize; notes.len()];
+        let mut total_phone_frames = 0_usize;
         for phone in phones {
             if phone.note_index >= notes.len() || phone.note_index < last_note {
                 return Err(VoiceError::new(
@@ -61,9 +61,14 @@ impl F0Stage<'_> {
                 ));
             }
             last_note = phone.note_index;
-            per_note_frames[phone.note_index] = per_note_frames[phone.note_index]
+            total_phone_frames = total_phone_frames
                 .checked_add(phone.frames)
                 .ok_or_else(|| VoiceError::new("F0 phone duration sum overflow"))?;
+            if total_phone_frames > frames {
+                return Err(VoiceError::new(
+                    "F0 phone timeline exceeds the note timeline",
+                ));
+            }
             let resolved = self.tree.resolve_phone(&phone.language, &phone.token)?;
             let table = self
                 .tree
@@ -88,9 +93,11 @@ impl F0Stage<'_> {
             phone_frames.push(phone.frames);
             tokens.push(phone.token.clone());
         }
-        if per_note_frames != note_features.frame_counts || vowel_mask.len() != frames {
+        // Phone ownership conditions the feature rows; its edited boundaries
+        // expand independently from the score note positions.
+        if total_phone_frames != frames || vowel_mask.len() != frames {
             return Err(VoiceError::new(
-                "F0 corrected phone frames do not cover their notes",
+                "F0 phone and note timelines have different total frame counts",
             ));
         }
         Ok(PitchInput {

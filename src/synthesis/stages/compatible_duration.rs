@@ -58,15 +58,26 @@ impl<'a> CompatibleDurationStage<'a> {
         configuration::validate(tree).map(|_| ())
     }
 
-    pub fn predict_explicit(&self, records: &[DurationRecord]) -> Result<DurationResult> {
+    pub fn predict_explicit(
+        &self,
+        records: &[DurationRecord],
+        phrase_start_seconds: f64,
+    ) -> Result<DurationResult> {
         let phones = frontend::prepare_explicit_typed(self.tree, records, FRONTEND_TYPE_ID)?;
         let prediction = self.predict(phones)?;
-        let durations =
-            frontend::postprocess_typed(self.tree, records, &prediction.scalars, FRONTEND_TYPE_ID)?;
-        Ok(DurationResult {
-            durations,
+        let allocation = frontend::postprocess_typed(
+            self.tree,
+            records,
+            &prediction.scalars,
+            FRONTEND_TYPE_ID,
+            phrase_start_seconds,
+        )?;
+        DurationResult::new(
+            records,
             prediction,
-        })
+            allocation.default_durations,
+            allocation.durations,
+        )
     }
 
     fn predict(&self, phones: Vec<PhoneFeatures>) -> Result<DurationPrediction> {
@@ -109,6 +120,8 @@ impl<'a> CompatibleDurationStage<'a> {
             // predictions. Empty vectors explicitly preserve that absence.
             impulse_values: Vec::new(),
             impulse_positions: Vec::new(),
+            default_impulse_values: Vec::new(),
+            default_impulse_positions: Vec::new(),
         })
     }
 }

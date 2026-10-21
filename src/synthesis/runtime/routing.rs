@@ -127,6 +127,7 @@ impl Runtime {
         self.planner
             .update(project, revision, |owner| identities.get(&owner).cloned());
         self.sync_visuals();
+        self.sync_phonemes();
         let solo = crate::synthesis::mixing_options::validate_project_mixer(
             project.extra.get("projectMixer"),
         )

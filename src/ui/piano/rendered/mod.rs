@@ -1,8 +1,11 @@
 //! Read-only overlays of completed synthesis. Painting never scans whole PCM
 //! buffers or changes note interaction regions.
+mod phonemes;
 mod pitch;
 mod waveform;
 mod waveform_flash;
+
+pub use phonemes::draw as phonemes;
 
 use std::{
     ops::Range,

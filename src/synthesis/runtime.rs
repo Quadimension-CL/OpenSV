@@ -5,6 +5,7 @@ mod export;
 mod library;
 mod metronome;
 mod mixer;
+mod phonemes;
 mod playback;
 mod recordings;
 mod routing;
@@ -16,7 +17,7 @@ mod worker;
 use super::{
     plan::{OwnerId, Planner},
     render_cache::{CacheStats, PublishedOwner},
-    rendered::VisualTimeline,
+    rendered::{PhonemeSnapshot, VisualTimeline},
     settings::VoiceSelection,
     voice::VoiceInventory,
 };
@@ -59,6 +60,7 @@ pub struct Runtime {
     playback: playback::Playback,
     export_owners: Vec<PublishedOwner>,
     visuals: BTreeMap<OwnerId, VisualTimeline>,
+    phonemes: BTreeMap<OwnerId, PhonemeSnapshot>,
     export: Option<Receiver<Result<Vec<PathBuf>, String>>>,
     last_revision: Option<u64>,
     request_serial: u64,
@@ -94,6 +96,7 @@ impl Runtime {
             playback: playback::Playback::new(repaint.clone()),
             export_owners: Vec::new(),
             visuals: BTreeMap::new(),
+            phonemes: BTreeMap::new(),
             export: None,
             last_revision: None,
             request_serial: 0,
@@ -148,6 +151,8 @@ impl Runtime {
     }
     pub fn reload_voice(&mut self, key: &VoiceSelection) {
         self.voices.remove(key);
+        self.phonemes
+            .retain(|owner, _| self.routes.get(owner) != Some(key));
         self.last_revision = None;
         self.export_owners
             .retain(|owner| self.routes.get(&owner.owner) != Some(key));
@@ -166,6 +171,7 @@ impl Runtime {
         self.project_error = None;
         self.solo_tracks.clear();
         self.visuals.clear();
+        self.phonemes.clear();
         self.desired_playing = false;
         self.desired_seconds = 0.0;
         self.loop_range = None;
@@ -216,6 +222,9 @@ impl Runtime {
     }
     pub fn visuals(&self, owner: OwnerId) -> Option<&VisualTimeline> {
         self.visuals.get(&owner)
+    }
+    pub fn phonemes(&self, owner: OwnerId) -> Option<&PhonemeSnapshot> {
+        self.phonemes.get(&owner)
     }
     pub fn is_exporting(&self) -> bool {
         self.export.is_some()

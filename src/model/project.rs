@@ -64,6 +64,7 @@ pub struct Group {
     pub uuid: String,
     pub notes: Vec<Note>,
     pub parameters: BTreeMap<String, Automation>,
+    pub vocal_modes: BTreeMap<String, Automation>,
     pub pitch_controls: Vec<PitchControl>,
     #[serde(flatten)]
     pub extra: Extra,
@@ -78,11 +79,9 @@ impl Group {
                 .into_iter()
                 .map(|p| (p.key().into(), Automation::default()))
                 .collect(),
+            vocal_modes: BTreeMap::new(),
             pitch_controls: Vec::new(),
-            extra: BTreeMap::from([
-                ("vocalModes".into(), json!({})),
-                ("musicalScale".into(), json!({"type": "Major", "root": "C"})),
-            ]),
+            extra: BTreeMap::from([("musicalScale".into(), json!({"type": "Major", "root": "C"}))]),
         }
     }
 }

@@ -1,3 +1,4 @@
+mod automation;
 mod clipboard;
 mod commands;
 mod dictionary;
@@ -9,6 +10,7 @@ mod lyrics;
 mod midi;
 mod note_properties;
 mod performance;
+mod phoneme;
 mod retakes;
 mod time_events;
 mod transport;
@@ -43,6 +45,7 @@ pub struct Editor {
     history: History,
     performance_edit: Option<performance::PerformanceEdit>,
     voice_edit: Option<voice_parameters::VoiceEdit>,
+    phoneme_edit: Option<phoneme::PhonemeEdit>,
 }
 impl Editor {
     pub fn new(project: Project) -> Self {
@@ -62,6 +65,7 @@ impl Editor {
             history: History::default(),
             performance_edit: None,
             voice_edit: None,
+            phoneme_edit: None,
         }
     }
     pub fn current_track(&self) -> &Track {
@@ -121,6 +125,7 @@ impl Editor {
     pub fn finish(&mut self) {
         self.performance_edit = None;
         self.voice_edit = None;
+        self.phoneme_edit = None;
         if self.history.finish(&self.project) {
             self.revision += 1;
             self.reconcile();
@@ -129,6 +134,7 @@ impl Editor {
     pub fn cancel(&mut self) {
         self.performance_edit = None;
         self.voice_edit = None;
+        self.phoneme_edit = None;
         if let Some(selection) = self.history.cancel(&mut self.project) {
             self.restore_selection(selection);
         }
@@ -151,6 +157,7 @@ impl Editor {
     pub fn undo(&mut self) {
         self.performance_edit = None;
         self.voice_edit = None;
+        self.phoneme_edit = None;
         let selection = self.selection();
         if let Some(selection) = self.history.undo(&mut self.project, selection) {
             self.revision += 1;
@@ -160,6 +167,7 @@ impl Editor {
     pub fn redo(&mut self) {
         self.finish_performance_edit();
         self.finish_voice_edit();
+        self.finish_phoneme_edit();
         let selection = self.selection();
         if let Some(selection) = self.history.redo(&mut self.project, selection) {
             self.revision += 1;

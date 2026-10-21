@@ -10,7 +10,7 @@ pub(super) struct Japanese {
 
 impl Japanese {
     pub(super) fn load(directory: &Path) -> Result<Self> {
-        let phones = PhoneTable::load(&directory.join("japanese-romaji-dict.txt"), false)?;
+        let phones = romaji(directory)?;
         let mut kana = HashMap::new();
         for name in [
             "japanese-hira2romaji-dict.txt",
@@ -116,6 +116,23 @@ impl Japanese {
         }
         Ok(result)
     }
+}
+
+fn romaji(directory: &Path) -> Result<PhoneTable> {
+    let mut table = PhoneTable::load(&directory.join("japanese-romaji-dict.txt"), false)?;
+    for line in read(&directory.join("japanese-romaji-phones.txt"))?.lines() {
+        let mut fields = line.trim_start_matches('\u{feff}').split_whitespace();
+        if let (Some(phone), Some(class)) = (fields.next(), fields.next())
+            && matches!(
+                class,
+                "stop" | "fricative" | "affricate" | "aspirate" | "liquid" | "nasal" | "semivowel"
+            )
+        {
+            // Syllable readings such as n -> N keep priority over literal consonants.
+            table.include_literal(phone);
+        }
+    }
+    Ok(table)
 }
 
 fn small_kana(ch: char) -> Option<&'static str> {

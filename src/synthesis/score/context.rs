@@ -96,7 +96,9 @@ fn silence(edge: &ScoreNote, duration_seconds: f64) -> ScoreNote {
                 .first()
                 .map_or_else(String::new, |phone| phone.language.clone()),
             token: "sil".into(),
-            onset_offset_seconds: None,
+            source: None,
+            attributes: Default::default(),
+            source_note_onset_seconds: None,
         }],
         kind: 1,
         flag: edge.flag,

@@ -48,14 +48,14 @@ pub(super) fn prepare(
             .normalize_scalar(0, (seconds + f64::from(0.01_f32)).ln() as f32, true)
             .map_err(|error| VoiceError::new(error.to_string()))?;
         for (left_index, phone) in record.phones.iter().enumerate() {
-            // SV1's explicit onset-offset representation is different from
-            // the SV2 boundary correction and is not part of this adapter.
-            if phone
-                .onset_offset_seconds
-                .is_some_and(|offset| offset != 0.0)
-            {
+            if phone.attributes.left_offset.is_some() {
                 return Err(VoiceError::new(
                     "SV1 synthesis does not yet support phoneme onset offsets",
+                ));
+            }
+            if phone.attributes.strength.is_some_and(|value| value != 0.0) {
+                return Err(VoiceError::new(
+                    "SV1 synthesis does not yet support phoneme strength controls",
                 ));
             }
             let resolved = tree.resolve_phone(&phone.language, &phone.token)?;

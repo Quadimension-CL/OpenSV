@@ -19,6 +19,9 @@ pub(super) fn show(app: &mut App, ui: &mut Ui) {
                     .clicked()
                 {
                     app.view.phonemes = !app.view.phonemes;
+                    if !app.view.phonemes {
+                        super::phonemes::phoneme_deactivate(app);
+                    }
                 }
                 for lane in &mut app.view.lanes {
                     let (response, closed) = tab(
@@ -50,9 +53,8 @@ pub(super) fn show(app: &mut App, ui: &mut Ui) {
     if let Some(id) = close {
         // Closing a view never removes the project's parameter curves.
         app.view.lanes.retain(|lane| lane.id != id);
-        if matches!(app.gesture, Some(Gesture::Parameter { lane, .. }) if lane == id) {
-            app.editor.finish();
-            app.gesture = None;
+        if matches!(&app.gesture, Some(Gesture::Parameter(gesture)) if gesture.lane() == id) {
+            super::lanes::finish_parameter(app, ui.ctx());
         }
         ui.ctx().request_repaint();
     }

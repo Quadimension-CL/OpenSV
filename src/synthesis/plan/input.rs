@@ -143,6 +143,10 @@ pub struct OwnerInput {
     pub pitch_offset: i32,
     pub notes: Vec<NoteInput>,
     pub automation: BTreeMap<String, Automation>,
+    pub vocal_modes: BTreeMap<String, Automation>,
+    pub track_automation: BTreeMap<String, Automation>,
+    pub track_vocal_modes: BTreeMap<String, Automation>,
+    pub track_automation_offset: GlobalBlick,
     pub pitch_controls: Vec<PitchControl>,
     pub group_options: Extra,
     pub voice: VoiceInput,
@@ -206,6 +210,18 @@ impl OwnerInput {
             pitch_offset: reference.pitch_offset,
             notes: group.notes.iter().map(NoteInput::from).collect(),
             automation: group.parameters.clone(),
+            vocal_modes: group.vocal_modes.clone(),
+            track_automation: if reference.id == track.main_ref.id {
+                BTreeMap::new()
+            } else {
+                track.main_group.parameters.clone()
+            },
+            track_vocal_modes: if reference.id == track.main_ref.id {
+                BTreeMap::new()
+            } else {
+                track.main_group.vocal_modes.clone()
+            },
+            track_automation_offset: GlobalBlick(track.main_ref.blick_offset),
             pitch_controls: group.pitch_controls.clone(),
             group_options: group_extensions(&group.extra),
             voice: VoiceInput {

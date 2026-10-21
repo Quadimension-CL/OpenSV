@@ -1,18 +1,38 @@
 use super::PreparedRenderAcoustics;
 use crate::synthesis::engine::PreparedModelFeatures;
-use crate::synthesis::stages::{
-    f0::expression::expression_controls,
-    timbre::records::{AcousticNote, PhoneImpulse},
+use crate::synthesis::{
+    stages::{
+        f0::{expression::expression_controls, frontend::frame_count},
+        timbre::records::{AcousticNote, PhoneImpulse},
+    },
+    voice::{Result, VoiceError},
 };
 
 impl PreparedRenderAcoustics {
-    pub fn modulation(&self) -> Vec<AcousticNote> {
-        let mut note_frames = vec![0_usize; self.prepared.phrase.notes.len()];
-        for phone in &self.prepared.phones {
-            // The preparation step already checked each note's frame sum.
-            note_frames[phone.note_index] += phone.frames;
-        }
-        self.prepared
+    pub fn modulation(&self) -> Result<Vec<AcousticNote>> {
+        let note_frames = match &self.prepared.features {
+            PreparedModelFeatures::Sv1Local => {
+                let mut frames = vec![0_usize; self.prepared.phrase.notes.len()];
+                for phone in &self.prepared.phones {
+                    let count = frames.get_mut(phone.note_index).ok_or_else(|| {
+                        VoiceError::new("Acoustic phone is outside its note records")
+                    })?;
+                    *count = count
+                        .checked_add(phone.frames)
+                        .ok_or_else(|| VoiceError::new("Acoustic note frame count overflows"))?;
+                }
+                frames
+            }
+            PreparedModelFeatures::Sv2 { .. } => self
+                .prepared
+                .phrase
+                .notes
+                .iter()
+                .map(frame_count)
+                .collect::<Result<Vec<_>>>()?,
+        };
+        Ok(self
+            .prepared
             .phrase
             .notes
             .iter()
@@ -33,7 +53,7 @@ impl PreparedRenderAcoustics {
                     .map(|controls| controls.position_b),
                 },
             })
-            .collect()
+            .collect())
     }
 
     pub fn impulses(&self) -> Vec<Option<PhoneImpulse>> {

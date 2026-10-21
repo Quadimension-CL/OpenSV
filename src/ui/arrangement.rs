@@ -11,6 +11,10 @@ use eframe::egui::*;
 
 pub fn show(app: &mut App, ui: &mut Ui) {
     let rect = ui.max_rect();
+    if ui.rect_contains_pointer(rect) && ui.input(|input| input.pointer.any_pressed()) {
+        super::lanes::parameter_deactivate(app);
+        super::phonemes::phoneme_deactivate(app);
+    }
     ui.painter().rect_filled(rect, 4, CANVAS);
     let gutter = 250.0_f32.min(rect.width() * 0.36);
     let header = Rect::from_min_size(rect.min, vec2(rect.width(), 42.0));

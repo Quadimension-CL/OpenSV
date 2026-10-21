@@ -7,6 +7,7 @@ use crate::synthesis::{
 pub(super) struct PitchFrames {
     pub raw_log_hz: Vec<f32>,
     pub conditioning_log_hz: Vec<f32>,
+    pub projection_factors: Option<Vec<f32>>,
 }
 
 /// Interpolate physical pitch in Hz. Acoustic pitch conditioning is separate
@@ -25,7 +26,7 @@ pub(super) fn sample(
     {
         return Err(VoiceError::new("Invalid DDS acoustic pitch timeline"));
     }
-    validate_controls(controls, frames)?;
+    validate_controls(controls, frames, contract)?;
     let raw_hz = match contract {
         Contract::Compatible => {
             // The compatibility path consumes MIDI rows directly, truncating
@@ -69,10 +70,15 @@ pub(super) fn sample(
     Ok(PitchFrames {
         raw_log_hz,
         conditioning_log_hz,
+        projection_factors: projection_factors(controls)?,
     })
 }
 
-fn validate_controls(controls: Option<&[FrameControl]>, frames: usize) -> Result<()> {
+fn validate_controls(
+    controls: Option<&[FrameControl]>,
+    frames: usize,
+    contract: Contract,
+) -> Result<()> {
     let Some(controls) = controls else {
         return Ok(());
     };
@@ -84,19 +90,59 @@ fn validate_controls(controls: Option<&[FrameControl]>, frames: usize) -> Result
     for control in controls {
         if !control.pitch_ratio.is_finite()
             || control.pitch_ratio <= 0.0
-            || control.scalars.iter().any(|value| !value.is_finite())
+            || !control.scalars[0].is_finite()
+            || control.scalars[1].is_infinite()
+            || (contract == Contract::Native && control.scalars[1].is_nan())
         {
             return Err(VoiceError::new(
                 "DDS frame controls require a finite positive pitch ratio and finite scalars",
             ));
         }
-        if control.scalars.iter().any(|&value| value != 0.0) {
+        if control.scalars[0] != 0.0 {
             return Err(VoiceError::new(
-                "DDS voices do not support acoustic frame scalar controls",
+                "DDS voices do not support mouth opening controls",
+            ));
+        }
+        if contract == Contract::Native && control.scalars[1] != 0.0 {
+            return Err(VoiceError::new(
+                "Native SV1 voices do not support phoneme strength controls",
             ));
         }
     }
     Ok(())
+}
+
+fn projection_factors(controls: Option<&[FrameControl]>) -> Result<Option<Vec<f32>>> {
+    let Some(controls) = controls.filter(|controls| {
+        controls
+            .iter()
+            .any(|control| !control.scalars[1].is_nan() && control.scalars[1] != 0.0)
+    }) else {
+        return Ok(None);
+    };
+    controls
+        .iter()
+        .map(|control| {
+            let strength = control.scalars[1];
+            let mut factor = if strength.is_nan() {
+                1.0
+            } else {
+                strength * 4.0 + 1.0
+            };
+            if factor > 1.0 {
+                factor = factor * 0.375 + 0.625;
+            } else if factor < 1.0 {
+                factor = factor * 0.625 + 0.375;
+            }
+            if !factor.is_finite() {
+                return Err(VoiceError::new(
+                    "Compatible phoneme strength produced an invalid projection factor",
+                ));
+            }
+            Ok(factor)
+        })
+        .collect::<Result<Vec<_>>>()
+        .map(Some)
 }
 
 fn native(pitch: &PitchResult, frames: usize, frame_seconds: f64) -> Vec<f64> {

@@ -68,8 +68,5 @@ pub enum Gesture {
         origin: Pos2,
         initial: BTreeSet<EntityId>,
     },
-    Parameter {
-        lane: u64,
-        time: i64,
-    },
+    Parameter(Box<crate::ui::lanes::ParameterGesture>),
 }

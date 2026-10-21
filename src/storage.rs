@@ -26,10 +26,6 @@ pub fn load(path: &Path) -> Result<Project, String> {
         .chain(project.tracks.iter_mut().map(|t| &mut t.main_group))
     {
         group.notes.sort_by_key(|n| n.onset);
-        for curve in group.parameters.values_mut() {
-            curve.points.sort_by_key(|p| p.0);
-            curve.points.dedup_by(|a, b| a.0 == b.0);
-        }
     }
     Ok(project)
 }
@@ -144,15 +140,18 @@ fn validate(p: &Project) -> Result<(), String> {
         for note in &g.notes {
             NotePerformance::from_note(note)
                 .map_err(|error| format!("工程校验失败：音符 {}：{error}", note.lyrics))?;
+            PhonemeAttributes::read(&note.attributes)
+                .map_err(|error| format!("工程校验失败：音符 {}：{error}", note.lyrics))?;
             TakeSet::from_extra(&note.extra)
                 .map_err(|error| format!("工程校验失败：音符 {}：{error}", note.lyrics))?;
         }
-        for curve in g.parameters.values() {
-            if !["linear", "cosine", "cubic"].contains(&curve.mode.as_str())
-                || curve.points.iter().any(|(_, v)| !v.is_finite())
-            {
-                return bad("参数插值模式或控制点值无效");
+        for (name, curve) in g.parameters.iter().chain(&g.vocal_modes) {
+            if name.trim().is_empty() {
+                return bad("参数名称不能为空");
             }
+            curve
+                .validate()
+                .map_err(|error| format!("工程校验失败：参数 {name}：{error}"))?;
         }
         for control in &g.pitch_controls {
             match control {

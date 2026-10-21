@@ -22,7 +22,7 @@ pub struct ContextInput<'a> {
     pub bank: &'a [f32],
     pub style: &'a [f32],
     pub frame_styles: Option<&'a Sequence>,
-    pub phone_factors: Option<&'a [f32]>,
+    pub frame_factors: Option<&'a [f32]>,
 }
 
 pub struct ContextOutput {
@@ -79,14 +79,14 @@ impl<'a> Context<'a> {
             || input.linguistic.language_ids.len() != input.phones.len()
             || input.normalized_pitch.len() != frames
             || input
-                .phone_factors
-                .is_some_and(|values| values.len() != input.phones.len())
+                .frame_factors
+                .is_some_and(|values| values.len() != frames)
             || input
                 .normalized_pitch
                 .iter()
                 .chain(input.bank)
                 .chain(input.style)
-                .chain(input.phone_factors.into_iter().flatten())
+                .chain(input.frame_factors.into_iter().flatten())
                 .any(|value| !value.is_finite())
         {
             return Err(VoiceError::new(
@@ -128,15 +128,15 @@ impl<'a> Context<'a> {
         let mut frame_index = 0;
         for (phone_index, phone) in input.phones.iter().enumerate() {
             let projection = projected.frame(phone_index)?;
-            let factor = input
-                .phone_factors
-                .map_or(1.0, |values| values[phone_index]);
             let language = language
                 .as_ref()
                 .map(|values| values.frame(phone_index))
                 .transpose()?
                 .unwrap_or(&[]);
             for position in 0..phone.frames {
+                let factor = input
+                    .frame_factors
+                    .map_or(1.0, |values| values[frame_index]);
                 let row =
                     &mut expanded.values[frame_index * channels..(frame_index + 1) * channels];
                 for (target, &value) in row.iter_mut().zip(projection) {

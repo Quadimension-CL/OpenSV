@@ -1,3 +1,4 @@
+mod phonemes;
 mod publication;
 mod runner;
 mod scheduling;
@@ -13,7 +14,7 @@ use crate::synthesis::{
     audio::{LiveAudio, RenderedAudio},
     plan::{OwnerId, RenderPlan},
     render_cache::{CacheStats, PublishedOwner},
-    rendered::{VisualPatch, VisualSnapshot},
+    rendered::{PhonemeSnapshot, VisualPatch, VisualSnapshot},
 };
 use runner::run;
 use std::{
@@ -74,6 +75,10 @@ pub(super) enum Event {
     VisualPatches {
         revision: u64,
         patches: Vec<(OwnerId, VisualPatch)>,
+    },
+    Phonemes {
+        revision: u64,
+        snapshots: BTreeMap<OwnerId, PhonemeSnapshot>,
     },
     Status {
         revision: u64,

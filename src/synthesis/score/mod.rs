@@ -5,6 +5,7 @@
 //! Export rate and track mixing belong to the output layer. An owner remains
 //! one context across rests; its visible bounds only restrict publication.
 
+mod automation;
 mod context;
 mod lyrics;
 mod options;
@@ -18,6 +19,7 @@ mod types;
 mod voice_binding;
 mod voice_controls;
 
+pub use automation::PreparedAutomations;
 pub use lyrics::LyricFrontend;
 pub use owner::prepare_owner;
 pub use performance::PreparedPerformanceControls;

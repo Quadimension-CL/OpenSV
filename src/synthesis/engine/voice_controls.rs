@@ -1,5 +1,7 @@
 //! Owner-wide voice conditions shared by export and preview cursors.
 
+mod phonemes;
+
 use crate::{
     model::VocalModeComponent,
     synthesis::{
@@ -7,6 +9,8 @@ use crate::{
         voice::Result,
     },
 };
+
+use super::PreparedRenderAcoustics;
 
 #[derive(Default)]
 pub(super) struct AcousticControls {
@@ -17,14 +21,21 @@ pub(super) struct AcousticControls {
 
 impl AcousticControls {
     pub fn sample(
-        phrase: &PreparedPhrase,
+        acoustic: &PreparedRenderAcoustics,
         names: &[String],
         frame_seconds: f64,
         frames: usize,
     ) -> Result<Self> {
-        let Some(controls) = &phrase.voice_controls else {
-            return Ok(Self::default());
-        };
+        let phrase = &acoustic.prepared.phrase;
+        let mut frame_controls = phrase
+            .voice_controls
+            .as_ref()
+            .map(|controls| {
+                controls.sample_timbre_controls(phrase.start_seconds, frame_seconds, frames)
+            })
+            .transpose()?
+            .flatten();
+        phonemes::apply(acoustic, frame_seconds, frames, &mut frame_controls)?;
         Ok(Self {
             pronunciation: sample_styles(
                 phrase,
@@ -40,7 +51,7 @@ impl AcousticControls {
                 frame_seconds,
                 frames,
             )?,
-            frames: controls.sample_timbre_controls(phrase.start_seconds, frame_seconds, frames)?,
+            frames: frame_controls,
         })
     }
 }

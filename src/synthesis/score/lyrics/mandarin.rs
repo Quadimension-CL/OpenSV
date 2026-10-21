@@ -8,9 +8,11 @@ use std::{collections::HashMap, fs, path::Path};
 
 use crate::synthesis::voice::{Result, VoiceError};
 
+mod pinyin;
+
 #[derive(Debug)]
 pub struct MandarinLexicon {
-    syllables: HashMap<String, Vec<String>>,
+    pinyin: pinyin::Pinyin,
     words: HashMap<String, Vec<Vec<String>>>,
     longest_word: usize,
 }
@@ -18,32 +20,8 @@ pub struct MandarinLexicon {
 impl MandarinLexicon {
     pub fn load(directory: impl AsRef<Path>) -> Result<Self> {
         let directory = directory.as_ref();
-        let syllable_path = directory.join("mandarin-xsampa-dict.txt");
+        let pinyin = pinyin::Pinyin::load(&directory.join("mandarin-xsampa-dict.txt"))?;
         let word_path = directory.join("cedict.txt");
-        let mut syllables = HashMap::new();
-        for (index, line) in fs::read_to_string(&syllable_path)?.lines().enumerate() {
-            let line = line.trim().trim_start_matches('\u{feff}');
-            if line.is_empty() || line.starts_with('#') {
-                continue;
-            }
-            let mut fields = line.split_whitespace();
-            let key = fields.next().expect("nonempty line");
-            let phones: Vec<String> = fields.map(str::to_owned).collect();
-            if phones.is_empty() {
-                return Err(VoiceError::new(format!(
-                    "{}:{}: Mandarin syllable has no phonemes",
-                    syllable_path.display(),
-                    index + 1
-                )));
-            }
-            if let Some(previous) = syllables.insert(key.to_owned(), phones.clone())
-                && previous != phones
-            {
-                return Err(VoiceError::new(format!(
-                    "Conflicting Mandarin phoneme entries for {key:?}"
-                )));
-            }
-        }
         let mut words: HashMap<String, Vec<Vec<String>>> = HashMap::new();
         let mut longest_word = 0;
         for (index, line) in fs::read_to_string(&word_path)?.lines().enumerate() {
@@ -73,11 +51,11 @@ impl MandarinLexicon {
                 }
             }
         }
-        if syllables.is_empty() || words.is_empty() {
-            return Err(VoiceError::new("Mandarin dictionaries are empty"));
+        if words.is_empty() {
+            return Err(VoiceError::new("Mandarin word dictionary is empty"));
         }
         Ok(Self {
-            syllables,
+            pinyin,
             words,
             longest_word,
         })
@@ -104,7 +82,7 @@ impl MandarinLexicon {
             } else if token.chars().any(is_han) {
                 result.extend(self.resolve_phrase(token)?);
             } else {
-                result.push(self.resolve_syllable(token)?);
+                result.extend(self.pinyin.resolve(token)?);
             }
         }
         if result.is_empty() {
@@ -119,7 +97,7 @@ impl MandarinLexicon {
         for alternative in alternatives {
             let phones = alternative
                 .iter()
-                .map(|syllable| self.resolve_syllable(syllable))
+                .map(|syllable| self.pinyin.syllable(syllable))
                 .collect::<Result<Vec<_>>>()?;
             if !phoneme_readings.contains(&phones) {
                 phoneme_readings.push(phones);
@@ -157,14 +135,6 @@ impl MandarinLexicon {
         }
         Ok(result)
     }
-
-    fn resolve_syllable(&self, syllable: &str) -> Result<Vec<String>> {
-        let key = pinyin_key(syllable).ok_or_else(|| unknown(syllable))?;
-        self.syllables
-            .get(&key)
-            .cloned()
-            .ok_or_else(|| unknown(syllable))
-    }
 }
 
 fn malformed_word(path: &Path, zero_based_line: usize) -> VoiceError {
@@ -177,34 +147,11 @@ fn malformed_word(path: &Path, zero_based_line: usize) -> VoiceError {
 
 fn unknown(text: &str) -> VoiceError {
     VoiceError::new(format!(
-        "No exact installed Mandarin pronunciation for {text:?}; provide explicit phonemes or spaced pinyin"
+        "No installed Mandarin pronunciation for {text:?}; provide explicit phonemes or spaced pinyin"
     ))
 }
 
 fn is_han(ch: char) -> bool {
     matches!(ch, '\u{3400}'..='\u{4dbf}' | '\u{4e00}'..='\u{9fff}'
         | '\u{f900}'..='\u{faff}' | '\u{20000}'..='\u{323af}')
-}
-
-/// Tone spelling does not change this dictionary's toneless phoneme inventory;
-/// the score supplies the sung pitch. No syllable segmentation is inferred.
-fn pinyin_key(syllable: &str) -> Option<String> {
-    let mut value = syllable.to_lowercase().replace("u:", "v");
-    if value.ends_with(['0', '1', '2', '3', '4', '5']) {
-        value.pop();
-    }
-    let mut key = String::with_capacity(value.len());
-    for ch in value.chars() {
-        key.push(match ch {
-            'ā' | 'á' | 'ǎ' | 'à' => 'a',
-            'ē' | 'é' | 'ě' | 'è' => 'e',
-            'ī' | 'í' | 'ǐ' | 'ì' => 'i',
-            'ō' | 'ó' | 'ǒ' | 'ò' => 'o',
-            'ū' | 'ú' | 'ǔ' | 'ù' => 'u',
-            'ü' | 'ǖ' | 'ǘ' | 'ǚ' | 'ǜ' => 'v',
-            'a'..='z' => ch,
-            _ => return None,
-        });
-    }
-    (!key.is_empty()).then_some(key)
 }

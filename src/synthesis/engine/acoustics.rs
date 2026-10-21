@@ -60,7 +60,7 @@ pub fn synthesize_acoustics(
     let started = Instant::now();
     #[cfg(feature = "synth-profile")]
     let _profile = crate::synthesis::profiling::span("stage.timbre");
-    let modulation = render.modulation();
+    let modulation = render.modulation()?;
     let impulses = render.impulses();
     let request = TimbreRequest {
         notes: &render.prepared.phrase.notes,
@@ -77,7 +77,7 @@ pub fn synthesize_acoustics(
         PreparedModelFeatures::Sv1Local => {
             let stage = models::dds_timbre(voice)?;
             let controls = AcousticControls::sample(
-                &render.prepared.phrase,
+                &render,
                 &voice.style_names,
                 stage.frame_seconds(),
                 render
@@ -99,7 +99,7 @@ pub fn synthesize_acoustics(
         }
         PreparedModelFeatures::Sv2 { timbre, .. } => {
             let controls = AcousticControls::sample(
-                &render.prepared.phrase,
+                &render,
                 &voice.style_names,
                 crate::synthesis::score::FRAME_SECONDS,
                 render.pitch.pitch.len(),

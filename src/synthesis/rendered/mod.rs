@@ -4,10 +4,12 @@
 //! painting nor owner-cache publication needs to scan or copy an entire clip.
 
 pub mod patch;
+mod phonemes;
 mod pitch;
 mod snapshot;
 mod waveform;
 
+pub use phonemes::{PhonemeSnapshot, RenderedPhoneme, RenderedPhonemeTrack, SourcePhone};
 pub use pitch::PitchTrack;
 pub use snapshot::{VisualFlash, VisualPatch, VisualPiece, VisualSnapshot, VisualTimeline};
 pub use waveform::Waveform;
@@ -35,6 +37,7 @@ impl RenderedClip {
 #[derive(Debug)]
 pub struct RenderVisuals {
     pub pitch: PitchTrack,
+    pub phonemes: RenderedPhonemeTrack,
     pub waveform: Waveform,
 }
 
@@ -43,6 +46,7 @@ impl RenderVisuals {
     pub fn memory_bytes(&self) -> usize {
         self.pitch
             .memory_bytes()
+            .saturating_add(self.phonemes.memory_bytes())
             .saturating_add(self.waveform.memory_bytes())
     }
 }

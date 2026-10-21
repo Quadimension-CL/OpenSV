@@ -1,6 +1,6 @@
 //! Audio and display publication for the current worker revision.
 use super::{
-    Event,
+    Event, phonemes,
     state::{Session, WorkState, equivalent_owners},
     visuals,
 };
@@ -103,11 +103,13 @@ impl<'network, 'tree> WorkState<'network, 'tree> {
             } else {
                 None
             };
+            let visuals = self.cache.visual_snapshot();
+            self.publish_phonemes(events, &visuals);
             let _ = events.send(Event::Publication {
                 revision: self.revision,
                 audio,
                 owners,
-                visuals: self.cache.visual_snapshot(),
+                visuals,
             });
         }
         self.publish_status(events);
@@ -115,6 +117,13 @@ impl<'network, 'tree> WorkState<'network, 'tree> {
 
     pub fn publish_prepared(&mut self, owner: OwnerId, events: &Events) -> Result<(), String> {
         if let Some(session) = self.sessions.get_mut(&owner) {
+            phonemes::publish(
+                events,
+                &self.plan,
+                self.revision,
+                owner,
+                session.visuals.phonemes(),
+            );
             let mirrors = equivalent_owners(&self.plan, owner);
             if !self.rebuild_source
                 && let Some(live) = &mut self.live

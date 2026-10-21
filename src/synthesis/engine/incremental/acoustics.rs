@@ -85,7 +85,7 @@ pub fn recompute(
         crate::synthesis::score::FRAME_SECONDS,
         total,
     )?;
-    let patch = stage.predict_singing_prepared(
+    let mut patch = stage.predict_singing_prepared(
         &phrase.notes,
         &phones,
         &pitch_features,
@@ -106,6 +106,7 @@ pub fn recompute(
             "Local pitch output differs from its requested frame interval",
         ));
     }
+    crate::synthesis::engine::pitch::apply_pitch_delta(phrase, &mut patch, work_frames.start)?;
     let local = write_frames.start - work_frames.start..write_frames.end - work_frames.start;
     let mut pitch = base.pitch.clone();
     pitch.pitch[write_frames.clone()].copy_from_slice(&patch.pitch[local.clone()]);

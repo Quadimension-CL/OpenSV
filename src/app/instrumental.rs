@@ -11,6 +11,7 @@ pub struct AudioImport {
 
 impl App {
     pub fn import_audio(&mut self, target: Option<EntityId>, ctx: &Context) {
+        crate::ui::phonemes::phoneme_deactivate(self);
         let Some(path) = rfd::FileDialog::new()
             .set_title("导入伴奏")
             .add_filter("音频文件", &["wav", "mp3", "flac", "ogg", "aif", "aiff"])

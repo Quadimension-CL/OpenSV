@@ -10,6 +10,7 @@ mod lane_tabs;
 pub mod lanes;
 pub mod midi_import;
 pub mod panels;
+pub mod phonemes;
 pub mod piano;
 pub mod rename;
 pub mod retakes;

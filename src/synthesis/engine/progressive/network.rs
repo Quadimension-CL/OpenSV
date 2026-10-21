@@ -49,9 +49,9 @@ impl<'tree> Network<'tree> {
         let prepared = &acoustic.prepared;
         match self {
             Self::Dds(network) => {
-                let modulation = acoustic.modulation();
+                let modulation = acoustic.modulation()?;
                 let controls = AcousticControls::sample(
-                    &prepared.phrase,
+                    acoustic,
                     &voice.style_names,
                     network.frame_seconds(),
                     prepared.phones.iter().map(|phone| phone.frames).sum(),
@@ -74,7 +74,7 @@ impl<'tree> Network<'tree> {
             }
             Self::Sv2(network) => {
                 let controls = AcousticControls::sample(
-                    &prepared.phrase,
+                    acoustic,
                     &voice.style_names,
                     crate::synthesis::score::FRAME_SECONDS,
                     acoustic.pitch.pitch.len(),
@@ -99,7 +99,7 @@ impl<'tree> Network<'tree> {
         requested_frame: usize,
     ) -> Result<Stream<'network, 'tree>> {
         let prepared = &acoustic.prepared;
-        let modulation = acoustic.modulation();
+        let modulation = acoustic.modulation()?;
         let impulses = acoustic.impulses();
         let request = TimbreRequest {
             notes: &prepared.phrase.notes,

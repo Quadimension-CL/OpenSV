@@ -66,6 +66,9 @@ impl OwnerSynthesis {
         if let Some(controls) = &phrase.voice_controls {
             bytes = bytes.saturating_add(controls.memory_bytes());
         }
+        if let Some(controls) = &phrase.automations {
+            bytes = bytes.saturating_add(controls.memory_bytes());
+        }
         for record in &phrase.records {
             bytes = bytes
                 .saturating_add(vector_bytes(&record.phones))
@@ -100,10 +103,13 @@ impl OwnerSynthesis {
         bytes
             .saturating_add(self.components.memory_bytes())
             .saturating_add(vector_bytes(&self.duration.durations))
+            .saturating_add(vector_bytes(&self.duration.default_durations))
             .saturating_add(vector_bytes(&prediction.phones))
             .saturating_add(vector_bytes(&prediction.scalars))
             .saturating_add(vector_bytes(&prediction.impulse_values))
             .saturating_add(vector_bytes(&prediction.impulse_positions))
+            .saturating_add(vector_bytes(&prediction.default_impulse_values))
+            .saturating_add(vector_bytes(&prediction.default_impulse_positions))
             .saturating_add(vector_bytes(&self.pitch.pitch))
             .saturating_add(vector_bytes(&self.pitch.predicted_controls.slope))
             .saturating_add(vector_bytes(&self.pitch.predicted_controls.offset))

@@ -1,4 +1,4 @@
-use crate::model::{Parameter, new_id};
+use crate::model::{AutomationTarget, Parameter, new_id};
 use serde::{Deserialize, Serialize};
 
 use super::scale::ScaleDisplay;
@@ -45,8 +45,10 @@ impl Column {
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Lane {
     pub id: u64,
-    pub foreground: Parameter,
-    pub background: Parameter,
+    pub foreground: AutomationTarget,
+    pub background: AutomationTarget,
+    pub tool: ParameterTool,
+    pub zoom: f32,
     pub visible: bool,
     pub height: f32,
 }
@@ -54,12 +56,20 @@ impl Lane {
     pub fn new() -> Self {
         Self {
             id: new_id(),
-            foreground: Parameter::Pitch,
-            background: Parameter::Loudness,
+            foreground: AutomationTarget::Parameter(Parameter::Pitch),
+            background: AutomationTarget::Parameter(Parameter::Loudness),
+            tool: ParameterTool::ControlPoints,
+            zoom: 1.0,
             visible: true,
             height: 148.0,
         }
     }
+}
+#[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ParameterTool {
+    ControlPoints,
+    Freehand,
+    Line,
 }
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Viewport {
@@ -83,6 +93,7 @@ pub struct ViewState {
     pub scale: ScaleDisplay,
     pub lanes: Vec<Lane>,
     pub phonemes: bool,
+    pub phonemes_height: f32,
 }
 impl Default for ViewState {
     fn default() -> Self {
@@ -111,6 +122,7 @@ impl Default for ViewState {
                 ..Lane::new()
             }],
             phonemes: false,
+            phonemes_height: 128.0,
         }
     }
 }
@@ -164,11 +176,15 @@ impl ViewState {
             && self.row_height.is_finite()
             && (8.0..=48.0).contains(&self.row_height)
             && [4, 8, 16, 32, 64, 128].contains(&self.grid)
+            && self.phonemes_height.is_finite()
+            && (64.0..=500.0).contains(&self.phonemes_height)
             && self.lanes.len() <= 16
-            && self
-                .lanes
-                .iter()
-                .all(|l| l.height.is_finite() && (64.0..=600.0).contains(&l.height))
+            && self.lanes.iter().all(|l| {
+                l.height.is_finite()
+                    && (64.0..=600.0).contains(&l.height)
+                    && l.zoom.is_finite()
+                    && (0.25..=16.0).contains(&l.zoom)
+            })
     }
 }
 #[derive(Clone, Copy)]

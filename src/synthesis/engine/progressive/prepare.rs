@@ -7,6 +7,7 @@ use crate::synthesis::{
     },
     plan::OwnerInput,
     render_cache::CompletedOwner,
+    rendered::RenderedPhonemeTrack,
     score::{self, HOP_SAMPLES, LyricFrontend, SAMPLE_RATE},
     voice::{PreparedVoice, Result, VoiceError, VoiceFamily},
 };
@@ -90,10 +91,13 @@ pub fn prepare(
         (acoustic, pcm)
     };
     let pitch = models::pitch_track(voice, &acoustic.prepared.phrase, acoustic.pitch.clone())?;
+    let phonemes =
+        RenderedPhonemeTrack::from_phrase(&acoustic.prepared.phrase, &acoustic.duration)?;
     Ok(PreparedRender {
         acoustic,
         pcm,
         pitch,
+        phonemes,
         timbre_frames: Default::default(),
     })
 }

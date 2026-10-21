@@ -3,7 +3,7 @@ use super::{
 };
 use crate::synthesis::{
     audio::RenderedAudio,
-    rendered::{RenderVisuals, Waveform},
+    rendered::{RenderVisuals, RenderedPhonemeTrack, Waveform},
     score::PreparedPhrase,
     stages::vocoder::VocoderStage,
     voice::{PreparedVoice, Result},
@@ -67,6 +67,7 @@ pub fn synthesize(
     let pitch = models::pitch_track(voice, &acoustic.prepared.phrase, acoustic.pitch.clone())?;
     let visuals = RenderVisuals {
         pitch,
+        phonemes: RenderedPhonemeTrack::from_phrase(&acoustic.prepared.phrase, &acoustic.duration)?,
         waveform: Waveform::new(&audio),
     };
     timings.visuals_ms = started.elapsed().as_secs_f64() * 1000.0;

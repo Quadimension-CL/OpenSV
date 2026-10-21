@@ -85,8 +85,11 @@ impl Editor {
         if let Some(n) = self
             .group_mut()
             .and_then(|g| g.notes.iter_mut().find(|n| n.id == id))
+            && n.lyrics != lyric
         {
             n.lyrics = lyric;
+            n.phonemes.clear();
+            n.attributes.remove("phonemes");
         }
         self.finish();
     }

@@ -1,7 +1,7 @@
 use super::Runtime;
 use crate::synthesis::{
     plan::OwnerId,
-    rendered::{VisualPatch, VisualSnapshot},
+    rendered::{PhonemeSnapshot, VisualPatch, VisualSnapshot},
 };
 use std::{collections::BTreeMap, sync::Arc, time::Instant};
 
@@ -46,6 +46,13 @@ impl Runtime {
             {
                 // Consolidate block views without restarting or erasing the
                 // still-fading outlines of blocks that just became ready.
+                self.phonemes.insert(
+                    owner,
+                    PhonemeSnapshot {
+                        input: Arc::clone(&snapshot.input),
+                        data: snapshot.data.phonemes.clone(),
+                    },
+                );
                 self.visuals.entry(owner).or_default().complete(snapshot);
             }
         }

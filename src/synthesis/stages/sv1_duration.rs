@@ -53,16 +53,23 @@ impl<'a> Sv1DurationStage<'a> {
         };
         let (durations, record_seconds) =
             postprocess::execute(self.tree, self.children[0], records, &scalars)?;
-        Ok(Sv1DurationResult {
-            result: DurationResult {
-                durations,
-                prediction: DurationPrediction {
-                    phones,
-                    scalars,
-                    impulse_values: Vec::new(),
-                    impulse_positions: Vec::new(),
-                },
+        let mut result = DurationResult::new(
+            records,
+            DurationPrediction {
+                phones,
+                scalars,
+                impulse_values: Vec::new(),
+                impulse_positions: Vec::new(),
+                default_impulse_values: Vec::new(),
+                default_impulse_positions: Vec::new(),
             },
+            durations.clone(),
+            durations,
+        )?;
+        result.supports_timing = false;
+        result.supports_strength = false;
+        Ok(Sv1DurationResult {
+            result,
             record_seconds,
         })
     }

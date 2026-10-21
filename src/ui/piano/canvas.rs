@@ -26,6 +26,11 @@ pub fn note_rect(note: &Note, offset: i64, pitch_offset: i32, rect: Rect, app: &
 }
 pub fn show(app: &mut App, ui: &mut Ui) {
     let all = ui.max_rect();
+    if ui.rect_contains_pointer(all) && ui.input(|input| input.pointer.any_pressed()) {
+        crate::ui::lanes::parameter_deactivate(app);
+        crate::ui::phonemes::phoneme_deactivate(app);
+    }
+    let phoneme_dragging = crate::ui::phonemes::phoneme_dragging(app);
     ui.painter().rect_filled(all, 0, PANEL);
     let ruler = Rect::from_min_max(
         pos2(all.left() + GUTTER, all.top()),
@@ -42,12 +47,14 @@ pub fn show(app: &mut App, ui: &mut Ui) {
         ui,
         crate::ui::view_pan::Target::Piano,
         Rect::from_min_max(all.min, canvas.max - vec2(6.0, 0.0)),
-        app.gesture.is_none() && app.group_gesture.is_none(),
+        app.gesture.is_none() && app.group_gesture.is_none() && !phoneme_dragging,
     );
     app.view.piano.start =
         (app.view.piano.start - pan.x as f64 / app.view.piano.beat_width as f64).max(0.0);
     let response = ui.interact(canvas, Id::new("piano-canvas"), Sense::click_and_drag());
-    let vertical = if matches!(app.gesture, Some(Gesture::Pitch(_) | Gesture::Anchor(_))) {
+    let vertical = if phoneme_dragging
+        || matches!(app.gesture, Some(Gesture::Pitch(_) | Gesture::Anchor(_)))
+    {
         0.0
     } else if app.view_pan.is_active() {
         pan.y
@@ -64,6 +71,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
             && app.gesture.is_none()
             && app.group_gesture.is_none()
             && app.audio_drag.is_none()
+            && !phoneme_dragging
             && !app.view_pan.is_active(),
     );
     super::background::draw(app, ui, canvas);
@@ -88,7 +96,8 @@ pub fn show(app: &mut App, ui: &mut Ui) {
             enabled: !app.view_pan.is_active()
                 && app.gesture.is_none()
                 && app.group_gesture.is_none()
-                && app.audio_drag.is_none(),
+                && app.audio_drag.is_none()
+                && !phoneme_dragging,
         },
     );
     draw_ruler(
@@ -102,6 +111,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
     if !app.editor.current_track().is_instrumental()
         && app.group_gesture.is_none()
         && !app.view_pan.is_active()
+        && !phoneme_dragging
     {
         if app.piano_tool == super::Tool::PitchDraw {
             super::pitch_edit::interaction(app, ui, &response, canvas);
@@ -115,6 +125,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
     super::background_notes::draw(app, ui, canvas);
     super::rendered::waveforms(app, ui, canvas, &groups);
     scene::draw_notes(app, ui, canvas, &groups);
+    super::rendered::phonemes(app, ui, canvas, &groups);
     super::rendered::pitch(app, ui, canvas, &groups);
     super::pitch_edit::draw(app, ui, canvas, &groups);
     super::pitch_anchor::draw(app, ui, canvas);

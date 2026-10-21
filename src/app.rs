@@ -34,6 +34,8 @@ pub struct App {
     pub about: bool,
     pub piano_tool: ui::piano::Tool,
     pub piano_anchor: ui::piano::AnchorSelection,
+    pub parameter_lane: ui::lanes::ParameterSelection,
+    pub phoneme_editing: ui::phonemes::PhonemeEditing,
     pub show_pitch: bool,
     pub show_waveform: bool,
     pub show_retakes: bool,
@@ -115,6 +117,8 @@ impl App {
             about: false,
             piano_tool: ui::piano::Tool::NoteSelect,
             piano_anchor: ui::piano::AnchorSelection::default(),
+            parameter_lane: ui::lanes::ParameterSelection::default(),
+            phoneme_editing: ui::phonemes::PhonemeEditing::default(),
             show_pitch: true,
             show_waveform: true,
             show_retakes: true,
@@ -146,6 +150,7 @@ impl App {
         app
     }
     pub fn open_path(&mut self, path: PathBuf) {
+        ui::phonemes::phoneme_deactivate(self);
         ui::piano::cancel_audition(self);
         self.midi_import = None;
         match storage::load(&path) {
@@ -155,6 +160,8 @@ impl App {
                 self.path = Some(path);
                 self.gesture = None;
                 self.piano_anchor = ui::piano::AnchorSelection::default();
+                self.parameter_lane = ui::lanes::ParameterSelection::default();
+                self.phoneme_editing = ui::phonemes::PhonemeEditing::default();
                 self.group_gesture = None;
                 self.audio_drag = None;
                 self.audio_import = None;
@@ -185,6 +192,7 @@ impl App {
         }
     }
     pub fn save_project(&mut self, save_as: bool) -> bool {
+        ui::phonemes::phoneme_deactivate(self);
         ui::piano::cancel_audition(self);
         ui::tempo_input::finish(self);
         self.commit_lyric();
@@ -223,6 +231,7 @@ impl App {
         }
     }
     pub fn request_file(&mut self, action: FileAction, ctx: &Context) {
+        ui::phonemes::phoneme_deactivate(self);
         ui::piano::cancel_audition(self);
         ui::tempo_input::finish(self);
         self.time_edit = None;
@@ -236,9 +245,12 @@ impl App {
         }
     }
     fn perform_file(&mut self, action: FileAction, ctx: &Context) {
+        ui::phonemes::phoneme_deactivate(self);
         self.midi_import = None;
         self.gesture = None;
         self.piano_anchor = ui::piano::AnchorSelection::default();
+        self.parameter_lane = ui::lanes::ParameterSelection::default();
+        self.phoneme_editing = ui::phonemes::PhonemeEditing::default();
         self.group_gesture = None;
         self.audio_drag = None;
         self.audio_import = None;
@@ -403,7 +415,7 @@ impl eframe::App for App {
             ui::chrome::shortcuts(self, &ctx);
         }
         let title = format!(
-            "RynthV — {}{}",
+            "RynthV - {}{}",
             self.path
                 .as_ref()
                 .and_then(|p| p.file_stem())
@@ -471,6 +483,8 @@ impl eframe::App for App {
         ui::piano::end_keyboard_frame(self, &ctx);
         ui::piano::end_pitch_frame(self, &ctx);
         ui::piano::end_anchor_frame(self, &ctx);
+        ui::lanes::end_parameter_frame(self, &ctx);
+        ui::phonemes::end_phoneme_frame(self, &ctx);
         ui::panels::end_performance_frame(self, &ctx);
         ui::voice_library::end_parameter_frame(self, &ctx);
         if !self.editor.is_editing() {

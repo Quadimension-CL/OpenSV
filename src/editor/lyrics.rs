@@ -71,6 +71,7 @@ impl Editor {
                     note.lyrics.clone_from(word);
                     // An explicit pronunciation must not override the newly entered lyric.
                     note.phonemes.clear();
+                    note.attributes.remove("phonemes");
                     changed += 1;
                 }
             }

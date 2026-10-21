@@ -1,0 +1,335 @@
+use super::clipboard::ParameterClipboard;
+use super::{active_lane, editable_bounds, reconcile};
+use crate::{app::App, model::QUARTER};
+use eframe::egui::{Context, ViewportCommand};
+use std::collections::{BTreeMap, BTreeSet};
+
+pub fn parameter_active(app: &App) -> bool {
+    let Some(owner) = &app.parameter_lane.owner else {
+        return false;
+    };
+    !app.piano_collapsed
+        && app.parameter_lane.focused
+        && app.editor.track == owner.track
+        && app.editor.reference == Some(owner.reference)
+        && app
+            .editor
+            .active_ref()
+            .is_some_and(|reference| reference.group_id == owner.group)
+        && active_lane(app).is_some_and(|lane| lane.visible && lane.foreground == owner.target)
+}
+
+pub fn parameter_has_selection(app: &App) -> bool {
+    parameter_active(app) && !selected(app).is_empty()
+}
+
+pub fn parameter_can_paste(app: &App) -> bool {
+    parameter_active(app)
+        && editable(app)
+        && app.editor.group().is_some()
+        && !app.editor.is_editing()
+        && app.gesture.is_none()
+}
+
+pub fn parameter_deactivate(app: &mut App) {
+    if matches!(app.gesture, Some(crate::ui::piano::Gesture::Parameter(_))) {
+        super::gesture::finish_without_context(app, false);
+    }
+    app.parameter_lane.focused = false;
+}
+
+pub fn parameter_clear(app: &mut App) {
+    app.parameter_lane.selected.clear();
+    app.parameter_lane.anchor = None;
+}
+
+pub fn parameter_select_all(app: &mut App) {
+    if !ready(app) {
+        return;
+    }
+    let Some((begin, end)) = editable_bounds(app) else {
+        return;
+    };
+    let target = &app.parameter_lane.owner.as_ref().unwrap().target;
+    app.parameter_lane.selected = app
+        .editor
+        .automation(target)
+        .into_iter()
+        .flat_map(|curve| &curve.points)
+        .filter_map(|&(time, _)| (begin..=end).contains(&time).then_some(time))
+        .collect();
+    app.parameter_lane.anchor = app.parameter_lane.selected.first().copied();
+}
+
+pub fn parameter_copy(app: &mut App, ctx: &Context) {
+    if !ready(app) {
+        return;
+    }
+    match clipboard_text(app) {
+        Ok(Some((text, count))) => {
+            ctx.copy_text(text);
+            app.status = format!("已复制 {count} 个参数控制点");
+        }
+        Ok(None) => {}
+        Err(error) => app.error = Some(error),
+    }
+}
+
+pub fn parameter_cut(app: &mut App, ctx: &Context) {
+    if !ready(app) {
+        return;
+    }
+    let points = selected(app);
+    if points.is_empty() {
+        return;
+    }
+    match clipboard_text(app) {
+        Ok(Some((text, count))) => {
+            ctx.copy_text(text);
+            if remove(app, &points, "剪切参数控制点") {
+                parameter_clear(app);
+                app.status = format!("已剪切 {count} 个参数控制点");
+            }
+        }
+        Ok(None) => {}
+        Err(error) => app.error = Some(error),
+    }
+}
+
+pub fn parameter_delete(app: &mut App) {
+    if !ready(app) {
+        return;
+    }
+    let points = selected(app);
+    if !points.is_empty() && remove(app, &points, "删除参数控制点") {
+        parameter_clear(app);
+    }
+}
+
+pub fn parameter_paste(app: &mut App, ctx: &Context) {
+    if ready(app) && parameter_can_paste(app) {
+        ctx.send_viewport_cmd(ViewportCommand::RequestPaste);
+    }
+}
+
+pub fn parameter_paste_text(app: &mut App, text: &str) {
+    if !ready(app) || !parameter_can_paste(app) {
+        return;
+    }
+    let clipboard = match ParameterClipboard::from_text(text) {
+        Ok(clipboard) => clipboard,
+        Err(error) => {
+            app.error = Some(error);
+            return;
+        }
+    };
+    let Some(reference) = app.editor.active_ref() else {
+        return;
+    };
+    let Some(at) = app
+        .editor
+        .transport
+        .position
+        .checked_sub(reference.blick_offset)
+    else {
+        app.status = "播放位置超出参数控制点的可用时间范围。".into();
+        return;
+    };
+    insert(app, clipboard.points, clipboard.range, at, "粘贴参数控制点");
+}
+
+pub fn parameter_duplicate(app: &mut App) {
+    if !ready(app) || !editable(app) {
+        return;
+    }
+    let points = selected(app);
+    let Some(&(last, _)) = points.last() else {
+        return;
+    };
+    let Some(at) = last.checked_add(QUARTER) else {
+        app.status = "复制位置超出参数控制点的可用时间范围。".into();
+        return;
+    };
+    let range = app.parameter_lane.owner.as_ref().unwrap().target.range();
+    insert(app, points, range, at, "重复参数控制点");
+}
+
+pub(super) fn shift_selected(app: &mut App, delta_time: i64, delta_value: f64) {
+    if !ready(app) || !editable(app) || !delta_value.is_finite() {
+        return;
+    }
+    let points = selected(app);
+    let (Some(&(first, _)), Some(&(last, _)), Some((begin, end))) =
+        (points.first(), points.last(), editable_bounds(app))
+    else {
+        return;
+    };
+    let target = &app.parameter_lane.owner.as_ref().unwrap().target;
+    let (low, high) = target.range();
+    let lowest = points
+        .iter()
+        .map(|point| point.1)
+        .fold(f64::INFINITY, f64::min);
+    let highest = points
+        .iter()
+        .map(|point| point.1)
+        .fold(f64::NEG_INFINITY, f64::max);
+    let time = i128::from(delta_time).clamp(
+        i128::from(begin) - i128::from(first),
+        i128::from(end) - i128::from(last),
+    );
+    let value = if delta_value == 0.0 {
+        0.0
+    } else {
+        let minimum = low - lowest;
+        let maximum = high - highest;
+        if minimum > maximum {
+            app.status = "所选参数控制点的取值跨度超出可编辑范围。".into();
+            return;
+        }
+        delta_value.clamp(minimum, maximum)
+    };
+    if time == 0 && value == 0.0 {
+        return;
+    }
+    let moved: Vec<_> = points
+        .iter()
+        .map(|&(position, original)| ((i128::from(position) + time) as i64, original + value))
+        .collect();
+    let original = app.editor.automation(target).unwrap().points.clone();
+    let selected_times: BTreeSet<_> = points.iter().map(|point| point.0).collect();
+    let moved_times: BTreeSet<_> = moved.iter().map(|point| point.0).collect();
+    if original
+        .iter()
+        .any(|point| !selected_times.contains(&point.0) && moved_times.contains(&point.0))
+    {
+        app.status = "移动后会与未选中的参数控制点重合。".into();
+        return;
+    }
+    let mut replacement: BTreeMap<_, _> = original
+        .into_iter()
+        .filter(|point| !selected_times.contains(&point.0))
+        .collect();
+    replacement.extend(moved);
+    if replace(app, replacement.into_iter().collect(), "移动参数控制点") {
+        app.parameter_lane.selected = moved_times;
+        app.parameter_lane.anchor = app.parameter_lane.selected.first().copied();
+    }
+}
+
+fn ready(app: &mut App) -> bool {
+    reconcile(app);
+    parameter_active(app) && app.gesture.is_none() && !app.editor.is_editing()
+}
+
+fn editable(app: &App) -> bool {
+    app.parameter_lane
+        .owner
+        .as_ref()
+        .is_some_and(|owner| super::editable(app, &owner.target))
+}
+
+fn clipboard_text(app: &App) -> Result<Option<(String, usize)>, String> {
+    let range = app.parameter_lane.owner.as_ref().unwrap().target.range();
+    let Some(clipboard) = ParameterClipboard::capture(selected(app), range)? else {
+        return Ok(None);
+    };
+    clipboard
+        .to_text()
+        .map(|text| Some((text, clipboard.points.len())))
+}
+
+fn selected(app: &App) -> Vec<(i64, f64)> {
+    let (Some(owner), Some((begin, end))) = (&app.parameter_lane.owner, editable_bounds(app))
+    else {
+        return Vec::new();
+    };
+    app.editor
+        .automation(&owner.target)
+        .into_iter()
+        .flat_map(|curve| &curve.points)
+        .filter(|point| {
+            (begin..=end).contains(&point.0) && app.parameter_lane.selected.contains(&point.0)
+        })
+        .copied()
+        .collect()
+}
+
+fn remove(app: &mut App, points: &[(i64, f64)], label: &str) -> bool {
+    let target = &app.parameter_lane.owner.as_ref().unwrap().target;
+    let times: BTreeSet<_> = points.iter().map(|point| point.0).collect();
+    let replacement = app
+        .editor
+        .automation(target)
+        .into_iter()
+        .flat_map(|curve| &curve.points)
+        .filter(|point| !times.contains(&point.0))
+        .copied()
+        .collect();
+    replace(app, replacement, label)
+}
+
+fn insert(app: &mut App, source: Vec<(i64, f64)>, source_range: (f64, f64), at: i64, label: &str) {
+    let Some(&(first, _)) = source.first() else {
+        return;
+    };
+    let Some((begin, end)) = editable_bounds(app) else {
+        return;
+    };
+    let target = &app.parameter_lane.owner.as_ref().unwrap().target;
+    let (low, high) = target.range();
+    let (source_low, source_high) = source_range;
+    if !source_low.is_finite() || !source_high.is_finite() || source_low >= source_high {
+        app.error = Some("参数控制点剪贴板的取值范围无效。".into());
+        return;
+    }
+    let mut inserted = Vec::with_capacity(source.len());
+    for (time, value) in source {
+        let shifted = i128::from(at) + i128::from(time) - i128::from(first);
+        if shifted < i128::from(begin) || shifted > i128::from(end) {
+            app.status = "粘贴的参数控制点超出当前音符组的可编辑范围。".into();
+            return;
+        }
+        if !value.is_finite() {
+            app.error = Some("参数控制点剪贴板包含无效的数值。".into());
+            return;
+        }
+        let mapped = if source_range == (low, high) {
+            value
+        } else {
+            let fraction = ((value - source_low) / (source_high - source_low)).clamp(0.0, 1.0);
+            low + fraction * (high - low)
+        };
+        inserted.push((shifted as i64, mapped));
+    }
+    let times = inserted.iter().map(|point| point.0).collect();
+    let count = inserted.len();
+    let mut replacement: BTreeMap<_, _> = app
+        .editor
+        .automation(target)
+        .into_iter()
+        .flat_map(|curve| curve.points.iter().copied())
+        .collect();
+    replacement.extend(inserted);
+    if replace(app, replacement.into_iter().collect(), label) {
+        app.parameter_lane.selected = times;
+        app.parameter_lane.anchor = app.parameter_lane.selected.first().copied();
+        app.status = format!("已粘贴 {count} 个参数控制点");
+    }
+}
+
+fn replace(app: &mut App, points: Vec<(i64, f64)>, label: &str) -> bool {
+    let target = app.parameter_lane.owner.as_ref().unwrap().target.clone();
+    app.editor.begin(label);
+    match app.editor.replace_automation_points(&target, points) {
+        Ok(_) => {
+            app.editor.finish();
+            true
+        }
+        Err(error) => {
+            app.editor.cancel();
+            app.error = Some(error);
+            false
+        }
+    }
+}

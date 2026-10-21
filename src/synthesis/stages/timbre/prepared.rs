@@ -59,16 +59,16 @@ impl TimbreNetwork<'_> {
         let mut language_ids = Vec::with_capacity(phones.len());
         let mut phone_to_note = Vec::with_capacity(phones.len());
         let mut phone_durations = Vec::with_capacity(phones.len());
-        let mut per_note_frames = vec![0_usize; notes.frame_counts.len()];
+        let mut total_phone_frames = 0_usize;
         let mut last_note = 0;
         for phone in phones {
-            if phone.note_index >= per_note_frames.len() || phone.note_index < last_note {
+            if phone.note_index >= notes.frame_counts.len() || phone.note_index < last_note {
                 return Err(VoiceError::new(
                     "Timbre phones do not follow their note records",
                 ));
             }
             last_note = phone.note_index;
-            per_note_frames[phone.note_index] = per_note_frames[phone.note_index]
+            total_phone_frames = total_phone_frames
                 .checked_add(phone.frames)
                 .ok_or_else(|| VoiceError::new("Timbre phone length overflows"))?;
             let resolved = self.tree.resolve_phone(&phone.language, &phone.token)?;
@@ -80,7 +80,7 @@ impl TimbreNetwork<'_> {
                     .map_err(|_| VoiceError::new("Timbre phone exceeds frame index range"))?,
             );
         }
-        if notes.frame_counts != per_note_frames {
+        if notes.frame_positions.len() != total_phone_frames {
             return Err(VoiceError::new(
                 "Timbre notes, phones and F0 do not cover the same frames",
             ));

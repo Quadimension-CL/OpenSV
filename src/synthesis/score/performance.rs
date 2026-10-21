@@ -2,7 +2,7 @@
 //! to seconds independently of phoneme splitting and model boundary records.
 
 use crate::{
-    model::{NotePerformance, QUARTER},
+    model::{NotePerformance, Parameter, QUARTER},
     synthesis::{
         plan::{GlobalBlick, OwnerInput},
         voice::{Result, VoiceError},
@@ -67,10 +67,24 @@ impl PreparedPerformanceControls {
         vibrato
             .try_reserve_exact(count)
             .map_err(|_| VoiceError::new("Performance control range is too large"))?;
+        let envelope = input
+            .automation
+            .get(Parameter::Vibrato.key())
+            .map(|curve| curve.sampler(1.0))
+            .transpose()
+            .map_err(VoiceError::new)?;
+        let track_envelope = input
+            .track_automation
+            .get(Parameter::Vibrato.key())
+            .map(|curve| curve.sampler(1.0))
+            .transpose()
+            .map_err(VoiceError::new)?;
         for (index, modulation) in modulation.into_iter().enumerate() {
-            let position = begin
+            let local = begin
                 .checked_add(index as i64 * GRID)
-                .and_then(|local| local.checked_add(input.content_offset.0))
+                .ok_or_else(|| VoiceError::new("Performance control position overflows"))?;
+            let position = local
+                .checked_add(input.content_offset.0)
                 .ok_or_else(|| VoiceError::new("Performance control position overflows"))?;
             let seconds = input.tempo.seconds_at(GlobalBlick(position));
             if !seconds.is_finite()
@@ -80,11 +94,24 @@ impl PreparedPerformanceControls {
             {
                 return Err(VoiceError::new("Invalid performance control tempo mapping"));
             }
-            // Parameter envelopes are validated separately. Their supported
-            // neutral value is one; retain the f64 offset arithmetic here.
+            let envelope = envelope
+                .as_ref()
+                .map_or(Ok(1.0), |curve| curve.sample(local))
+                .map_err(VoiceError::new)?;
+            let track_envelope = match &track_envelope {
+                Some(curve) => {
+                    let track_position = position
+                        .checked_sub(input.track_automation_offset.0)
+                        .ok_or_else(|| VoiceError::new("Performance control position overflows"))?;
+                    curve.sample(track_position).map_err(VoiceError::new)?
+                }
+                None => 1.0,
+            };
+            // Multiply on the musical grid before converting to the model's
+            // frame clock, preserving the note modulation offset arithmetic.
             vibrato.push(ControlPoint {
                 seconds,
-                value: (modulation + 1.0) as f32,
+                value: ((modulation + 1.0) * envelope * track_envelope) as f32,
             });
         }
         Ok(Some(Self { vibrato }))

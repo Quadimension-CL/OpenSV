@@ -206,7 +206,7 @@ pub(super) fn update_gesture(app: &mut App, ui: &Ui, rect: Rect) {
             }
             app.editor.selected = selected;
         }
-        Gesture::Parameter { .. } | Gesture::Pitch(_) | Gesture::Anchor(_) => {}
+        Gesture::Parameter(_) | Gesture::Pitch(_) | Gesture::Anchor(_) => {}
     }
     app.gesture = Some(gesture);
 }

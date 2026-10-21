@@ -6,7 +6,7 @@ use crate::synthesis::{
     audio::RenderedAudio,
     engine::progressive::PreparedRender,
     plan::{OwnerId, OwnerInput, RenderPlan},
-    rendered::{PitchTrack, RenderVisuals, VisualPatch, Waveform},
+    rendered::{PitchTrack, RenderVisuals, RenderedPhonemeTrack, VisualPatch, Waveform},
     runtime::events::Events,
     score::SAMPLE_RATE,
     voice::Result,
@@ -16,6 +16,7 @@ use std::{ops::Range, sync::Arc};
 pub(super) struct SessionVisuals {
     input: Arc<OwnerInput>,
     pitch: PitchTrack,
+    phonemes: RenderedPhonemeTrack,
     patches: Vec<VisualPatch>,
 }
 
@@ -23,6 +24,7 @@ impl SessionVisuals {
     pub fn new(prepared: &PreparedRender, input: Arc<OwnerInput>) -> Result<Self> {
         let mut visuals = Self {
             pitch: prepared.pitch_track()?,
+            phonemes: prepared.phoneme_track(),
             input,
             patches: Vec::new(),
         };
@@ -58,6 +60,7 @@ impl SessionVisuals {
             range,
             data: Some(Arc::new(RenderVisuals {
                 pitch: self.pitch.clone(),
+                phonemes: self.phonemes.clone(),
                 waveform: Waveform::new(audio),
             })),
             highlight,
@@ -75,6 +78,10 @@ impl SessionVisuals {
                 patch
             })
             .collect()
+    }
+
+    pub fn phonemes(&self) -> &RenderedPhonemeTrack {
+        &self.phonemes
     }
 
     fn visible_range(&self) -> Range<i64> {

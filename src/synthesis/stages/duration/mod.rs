@@ -5,6 +5,7 @@
 
 mod attention;
 pub(crate) mod context;
+mod controls;
 pub(crate) mod encoding;
 pub mod frontend;
 mod heads;
@@ -36,12 +37,35 @@ pub struct DurationPrediction {
     /// Softmax-weighted index / (bins - 1), used by timbre
     /// to place that impulse within the phoneme's frames.
     pub impulse_positions: Vec<f32>,
+    pub default_impulse_values: Vec<f64>,
+    pub default_impulse_positions: Vec<f32>,
 }
 
 #[derive(Debug, Serialize)]
 pub struct DurationResult {
     pub durations: Vec<PhoneDuration>,
+    pub default_durations: Vec<PhoneDuration>,
+    pub supports_timing: bool,
+    pub supports_strength: bool,
     pub prediction: DurationPrediction,
+}
+
+impl DurationResult {
+    pub(crate) fn new(
+        records: &[DurationRecord],
+        mut prediction: DurationPrediction,
+        default_durations: Vec<PhoneDuration>,
+        durations: Vec<PhoneDuration>,
+    ) -> Result<Self> {
+        controls::apply_impulses(records, &mut prediction)?;
+        Ok(Self {
+            durations,
+            default_durations,
+            supports_timing: true,
+            supports_strength: true,
+            prediction,
+        })
+    }
 }
 
 impl<'a> DurationStage<'a> {
@@ -91,14 +115,25 @@ impl<'a> DurationStage<'a> {
         })
     }
 
-    pub fn predict_explicit(&self, records: &[DurationRecord]) -> Result<DurationResult> {
+    pub fn predict_explicit(
+        &self,
+        records: &[DurationRecord],
+        phrase_start_seconds: f64,
+    ) -> Result<DurationResult> {
         let phones = frontend::prepare_explicit(self.tree, records)?;
         let prediction = self.predict(phones)?;
-        let durations = frontend::postprocess(self.tree, records, &prediction.scalars)?;
-        Ok(DurationResult {
-            durations,
+        let allocation = frontend::postprocess(
+            self.tree,
+            records,
+            &prediction.scalars,
+            phrase_start_seconds,
+        )?;
+        DurationResult::new(
+            records,
             prediction,
-        })
+            allocation.default_durations,
+            allocation.durations,
+        )
     }
 
     /// Each record has an independent duration seed; zero selects its default
@@ -107,6 +142,7 @@ impl<'a> DurationStage<'a> {
         &self,
         records: &[DurationRecord],
         seeds: &[u32],
+        phrase_start_seconds: f64,
     ) -> Result<DurationResult> {
         if records.len() != seeds.len() {
             return Err(VoiceError::new(
@@ -115,11 +151,18 @@ impl<'a> DurationStage<'a> {
         }
         let phones = frontend::prepare_explicit(self.tree, records)?;
         let prediction = self.predict_with_seeds(phones, Some(seeds))?;
-        let durations = frontend::postprocess(self.tree, records, &prediction.scalars)?;
-        Ok(DurationResult {
-            durations,
+        let allocation = frontend::postprocess(
+            self.tree,
+            records,
+            &prediction.scalars,
+            phrase_start_seconds,
+        )?;
+        DurationResult::new(
+            records,
             prediction,
-        })
+            allocation.default_durations,
+            allocation.durations,
+        )
     }
 
     /// Execute real explicit-phone conditions on the default, non-retake path.
@@ -138,6 +181,8 @@ impl<'a> DurationStage<'a> {
                 scalars: Vec::new(),
                 impulse_values: Vec::new(),
                 impulse_positions: Vec::new(),
+                default_impulse_values: Vec::new(),
+                default_impulse_positions: Vec::new(),
             });
         }
         let features = encoding::encode(self.tree, &self.children, self.configuration, &phones)?;
@@ -186,6 +231,8 @@ impl<'a> DurationStage<'a> {
         Ok(DurationPrediction {
             phones,
             scalars,
+            default_impulse_values: impulse_values.clone(),
+            default_impulse_positions: impulse_positions.clone(),
             impulse_values,
             impulse_positions,
         })

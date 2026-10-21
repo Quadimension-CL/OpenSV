@@ -4,6 +4,8 @@ use eframe::egui::*;
 pub enum Target {
     Arrangement,
     Piano,
+    Parameter(u64),
+    Phonemes,
 }
 impl Target {
     fn id(self) -> Id {

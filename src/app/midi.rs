@@ -27,6 +27,7 @@ pub struct MidiImport {
 
 impl App {
     pub fn begin_midi_import(&mut self, mode: MidiImportMode, ctx: &Context) {
+        ui::phonemes::phoneme_deactivate(self);
         ui::piano::cancel_audition(self);
         ui::tempo_input::finish(self);
         self.commit_lyric();
@@ -85,6 +86,7 @@ impl App {
     }
 
     pub fn apply_midi_import(&mut self, import: &MidiImport) -> Result<(), String> {
+        ui::phonemes::phoneme_deactivate(self);
         let MidiImportPhase::Ready { file, selected } = &import.phase else {
             return Err("MIDI 尚未读取完成。".into());
         };
@@ -105,6 +107,7 @@ impl App {
                 self.audio_import = None;
                 self.gesture = None;
                 self.piano_anchor = crate::ui::piano::AnchorSelection::default();
+                self.phoneme_editing = ui::phonemes::PhonemeEditing::default();
                 self.group_gesture = None;
                 self.audio_drag = None;
                 self.view_pan = ui::view_pan::ViewPan::default();

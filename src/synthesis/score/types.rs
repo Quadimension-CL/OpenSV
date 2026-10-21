@@ -16,7 +16,12 @@ pub struct ScorePhone {
     pub language: String,
     pub token: String,
     #[serde(default)]
-    pub onset_offset_seconds: Option<f64>,
+    pub source: Option<crate::model::SourcePhone>,
+    #[serde(default)]
+    pub attributes: crate::model::PhonemeAttributes,
+    /// Global seconds of the original note onset, shared by all its syllables.
+    #[serde(default)]
+    pub source_note_onset_seconds: Option<f64>,
 }
 
 /// One syllable/record. For a split note, duration_seconds remains the whole
@@ -64,6 +69,8 @@ pub struct ExplicitScore {
 
 #[derive(Clone, Debug)]
 pub struct PreparedPhrase {
+    /// Parameter curves on the owner's tempo-aware musical timeline.
+    pub automations: Option<std::sync::Arc<super::PreparedAutomations>>,
     /// Native curve/point conditioning, sampled after the model clock is known.
     pub pitch_controls: Option<super::PreparedPitchControls>,
     /// Note modulation sampled on the editor's tempo-aware parameter grid.
@@ -120,10 +127,11 @@ impl ExplicitScore {
                 )));
             }
             for phone in &note.phones {
+                phone.attributes.validate().map_err(VoiceError::new)?;
                 if phone.token.is_empty()
                     || phone.token.chars().any(char::is_whitespace)
                     || phone
-                        .onset_offset_seconds
+                        .source_note_onset_seconds
                         .is_some_and(|value| !value.is_finite())
                 {
                     return Err(VoiceError::new(format!(
@@ -178,7 +186,9 @@ impl ExplicitScore {
                     .map(|phone| ExplicitPhone {
                         language: phone.language.clone(),
                         token: phone.token.clone(),
-                        onset_offset_seconds: phone.onset_offset_seconds,
+                        source: phone.source,
+                        attributes: phone.attributes,
+                        source_note_onset_seconds: phone.source_note_onset_seconds,
                     })
                     .collect(),
                 note: DurationNote {
@@ -196,6 +206,7 @@ impl ExplicitScore {
         }
         super::records::redistribute_onsets(duration_tree, &mut records, &mut notes, family)?;
         Ok(PreparedPhrase {
+            automations: None,
             pitch_controls: None,
             performance_controls: None,
             voice_controls: None,

@@ -107,7 +107,9 @@ pub fn menus(app: &mut App, ui: &mut Ui) {
             }
         });
         ui.menu_button("修改", |ui| {
-            let selected = app.piano_tool != super::piano::Tool::PitchAnchor
+            let selected = !super::lanes::parameter_active(app)
+                && !super::phonemes::phoneme_active(app)
+                && app.piano_tool != super::piano::Tool::PitchAnchor
                 && !app.editor.selected.is_empty();
             if item(ui, "填入歌词…", "Ctrl+L", selected) {
                 super::fill_lyrics::open(app);
@@ -116,10 +118,10 @@ pub fn menus(app: &mut App, ui: &mut Ui) {
                 app.editor.mute_selected();
             }
             ui.separator();
-            if item(ui, "升高八度", "Ctrl+↑", edit::selected(app)) {
+            if item(ui, "升高八度", "Ctrl+↑", edit::can_transpose(app)) {
                 edit::transpose(app, true);
             }
-            if item(ui, "降低八度", "Ctrl+↓", edit::selected(app)) {
+            if item(ui, "降低八度", "Ctrl+↓", edit::can_transpose(app)) {
                 edit::transpose(app, false);
             }
             item(ui, "智能量化", "", false);
@@ -127,7 +129,12 @@ pub fn menus(app: &mut App, ui: &mut Ui) {
         });
         ui.menu_button("自动处理", |ui| {
             item(ui, "装饰所选音符", "", false);
-            super::retakes::commands(app, ui);
+            ui.add_enabled_ui(
+                !super::lanes::parameter_active(app) && !super::phonemes::phoneme_active(app),
+                |ui| {
+                    super::retakes::commands(app, ui);
+                },
+            );
             item(ui, "从音频提取音符", "", false);
             item(ui, "检测曲速", "", false);
         });
@@ -176,6 +183,12 @@ pub fn menus(app: &mut App, ui: &mut Ui) {
     });
 }
 pub fn shortcuts(app: &mut App, ctx: &Context) {
+    if super::phonemes::phoneme_dragging(app) {
+        if ctx.input_mut(|input| input.consume_key(Modifiers::NONE, Key::Escape)) {
+            super::phonemes::phoneme_cancel(app, ctx);
+        }
+        return;
+    }
     if app.editor.has_performance_edit() || app.editor.has_voice_edit() {
         return;
     }
@@ -209,6 +222,10 @@ pub fn shortcuts(app: &mut App, ctx: &Context) {
     }
     if app.gesture.is_some() || app.group_gesture.is_some() {
         if command(Key::Escape, Modifiers::NONE) {
+            if matches!(app.gesture, Some(super::piano::Gesture::Parameter(_))) {
+                super::lanes::parameter_cancel(app, ctx);
+                return;
+            }
             app.editor.cancel();
             app.gesture = None;
             app.group_gesture = None;
@@ -235,43 +252,63 @@ pub fn shortcuts(app: &mut App, ctx: &Context) {
     } else if command(Key::Z, ctrl) {
         app.editor.undo();
     }
-    if super::piano::anchor_keyboard(app, ctx) {
+    if super::lanes::parameter_keyboard(app, ctx) {
         return;
     }
-    if command(Key::T, Modifiers::ALT | Modifiers::SHIFT) {
+    if !super::lanes::parameter_active(app)
+        && !super::phonemes::phoneme_active(app)
+        && super::piano::anchor_keyboard(app, ctx)
+    {
+        return;
+    }
+    if !super::lanes::parameter_active(app)
+        && !super::phonemes::phoneme_active(app)
+        && command(Key::T, Modifiers::ALT | Modifiers::SHIFT)
+    {
         super::retakes::prune(app);
         return;
-    } else if command(Key::T, Modifiers::ALT) {
+    } else if !super::lanes::parameter_active(app)
+        && !super::phonemes::phoneme_active(app)
+        && command(Key::T, Modifiers::ALT)
+    {
         super::retakes::create(app, RetakeComponent::All);
         return;
     }
     if command(Key::A, ctrl) {
-        app.editor.select_all_notes();
+        edit::select_all(app);
     }
     if command(Key::D, ctrl) {
         edit::duplicate(app);
     }
-    if app.piano_tool != super::piano::Tool::PitchAnchor && command(Key::L, ctrl) {
+    if !super::lanes::parameter_active(app)
+        && !super::phonemes::phoneme_active(app)
+        && app.piano_tool != super::piano::Tool::PitchAnchor
+        && command(Key::L, ctrl)
+    {
         super::fill_lyrics::open(app);
         return;
     }
-    if app.piano_tool != super::piano::Tool::PitchAnchor && command(Key::M, ctrl) {
+    if !super::lanes::parameter_active(app)
+        && !super::phonemes::phoneme_active(app)
+        && app.piano_tool != super::piano::Tool::PitchAnchor
+        && command(Key::M, ctrl)
+    {
         app.editor.mute_selected();
     }
     if command(Key::B, ctrl) {
         app.view.toggle(Column::Note);
     }
     if command(Key::ArrowUp, ctrl) {
-        app.editor.transpose(12);
+        edit::transpose(app, true);
     }
     if command(Key::ArrowDown, ctrl) {
-        app.editor.transpose(-12);
+        edit::transpose(app, false);
     }
     if command(Key::Delete, Modifiers::NONE) {
-        app.editor.delete_selected();
+        edit::delete(app);
     }
     if command(Key::Escape, Modifiers::NONE) {
-        app.editor.selected.clear();
+        edit::clear(app);
     }
     if command(Key::Num1, Modifiers::ALT) {
         app.piano_tool = super::piano::Tool::NoteSelect;

@@ -31,6 +31,17 @@ impl IncrementalEdit {
         previous: &PreparedPhrase,
         phrase: &PreparedPhrase,
     ) -> Result<Option<Self>> {
+        // Row reuse keeps each record's phone allocation on the score clock.
+        // Manual boundaries can cross records, so prepare the complete owner.
+        if previous
+            .records
+            .iter()
+            .chain(&phrase.records)
+            .flat_map(|record| &record.phones)
+            .any(|phone| phone.attributes.left_offset.is_some())
+        {
+            return Ok(None);
+        }
         let Some(changed) = input::changed_notes(old, new) else {
             return Ok(None);
         };

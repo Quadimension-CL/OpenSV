@@ -17,7 +17,9 @@ pub fn prepare_owner(
 ) -> Result<PreparedPhrase> {
     let mut phrase = ExplicitScore::from_owner(input, lexicon, duration_tree, family)?
         .prepare(duration_tree, family)?;
-    phrase.voice_controls = super::PreparedVoiceControls::new(input, family)?;
+    phrase.automations = super::PreparedAutomations::new(input)?.map(std::sync::Arc::new);
+    phrase.voice_controls =
+        super::PreparedVoiceControls::new(input, family, phrase.automations.clone())?;
     let tuning = phrase
         .voice_controls
         .as_ref()
@@ -126,7 +128,9 @@ impl ExplicitScore {
                     phones: vec![ScorePhone {
                         language: language.id().to_owned(),
                         token: "sil".to_owned(),
-                        onset_offset_seconds: None,
+                        source: None,
+                        attributes: Default::default(),
+                        source_note_onset_seconds: None,
                     }],
                     kind: u32::from(family == VoiceFamily::Sv1),
                     flag: family == VoiceFamily::Sv1,
@@ -155,6 +159,9 @@ impl ExplicitScore {
             if parts == 0 || syllables.iter().any(Vec::is_empty) {
                 return Err(VoiceError::new(format!("Note {} has no phonemes", note.id)));
             }
+            let phoneme_attributes =
+                crate::model::PhonemeAttributes::read(&note.attributes).map_err(VoiceError::new)?;
+            let mut phone_index = 0;
             for (part_index, tokens) in syllables.into_iter().enumerate() {
                 score.notes.push(ScoreNote {
                     source_note_id: Some(note.id),
@@ -168,10 +175,22 @@ impl ExplicitScore {
                     pitch,
                     phones: tokens
                         .into_iter()
-                        .map(|token| ScorePhone {
-                            language: note_language.id().to_owned(),
-                            token,
-                            onset_offset_seconds: None,
+                        .map(|token| {
+                            let index = phone_index;
+                            phone_index += 1;
+                            ScorePhone {
+                                language: note_language.id().to_owned(),
+                                token,
+                                source: Some(crate::model::SourcePhone {
+                                    note_id: note.id,
+                                    phone_index: index,
+                                }),
+                                attributes: phoneme_attributes
+                                    .get(index)
+                                    .copied()
+                                    .unwrap_or_default(),
+                                source_note_onset_seconds: Some(begin_seconds),
+                            }
                         })
                         .collect(),
                     kind: 0,

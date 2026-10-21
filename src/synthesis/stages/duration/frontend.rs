@@ -16,8 +16,13 @@ const FRONTEND_TYPE: [u8; 16] = [
 pub struct ExplicitPhone {
     pub language: String,
     pub token: String,
-    /// Optional phoneme onset adjustment in seconds.
-    pub onset_offset_seconds: Option<f64>,
+    #[serde(default)]
+    pub source: Option<crate::model::SourcePhone>,
+    #[serde(default)]
+    pub attributes: crate::model::PhonemeAttributes,
+    /// Global seconds of the source note onset, before context padding.
+    #[serde(default)]
+    pub source_note_onset_seconds: Option<f64>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize)]
@@ -65,6 +70,11 @@ pub struct PhoneDuration {
     /// Authoritative acoustic frame count. DDS F0 derives a separate rounded
     /// clock from duration_seconds; SV2 uses this corrected count.
     pub frames: usize,
+}
+
+pub(crate) struct PhoneAllocations {
+    pub default_durations: Vec<PhoneDuration>,
+    pub durations: Vec<PhoneDuration>,
 }
 
 impl DurationRecord {
@@ -188,12 +198,19 @@ pub(crate) fn prepare_explicit_typed(
 
 /// Restore seconds and frame boundaries from the duration network's one-scalar
 /// output. This operates on the supplied records in their chronological order.
-pub fn postprocess(
+pub(crate) fn postprocess(
     tree: &PreparedTree,
     records: &[DurationRecord],
     raw_scalar: &[f32],
-) -> Result<Vec<PhoneDuration>> {
-    postprocess_typed(tree, records, raw_scalar, FRONTEND_TYPE)
+    phrase_start_seconds: f64,
+) -> Result<PhoneAllocations> {
+    postprocess_typed(
+        tree,
+        records,
+        raw_scalar,
+        FRONTEND_TYPE,
+        phrase_start_seconds,
+    )
 }
 
 /// Both model versions use inverse normalization, per-record softmax,
@@ -203,7 +220,8 @@ pub(crate) fn postprocess_typed(
     records: &[DurationRecord],
     raw_scalar: &[f32],
     expected_type: [u8; 16],
-) -> Result<Vec<PhoneDuration>> {
+    phrase_start_seconds: f64,
+) -> Result<PhoneAllocations> {
     let frontend = tree.node(frontend_node(tree, expected_type)?)?;
     if frontend.children.len() != 4 {
         return Err(VoiceError::new("Duration frontend requires four children"));
@@ -218,7 +236,10 @@ pub(crate) fn postprocess_typed(
         ));
     }
     if records.is_empty() {
-        return Ok(Vec::new());
+        return Ok(PhoneAllocations {
+            default_durations: Vec::new(),
+            durations: Vec::new(),
+        });
     }
     let normalizer = tree.range_normalizer(frontend.children[3])?;
     if normalizer.channels() != 1 {
@@ -269,36 +290,11 @@ pub(crate) fn postprocess_typed(
             });
         }
     }
-    // After flattening the records, each end boundary uses the first note's
-    // frame step and the next phone's onset adjustment.
     let (step, _) = records[0].timing()?;
-    let phones: Vec<_> = records.iter().flat_map(|record| &record.phones).collect();
-    let mut seconds = 0.0;
-    let mut previous = 0_usize;
-    for (index, phone) in output.iter_mut().enumerate() {
-        seconds += phone.duration_seconds;
-        let offset = phones
-            .get(index + 1)
-            .and_then(|p| p.onset_offset_seconds)
-            .unwrap_or(0.0);
-        if !offset.is_finite() {
-            return Err(VoiceError::new("Non-finite phoneme onset offset"));
-        }
-        let boundary = rounded_frames((seconds + offset) / step);
-        if !boundary.is_finite() || boundary > i32::MAX as f64 {
-            return Err(VoiceError::new(
-                "Phoneme boundary exceeds supported frame range",
-            ));
-        }
-        let minimum = if index == 0 { 0 } else { previous + 1 };
-        let end = (boundary.max(0.0) as usize).max(minimum);
-        phone.frames = end - previous;
-        previous = end;
-    }
-    Ok(output)
+    super::controls::allocate_boundaries(records, output, step, phrase_start_seconds)
 }
 
-fn rounded_frames(value: f64) -> f64 {
+pub(super) fn rounded_frames(value: f64) -> f64 {
     // Add a sign-matched bias and truncate; replacing this with round()
     // would change the tie rule.
     (value + f64::from_bits(0x3fdf_ffff_ffff_ffff).copysign(value)).trunc()

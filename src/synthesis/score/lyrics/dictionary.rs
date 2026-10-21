@@ -59,6 +59,14 @@ impl PhoneTable {
         self.entries.contains_key(key)
     }
 
+    pub(super) fn include_literal(&mut self, phone: &str) {
+        let key = phone.to_lowercase();
+        self.max_key_bytes = self.max_key_bytes.max(key.len());
+        self.entries
+            .entry(key)
+            .or_insert_with(|| vec![vec![phone.to_owned()]]);
+    }
+
     pub(super) fn get(&self, key: &str) -> Result<Phones> {
         let alternatives = self.entries.get(key).ok_or_else(|| unknown(key))?;
         if alternatives.len() != 1 {

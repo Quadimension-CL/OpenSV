@@ -166,15 +166,19 @@ fn piano_stack(app: &mut App, ui: &mut Ui) {
         .filter(|l| l.visible)
         .cloned()
         .collect();
-    let desired: f32 = lanes.iter().map(|l| l.height + 5.0).sum();
-    let phonemes = if app.view.phonemes { 46.0 } else { 0.0 };
-    let available = (tabs.top() - toolbar.bottom() - 125.0 - phonemes).max(0.0);
+    let phonemes = if app.view.phonemes {
+        app.view.phonemes_height + 5.0
+    } else {
+        0.0
+    };
+    let desired: f32 = lanes.iter().map(|l| l.height + 5.0).sum::<f32>() + phonemes;
+    let available = (tabs.top() - toolbar.bottom() - 125.0).max(0.0);
     let scale = if desired > available {
         available / desired.max(1.0)
     } else {
         1.0
     };
-    let mut y = tabs.top() - desired * scale - phonemes;
+    let mut y = tabs.top() - desired * scale;
     super::piano::show(
         app,
         &mut child(
@@ -184,19 +188,29 @@ fn piano_stack(app: &mut App, ui: &mut Ui) {
         ),
     );
     if app.view.phonemes {
-        let p = Rect::from_min_size(pos2(rect.left(), y), vec2(rect.width(), phonemes));
-        let mut phoneme_ui = child(ui, p, "phonemes");
-        phoneme_ui.label(RichText::new("æ  音素时值").color(MUTED));
-        phoneme_ui.label(RichText::new("尚无合成音素结果").size(11.0).color(MUTED));
-        y += phonemes;
+        let divider = Rect::from_min_size(pos2(rect.left(), y), vec2(rect.width(), 5.0 * scale));
+        let response = ui
+            .interact(divider, Id::new("phonemes-divider"), Sense::drag())
+            .on_hover_cursor(CursorIcon::ResizeVertical);
+        if response.dragged() {
+            app.view.phonemes_height = (app.view.phonemes_height
+                - response.drag_delta().y / scale.max(0.01))
+            .clamp(64.0, 500.0);
+        }
+        let p = Rect::from_min_size(
+            pos2(rect.left(), y + 5.0 * scale),
+            vec2(rect.width(), app.view.phonemes_height * scale),
+        );
+        super::phonemes::show(app, &mut child(ui, p, "phonemes"));
+        y += phonemes * scale;
     }
     let mut reorder = None;
     for lane in lanes {
         let r = Rect::from_min_size(
-            pos2(rect.left(), y + 5.0),
+            pos2(rect.left(), y + 5.0 * scale),
             vec2(rect.width(), lane.height * scale),
         );
-        let divider = Rect::from_min_size(pos2(rect.left(), y), vec2(rect.width(), 5.0));
+        let divider = Rect::from_min_size(pos2(rect.left(), y), vec2(rect.width(), 5.0 * scale));
         let response = ui
             .interact(divider, Id::new(("lane-divider", lane.id)), Sense::drag())
             .on_hover_cursor(CursorIcon::ResizeVertical);

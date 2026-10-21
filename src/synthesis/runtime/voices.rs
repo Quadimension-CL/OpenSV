@@ -137,6 +137,10 @@ impl Runtime {
             worker::Event::VisualPatches { revision, patches } if revision == v.revision => {
                 self.patch_visuals(patches)
             }
+            worker::Event::Phonemes {
+                revision,
+                snapshots,
+            } if revision == v.revision => self.complete_phonemes(snapshots),
             worker::Event::Source { revision, source } if revision == v.revision => {
                 let unchanged = v
                     .live
@@ -222,6 +226,7 @@ impl Runtime {
             self.context_import = super::ContextImport::default();
         }
         self.voices.clear();
+        self.phonemes.clear();
         self.export_owners.clear();
         self.stats = CacheStats::default();
         self.error = None;

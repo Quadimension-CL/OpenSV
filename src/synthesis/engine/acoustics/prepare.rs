@@ -73,12 +73,16 @@ pub fn prepare_acoustics(
             voice.model("duration")?,
             models::required_identity(duration_identity)?,
         )?
-        .predict_explicit(&phrase.records)?,
+        .predict_explicit(&phrase.records, phrase.start_seconds)?,
         VoiceFamily::Sv2 => DurationStage::prepare(
             voice.model("duration")?,
             models::required_identity(duration_identity)?,
         )?
-        .predict_explicit_seeded(&phrase.records, &duration_seeds)?,
+        .predict_explicit_seeded(
+            &phrase.records,
+            &duration_seeds,
+            phrase.start_seconds,
+        )?,
     };
     if duration
         .prediction
@@ -197,6 +201,7 @@ pub fn prepare_acoustics(
     if voice.family != VoiceFamily::Sv2 {
         crate::synthesis::engine::pitch::apply_dds_curves(&prepared_phrase, &mut pitch)?;
     }
+    crate::synthesis::engine::pitch::apply_pitch_delta(&prepared_phrase, &mut pitch, 0)?;
     let pitch_ms = started.elapsed().as_secs_f64() * 1000.0;
     #[cfg(feature = "synth-profile")]
     drop(profile);

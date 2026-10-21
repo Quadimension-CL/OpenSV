@@ -117,7 +117,9 @@ fn same_record(now: &DurationRecord, old: &DurationRecord) -> bool {
         && now.phones.iter().zip(&old.phones).all(|(a, b)| {
             a.language == b.language
                 && a.token == b.token
-                && a.onset_offset_seconds == b.onset_offset_seconds
+                && a.source == b.source
+                && a.attributes == b.attributes
+                && a.source_note_onset_seconds == b.source_note_onset_seconds
         })
 }
 

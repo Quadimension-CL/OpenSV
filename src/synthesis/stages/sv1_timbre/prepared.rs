@@ -52,7 +52,7 @@ impl PreparedSv1TimbreFrames {
             bank: &network.bank,
             style: &network.styles.neutral,
             frame_styles: frame_styles.as_ref(),
-            phone_factors: None,
+            frame_factors: sampled_pitch.projection_factors.as_deref(),
         })?;
         expanded.validate()?;
         if expanded.frames != frames

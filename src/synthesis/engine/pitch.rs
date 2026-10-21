@@ -1,9 +1,12 @@
 //! Pitch-control sampling shared by full, progressive and local synthesis.
 
-use crate::synthesis::{
-    score::PreparedPhrase,
-    stages::f0::{PitchResult, frontend::frame_count},
-    voice::{Result, VoiceError},
+use crate::{
+    model::Parameter,
+    synthesis::{
+        score::PreparedPhrase,
+        stages::f0::{PitchResult, frontend::frame_count},
+        voice::{Result, VoiceError},
+    },
 };
 
 pub(super) fn sv2_controls(phrase: &PreparedPhrase) -> Result<Option<Vec<f32>>> {
@@ -48,6 +51,31 @@ pub(super) fn apply_dds_curves(phrase: &PreparedPhrase, pitch: &mut PitchResult)
         if control.is_finite() {
             *value = control;
         }
+    }
+    Ok(())
+}
+
+/// Parameter pitch deviation is applied after model prediction and absolute
+/// pitch controls. Local replacements use their frame position in the owner.
+pub(super) fn apply_pitch_delta(
+    phrase: &PreparedPhrase,
+    pitch: &mut PitchResult,
+    first_frame: usize,
+) -> Result<()> {
+    let Some(automations) = &phrase.automations else {
+        return Ok(());
+    };
+    if !automations.has_parameter(Parameter::Pitch) {
+        return Ok(());
+    }
+    let values = automations.sample_parameter(
+        Parameter::Pitch,
+        phrase.start_seconds + first_frame as f64 * pitch.frame_seconds,
+        pitch.frame_seconds,
+        pitch.pitch.len(),
+    )?;
+    for (pitch, cents) in pitch.pitch.iter_mut().zip(values) {
+        *pitch = (f64::from(*pitch) + f64::from(cents) / 100.0) as f32;
     }
     Ok(())
 }

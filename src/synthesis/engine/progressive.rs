@@ -15,7 +15,7 @@ pub use prepare::prepare;
 use super::{OwnerSynthesis, PreparedRenderAcoustics, RenderResult};
 use crate::synthesis::{
     audio::RenderedAudio,
-    rendered::{PitchTrack, RenderVisuals, Waveform},
+    rendered::{PitchTrack, RenderVisuals, RenderedPhonemeTrack, Waveform},
     voice::Result,
 };
 use network::PreparedFrames;
@@ -26,6 +26,7 @@ pub struct PreparedRender {
     acoustic: PreparedRenderAcoustics,
     pcm: PcmStore,
     pitch: PitchTrack,
+    phonemes: RenderedPhonemeTrack,
     timbre_frames: OnceLock<PreparedFrames>,
 }
 
@@ -34,6 +35,10 @@ impl PreparedRender {
     /// this once and shares its values across ready PCM interval snapshots.
     pub fn pitch_track(&self) -> Result<PitchTrack> {
         Ok(self.pitch.clone())
+    }
+
+    pub fn phoneme_track(&self) -> RenderedPhonemeTrack {
+        self.phonemes.clone()
     }
 
     /// Existing unchanged regions are available before any new cursor runs.
@@ -65,6 +70,7 @@ impl PreparedRender {
         let started = Instant::now();
         let visuals = RenderVisuals {
             pitch: self.pitch,
+            phonemes: self.phonemes,
             waveform: Waveform::new(&audio),
         };
         let mut timings = self.acoustic.timings;
