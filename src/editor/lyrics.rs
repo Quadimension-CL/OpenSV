@@ -69,7 +69,7 @@ impl Editor {
                     && note.lyrics != **word
                 {
                     note.lyrics.clone_from(word);
-                    // An explicit pronunciation must not override the newly entered lyric.
+
                     note.phonemes.clear();
                     note.attributes.remove("phonemes");
                     changed += 1;
@@ -102,7 +102,7 @@ pub fn split_lyrics(text: &str, by_character: bool) -> Vec<String> {
                 if !letters.is_empty() {
                     result.push(std::mem::take(&mut letters));
                 }
-                // Keep small kana with their preceding kana, e.g. きゃ and ファ.
+
                 let previous_kana = result.len() > first
                     && result.last().is_some_and(|s| {
                         s.ends_with(|c| matches!(c, '\u{3041}'..='\u{3096}' | '\u{30a1}'..='\u{30fa}' | '\u{ff66}'..='\u{ff9d}'))

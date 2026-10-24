@@ -4,8 +4,6 @@ use crate::synthesis::inference::{affine::Affine, matrix::DenseMatrix};
 
 use super::{PreparedModule, PreparedNode, Result, TensorStorage, VoiceError};
 
-/// One matrix followed by an optional bias vector.
-/// Raw storage and decoded CPU weights are shared, not copied for each execution.
 pub struct PreparedAffine {
     pub weights: Arc<TensorStorage>,
     pub bias: Option<Arc<TensorStorage>>,
@@ -30,8 +28,10 @@ impl PreparedAffine {
                 rows,
                 columns,
                 values,
+                ..
             } => DenseMatrix::from_float(*rows, *columns, Arc::clone(values)),
             TensorStorage::QuantizedMatrix {
+                legacy_integer_execution,
                 rows,
                 columns,
                 bits,
@@ -39,7 +39,7 @@ impl PreparedAffine {
                 scales,
                 values,
             } => {
-                DenseMatrix::from_quantized(*rows, *columns, *bits, *input_exponent, scales, values)
+                DenseMatrix::from_quantized_execution(*rows, *columns, *bits, *input_exponent, scales, values,*legacy_integer_execution)
             }
             TensorStorage::FloatVector { .. } => {
                 return Err(VoiceError::new("Affine first child is not a matrix"));

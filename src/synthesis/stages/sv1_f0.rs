@@ -1,5 +1,3 @@
-//! DDS pitch program with SV1 NOFS and SV2 compatibility input contracts.
-
 mod controls;
 mod features;
 mod frontend;
@@ -85,8 +83,7 @@ impl<'a> Sv1F0Stage<'a> {
             .vector()
             .ok_or_else(|| VoiceError::new("Compatible F0 style is not a float vector"))?
             .to_vec();
-        // Enable the default scalar style flag. Add its learned contribution
-        // to the stored style independently of position C.
+
         let mut runtime = ModelRuntime::new(tree);
         let projection =
             runtime.execute(root.children[2], &Sequence::new(1, 1, vec![1.0])?, true)?;
@@ -144,8 +141,7 @@ impl<'a> Sv1F0Stage<'a> {
                 "Native DDS F0 requires continuous phone durations",
             ));
         }
-        // The SV2 adapter consumes the duration stage's corrected phone frame
-        // counts directly; it does not quantize NOFS phone seconds.
+
         let phone_frames: Vec<_> = phones.iter().map(|phone| phone.frames).collect();
         self.predict(notes, phones, &phone_frames, pitch_seeds, vibrato)
     }
@@ -234,8 +230,7 @@ impl<'a> Sv1F0Stage<'a> {
         };
         let mut pitch = Vec::with_capacity(sampled.pitch.len());
         for frame in 0..sampled.pitch.len() {
-            // Initial boundary checks are asymmetric: frame 0 contributes only
-            // its right neighbor, and frame 1 has no left term.
+
             let left = if frame > 1 {
                 sampled.pitch[frame - 1] * 0.25
             } else {
@@ -270,8 +265,7 @@ fn transposition(notes: &[FrontendNote]) -> Result<f32> {
         if !pitch.is_finite() {
             return Err(VoiceError::new("Compatible F0 note pitch is not finite"));
         }
-        // Round the upper/lower bounds outward before computing the
-        // whole-phrase shift shared by all notes.
+
         minimum = minimum.min(pitch.floor());
         maximum = maximum.max(pitch.ceil());
     }

@@ -42,7 +42,7 @@ pub(super) fn pair(ui: &mut Ui, content: impl FnOnce(&mut Ui, f32)) {
 }
 
 pub(super) fn error(ui: &mut Ui, message: &str) {
-    ui.colored_label(Color32::from_rgb(218, 142, 126), message);
+    ui.colored_label(Color32::from_rgb(218, 142, 126), crate::i18n::message(message));
 }
 
 pub(super) fn combo<T: PartialEq + Clone>(
@@ -54,7 +54,7 @@ pub(super) fn combo<T: PartialEq + Clone>(
     let label = options
         .iter()
         .find(|(v, _)| v == value)
-        .map_or("未支持的值", |(_, label)| *label);
+        .map_or(crate::i18n::t("未支持的值"), |(_, label)| *label);
     ComboBox::from_id_salt(id)
         .width(ui.available_width())
         .selected_text(label)

@@ -2,6 +2,7 @@
 
 mod app;
 mod editor;
+mod i18n;
 mod ui;
 
 use rynthv::{midi, model, storage, synthesis};

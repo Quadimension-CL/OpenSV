@@ -5,12 +5,11 @@ use crate::synthesis::{
     voice::{Result, VoiceError},
 };
 
-/// Full-owner conditions keep absolute noise and feature identities unchanged
-/// while the acoustic operators consume their rows incrementally.
 pub(super) struct Input {
     pub first_frame: usize,
     pub features: Features,
     pub normalized_pitch: Vec<f32>,
+    pub refinement_pitch: Vec<f32>,
     pub impulse: Vec<f32>,
     pub pitch_hz: Vec<f32>,
     pub controls: Sequence,
@@ -18,7 +17,7 @@ pub(super) struct Input {
     pub timbre_noise: Sequence,
     pub ppg_shape: Vec<f32>,
     pub ppg_intensity: Vec<f32>,
-    pub timbre_shape: Vec<f32>,
+    pub timbre_intensity: Vec<f32>,
     pub primary_style: Sequence,
     pub secondary_style: Sequence,
 }
@@ -46,7 +45,7 @@ impl Input {
         for values in [input.normalized_pitch, input.phone_impulse, input.pitch_hz] {
             scalar(values, frames)?;
         }
-        for values in [input.ppg_shape, input.ppg_intensity, input.timbre_shape] {
+        for values in [input.ppg_shape, input.ppg_intensity, input.timbre_intensity] {
             scalar(values, low)?;
         }
         let style = |source: Option<&Sequence>| -> Result<Sequence> {
@@ -65,6 +64,7 @@ impl Input {
             first_frame: 0,
             features: Features::Dense(input.frame_features.clone()),
             normalized_pitch: input.normalized_pitch.to_vec(),
+            refinement_pitch: refinement_pitch(network, input.pitch_hz.iter().map(|hz| hz.ln()))?,
             impulse: input.phone_impulse.to_vec(),
             pitch_hz: input.pitch_hz.to_vec(),
             controls: input.controls.clone(),
@@ -72,7 +72,7 @@ impl Input {
             timbre_noise: input.timbre_noise.clone(),
             ppg_shape: input.ppg_shape.to_vec(),
             ppg_intensity: input.ppg_intensity.to_vec(),
-            timbre_shape: input.timbre_shape.to_vec(),
+            timbre_intensity: input.timbre_intensity.to_vec(),
             primary_style: style(input.primary_style)?,
             secondary_style: style(input.secondary_style)?,
         })
@@ -82,8 +82,7 @@ impl Input {
         network: &TimbreNetwork<'_>,
         features: Features,
         records: &AcousticRecords,
-        primary_style_weights: Option<&Sequence>,
-        secondary_style_weights: Option<&Sequence>,
+        styles: Option<&super::super::styles::AcousticStyles>,
     ) -> Result<Self> {
         let frames = records.total_frames - records.first_frame;
         if features.frames() != frames
@@ -94,12 +93,12 @@ impl Input {
                 "Timbre stream records differ from their feature timeline",
             ));
         }
-        let frontend = network.tree.node(network.layout.frontend)?;
+        let frontend = crate::synthesis::stages::f0::frontend::NoteFrontend::prepare(
+            network.tree,
+            network.layout.frontend,
+        )?;
         let normalizer = network.tree.range_normalizer(
-            *frontend
-                .children
-                .get(3)
-                .ok_or_else(|| VoiceError::new("Timbre frontend has no pitch normalizer"))?,
+            frontend.pitch_normalizer_node,
         )?;
         let normalized_pitch = records
             .frames
@@ -135,22 +134,33 @@ impl Input {
         for values in [
             &records.ppg_shape,
             &records.ppg_intensity,
-            &records.timbre_shape,
+            &records.timbre_intensity,
         ] {
             scalar(values, low)?;
         }
         require(&controls, frames, 2)?;
         require(&ppg_noise, low, network.layout.ppg_noise_channels)?;
         require(&timbre_noise, low, network.layout.timbre_noise_channels)?;
-        let style = |weights| {
-            network
-                .styles
-                .sample_frames(weights, records.total_frames, &records.low_rate_positions)
+        let neutral = Sequence::new(
+            low,
+            network.styles.neutral.len(),
+            network.styles.neutral.repeat(low),
+        )?;
+        let (primary_style, secondary_style) = if let Some(styles) = styles {
+            require(&styles.primary,low,network.styles.neutral.len())?;
+            require(&styles.secondary,low,network.styles.neutral.len())?;
+            (styles.primary.clone(),styles.secondary.clone())
+        } else {
+            (neutral.clone(), neutral)
         };
         Ok(Self {
             first_frame: records.first_frame,
             features,
             normalized_pitch,
+            refinement_pitch: refinement_pitch(
+                network,
+                records.frames.iter().map(|frame| frame.clamped_log_hz),
+            )?,
             impulse,
             pitch_hz,
             controls,
@@ -158,11 +168,33 @@ impl Input {
             timbre_noise,
             ppg_shape: records.ppg_shape.clone(),
             ppg_intensity: records.ppg_intensity.clone(),
-            timbre_shape: records.timbre_shape.clone(),
-            primary_style: style(primary_style_weights)?,
-            secondary_style: style(secondary_style_weights)?,
+            timbre_intensity: records.timbre_intensity.clone(),
+            primary_style,
+            secondary_style,
         })
     }
+}
+
+fn refinement_pitch(
+    network: &TimbreNetwork<'_>,
+    values: impl Iterator<Item = f32>,
+) -> Result<Vec<f32>> {
+    if !matches!(
+        network.layout.architecture,
+        super::super::config::TimbreArchitecture::Sixteen
+    ) {
+        return Ok(Vec::new());
+    }
+    let normalizer = network
+        .tree
+        .range_normalizer(network.layout.log_pitch_normalizer)?;
+    values
+        .map(|value| {
+            normalizer
+                .normalize_scalar(0, value, true)
+                .map_err(|error| VoiceError::new(error.to_string()))
+        })
+        .collect()
 }
 
 fn scalar(values: &[f32], count: usize) -> Result<()> {

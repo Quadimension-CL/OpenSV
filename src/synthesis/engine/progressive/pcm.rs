@@ -1,4 +1,3 @@
-//! Sparse model PCM. Readiness belongs to real blocks, never zero allocation.
 mod buffer;
 mod clock;
 mod plan;
@@ -28,6 +27,18 @@ pub struct PcmStore {
 }
 
 impl PcmStore {
+    pub(super) fn complete(components: &PcmComponents) -> Result<Self> {
+        if components.primary.len() != components.secondary.len() {
+            return Err(VoiceError::new(
+                "Complete PCM components have different lengths",
+            ));
+        }
+        let mut store = Self::new(components.start_seconds, components.primary.len())?;
+        store.samples = [components.primary.to_vec(), components.secondary.to_vec()];
+        store.ready.fill(true);
+        Ok(store)
+    }
+
     pub fn new(start_seconds: f64, total_samples: usize) -> Result<Self> {
         let clock = Clock::new(start_seconds, total_samples)?;
         let first_block = clock.origin.div_euclid(BLOCK);
@@ -42,7 +53,6 @@ impl PcmStore {
         })
     }
 
-    /// Dirty blocks remain available solely as seam context, not playback.
     pub fn from_existing(base: &PcmComponents, dirty: Range<usize>) -> Result<Self> {
         if base.primary.len() != base.secondary.len() || dirty.start >= dirty.end {
             return Err(VoiceError::new("Invalid progressive PCM baseline"));

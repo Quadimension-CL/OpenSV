@@ -1,14 +1,17 @@
-//! Shared note/phone conditioning network.
-//!
-//! F0 and timbre use this same program with distinct weights and style widths.
-
 mod encode;
 mod expand;
 mod prepare;
+mod phones;
+mod phonetic_prepare;
 mod project;
 mod rows;
+pub mod phonetic_context;
+#[cfg(feature="acoustic-diagnostic")]
+pub mod diagnostic;
 
 pub use expand::{ExpandedFeatures, ExpansionInput, FeatureRows};
+pub use phones::FeaturePhones;
+use phones::PhoneEncoder;
 use std::sync::Arc;
 
 use crate::synthesis::{
@@ -19,10 +22,12 @@ use crate::synthesis::{
 pub const FEATURE_TYPE_ID: [u8; 16] = [
     0xc9, 0x73, 0x5a, 0xd3, 0xe2, 0x78, 0x74, 0xcf, 0x5f, 0x28, 0x2c, 0x5f, 0xdf, 0x8e, 0xff, 0x6a,
 ];
+pub const PHONETIC_FEATURE_TYPE_ID:[u8;16]=[
+    0xa1,0xd1,0x0a,0x74,0x1d,0x35,0x42,0x47,
+    0x38,0x26,0x6a,0x20,0x0f,0x92,0x44,0x4a,
+];
 
-/// Empty ownership slot representing an absent optional projection or head.
-/// It is not an Identity operator.
-const EMPTY_SLOT_TYPE_ID: [u8; 16] = [
+pub(crate) const EMPTY_SLOT_TYPE_ID: [u8; 16] = [
     0xd8, 0x9e, 0x1b, 0x8a, 0x6c, 0x01, 0xd9, 0x3d, 0x18, 0xa8, 0xd1, 0xa7, 0x40, 0x1e, 0x1c, 0x0e,
 ];
 
@@ -43,20 +48,18 @@ pub struct FeatureNetwork<'a> {
     children: [usize; 10],
     configuration: FeatureConfiguration,
     note_input_channels: usize,
-    phone_embedding: Embedding,
+    phone_encoder: PhoneEncoder,
     language_embedding: Embedding,
 }
 
 pub struct FeatureInputs<'a> {
-    /// Normalized note scalars, one complete row per note.
+
     pub notes: &'a [f32],
     pub style: Option<&'a [f32]>,
     pub phone_to_note: &'a [usize],
-    pub phone_ids: &'a [usize],
-    pub language_ids: &'a [usize],
+    pub phones: &'a FeaturePhones,
 }
 
-/// Per-note and per-phone context rows, shared immutably across requests.
 #[derive(Clone, Debug)]
 pub struct FeatureEncoding {
     pub note_count: usize,
@@ -78,13 +81,18 @@ pub struct FrameFeatureInputs<'a> {
 
 pub struct FrameConditioning {
     pub frames: usize,
-    /// The optional pointwise branch (child 8); absent for an empty ownership slot.
+
     pub pointwise: Option<Vec<f32>>,
-    /// The dilated conditioning branch (child 9).
+
     pub convolutional: Vec<f32>,
 }
 
 impl FeatureNetwork<'_> {
+
+    pub(super) fn shared_frame_source(&self) -> bool {
+        self.phonetic()
+    }
+
     pub fn configuration(&self) -> FeatureConfiguration {
         self.configuration
     }
@@ -128,8 +136,6 @@ impl FeatureNetwork<'_> {
         )
     }
 
-    /// Pure duration expansion. Timbre also calls this directly before its
-    /// separate sampling program; the F0 wrapper subsequently calls `project`.
     pub fn expand(
         &self,
         input: &ExpansionInput<'_>,
@@ -171,6 +177,8 @@ impl FeatureNetwork<'_> {
                 ));
             }
         }
+        #[cfg(feature="acoustic-diagnostic")]
+        diagnostic::capture_frames(self.tree,&output)?;
         Ok(output)
     }
 }

@@ -1,8 +1,3 @@
-//! Learned harmonic amplitudes/phases with Hann overlap-add.
-//!
-//! Synthesizes a bank of cosines using prepared frequency factors and a
-//! two-hop overlap buffer, without multiplying an incoming PCM stream.
-
 use std::{f32::consts::TAU, sync::Arc};
 
 use crate::synthesis::{
@@ -20,13 +15,11 @@ pub struct GainFilter {
     work: Vec<f32>,
     first: bool,
     finished: bool,
+    native_amplitude_limit: bool,
 }
 
 impl GainFilter {
-    /// `factors_node` is vocoder root child 4. Root child 5 predicts twice
-    /// this vector's width: log amplitudes, followed by phases in radians.
-    /// `frame_period` is the time-axis interval used to
-    /// derive `hop = round(sample_rate * frame_period)`.
+
     pub fn prepare(
         tree: &PreparedTree,
         factors_node: usize,
@@ -59,8 +52,7 @@ impl GainFilter {
             ));
         }
         let length = hop * 2;
-        // Root construction passes scale = 1.0. The period is exactly 2H,
-        // rather than the symmetric-window alternative 2H - 1.
+
         let window = (0..length)
             .map(|sample| (1.0 - (sample as f32 / length as f32 * TAU).cos()) * 0.5)
             .collect();
@@ -73,11 +65,16 @@ impl GainFilter {
             work: vec![0.0; length],
             first: true,
             finished: false,
+            native_amplitude_limit: false,
         })
     }
 
     pub fn parameter_channels(&self) -> usize {
         self.factors.len() * 2
+    }
+
+    pub fn set_native_amplitude_limit(&mut self) {
+        self.native_amplitude_limit = true;
     }
 
     pub fn reset(&mut self) {
@@ -87,11 +84,6 @@ impl GainFilter {
         self.finished = false;
     }
 
-    /// `phase_cycles` is the caller's accumulated fundamental phase, before
-    /// multiplication by the model's frequency factor and by 2*pi. It is not
-    /// the learned phase: that occupies the second half of `parameters`.
-    /// Output rows each contain `hop` consecutive PCM samples. The initial
-    /// half-window is suppressed; flush emits the trailing half-window.
     pub fn render(
         &mut self,
         frequency_hz: &[f32],
@@ -136,7 +128,13 @@ impl GainFilter {
             self.work.fill(0.0);
             let controls = parameters.frame(frame)?;
             for (band, &factor) in self.factors.iter().enumerate() {
-                let amplitude = controls[band].exp();
+
+                let log_amplitude = if self.native_amplitude_limit {
+                    controls[band].min(0.0)
+                } else {
+                    controls[band]
+                };
+                let amplitude = log_amplitude.exp();
                 let phase =
                     phase_cycles[frame] * factor * TAU + controls[self.factors.len() + band];
                 if !amplitude.is_finite() || !phase.is_finite() {

@@ -1,6 +1,3 @@
-//! SSE2 is part of the Windows x86-64 baseline. Output lanes are independent;
-//! separate MULPS/ADDPS preserve each lane's established scalar reduction order.
-
 #[cfg(not(target_arch = "x86_64"))]
 compile_error!("The packed synthesis convolution backend requires x86-64 SSE2");
 
@@ -17,7 +14,7 @@ pub(super) struct Output {
 impl Output {
     #[inline(always)]
     pub(super) fn zero() -> Self {
-        // SAFETY: all x86-64 CPUs support the SSE instructions used here.
+
         unsafe {
             Self {
                 low: _mm_setzero_ps(),
@@ -36,8 +33,7 @@ impl Output {
             padded[..values.len()].copy_from_slice(values);
             &padded
         };
-        // SAFETY: source contains eight readable f32 values; loadu has no
-        // alignment requirement. Tail lanes never access a neighboring frame.
+
         unsafe {
             Self {
                 low: _mm_loadu_ps(source.as_ptr()),
@@ -55,8 +51,7 @@ impl Output {
         } else {
             &mut padded
         };
-        // SAFETY: target contains eight writable f32 values, without an
-        // alignment requirement. Partial output blocks use the stack buffer.
+
         unsafe {
             _mm_storeu_ps(target.as_mut_ptr(), self.low);
             _mm_storeu_ps(target.as_mut_ptr().add(4), self.high);
@@ -68,7 +63,7 @@ impl Output {
 
     #[inline(always)]
     pub(super) fn add(&mut self, value: Self) {
-        // SAFETY: x86-64 SSE is available and these operations do not dereference memory.
+
         unsafe {
             self.low = _mm_add_ps(self.low, value.low);
             self.high = _mm_add_ps(self.high, value.high);
@@ -80,8 +75,7 @@ impl Output {
 pub(super) fn accumulate_one(weights: &[f32], source: &[f32], sum: &mut Output) {
     debug_assert_eq!(weights.len() / 8, source.len());
     for (weights, &sample) in weights.as_chunks::<8>().0.iter().zip(source) {
-        // SAFETY: each weights chunk has eight readable f32 values; the
-        // source sample is copied by the safe iterator. SSE is x86-64 baseline.
+
         unsafe {
             let low = _mm_loadu_ps(weights.as_ptr());
             let high = _mm_loadu_ps(weights.as_ptr().add(4));
@@ -104,8 +98,7 @@ pub(super) fn accumulate_four(weights: &[f32], source: [&[f32]; 4], sums: &mut [
         .zip(source[2])
         .zip(source[3]);
     for ((((weights, &a), &b), &c), &d) in rows {
-        // SAFETY: each weights chunk provides two complete, unaligned vectors.
-        // All four input samples are obtained from safe slice iterators.
+
         unsafe {
             let low = _mm_loadu_ps(weights.as_ptr());
             let high = _mm_loadu_ps(weights.as_ptr().add(4));

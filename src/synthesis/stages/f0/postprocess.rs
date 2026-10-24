@@ -1,15 +1,9 @@
-//! F0 control blending and per-note output. These operations do not generate
-//! a fundamental frequency.
-
 use std::fmt;
 
-/// Frame duration: 240 samples at 48 kHz.
 pub const FRAME_SECONDS: f64 = 240.0 / 48_000.0;
-/// Result context on each side of a note, not an edit invalidation radius.
+
 pub const NOTE_CONTEXT_FRAMES: usize = 100;
 
-// Left/right float32 weights differ slightly; evaluating a symmetric
-// cosine would lose those roundings.
 const LEFT_WEIGHTS: [u32; 15] = [
     0x3f7d_8a60,
     0x3f76_41b0,
@@ -80,10 +74,6 @@ impl fmt::Display for PostprocessError {
 
 impl std::error::Error for PostprocessError {}
 
-/// Blends absolute pitch controls onto actual model output, in the same pitch
-/// unit as that output. NaN means an absent control, not an unvoiced frame.
-/// The caller supplies an already aligned control frame for every model frame.
-/// All argument validation happens before `generated` is modified.
 pub fn mix_controls(generated: &mut [f32], controls: &[f32]) -> Result<(), PostprocessError> {
     if generated.len() != controls.len() {
         return Err(PostprocessError::LengthMismatch {
@@ -141,28 +131,22 @@ pub fn mix_controls(generated: &mut [f32], controls: &[f32]) -> Result<(), Postp
     Ok(())
 }
 
-/// Duration and note pitch from the prepared, sequential synthesis records.
-/// Include any rest records that advance the synthesis cursor. Editor note
-/// onsets alone are insufficient to construct these records.
 #[derive(Clone, Copy, Debug)]
 pub struct NotePitchSpan {
     pub duration_seconds: f64,
-    /// Same pitch unit as the generated sequence; no Hz conversion is implied.
+
     pub pitch: f32,
 }
 
 #[derive(Clone, Debug)]
 pub struct NotePitchCurve {
-    /// Index of the first sample in the phrase's 5 ms time grid. May be negative.
+
     pub first_frame: i64,
     pub body_frames: usize,
-    /// Relative to `NotePitchSpan::pitch`, with 100 frames of context per side.
+
     pub pitch_offsets: Vec<f32>,
 }
 
-/// Splits actual generated output by individually rounded note durations.
-/// Out-of-range context uses the global sequence's nearest endpoint. The
-/// zero-frame branch leaves its 200 context samples at zero.
 pub fn split_note_curves(
     generated: &[f32],
     notes: &[NotePitchSpan],

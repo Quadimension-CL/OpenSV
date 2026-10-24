@@ -24,7 +24,13 @@ pub(super) fn lyric(app: &mut App, ui: &mut Ui, rect: Rect, reference: &GroupRef
         return;
     };
     let clip = crate::ui::group_geometry::clip_rect(reference, rect, &app.view.piano);
-    r.max.x = r.max.x.max(r.min.x + 130.0).min(clip.right());
+    if edit.phonemes {
+        r=Rect::from_min_max(pos2(r.left(),r.top()-app.view.row_height),pos2(r.right(),r.top()));
+    }
+    r.max.x = if edit.phonemes {
+        let text=ui.painter().layout_no_wrap(edit.text.clone(),FontId::proportional(12.0),super::super::theme::TEXT);
+        (r.min.x+(text.size().x+8.0).max(50.0)).min(clip.right())
+    }else {r.max.x.max(r.min.x+130.0).min(clip.right())};
     let mut edit_ui = child(ui, r, ("lyric", edit.id));
     let response = edit_ui.add_sized(
         r.size(),
@@ -51,7 +57,8 @@ pub(super) fn lyric(app: &mut App, ui: &mut Ui, rect: Rect, reference: &GroupRef
     if escape {
         response.surrender_focus();
     } else if enter || tab || response.lost_focus() {
-        app.editor.set_lyric(edit.id, edit.text);
+        if edit.phonemes {app.editor.set_phonemes(edit.id,edit.text);}
+        else {app.editor.set_lyric(edit.id, edit.text);}
         response.surrender_focus();
         if tab {
             let mut notes: Vec<_> = app
@@ -68,8 +75,9 @@ pub(super) fn lyric(app: &mut App, ui: &mut Ui, rect: Rect, reference: &GroupRef
             {
                 app.lyric = Some(LyricEdit {
                     id: next.id,
-                    text: next.lyrics.clone(),
+                    text: if edit.phonemes {super::phonemes::text(app,reference,next)}else{next.lyrics.clone()},
                     focus: true,
+                    phonemes: edit.phonemes,
                 });
                 app.editor.selected = BTreeSet::from([next.id]);
             }

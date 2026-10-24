@@ -1,5 +1,3 @@
-//! Cross-thread task timings associated with a session's captured call path.
-
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex, MutexGuard},
@@ -11,18 +9,14 @@ use serde::Serialize;
 #[derive(Debug, Serialize)]
 pub struct ParallelTiming {
     pub path: String,
-    /// Completed task scopes, rather than calls dispatching a parallel batch.
+
     pub calls: u64,
-    /// Sum of each task's wall duration. This is not CPU time; workers can be
-    /// descheduled, and concurrent tasks overlap with main-thread span time.
+
     pub worker_task_ms: f64,
-    /// Tasks still running when the session ended; excluded from the sum.
+
     pub open_tasks_at_finish: usize,
 }
 
-/// Share this captured path across worker tasks without creating a session on
-/// those threads. An inactive handle calls the closure without a clock read,
-/// allocation, or synchronization.
 #[derive(Clone, Default)]
 pub struct ParallelWork {
     counter: Option<Arc<Counter>>,
@@ -78,8 +72,7 @@ impl Registry {
 
 impl Drop for Registry {
     fn drop(&mut self) {
-        // Starting another session also ends any handles retained from the
-        // previous generation, even if that session never called finish.
+
         for counter in self.counters.values() {
             counter.lock().active = false;
         }
@@ -136,7 +129,7 @@ struct Task<'a> {
 
 impl Drop for Task<'_> {
     fn drop(&mut self) {
-        // Exclude the bookkeeping lock from the task's measured duration.
+
         let elapsed = self.started.elapsed();
         let mut state = self.counter.lock();
         state.running -= 1;

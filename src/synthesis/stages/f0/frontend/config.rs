@@ -1,6 +1,5 @@
 use crate::synthesis::voice::{Result, VoiceError};
 
-/// Five base features plus four-byte tag strings.
 pub(super) struct Configuration {
     pub frame_seconds: f64,
     pub tags: Vec<String>,

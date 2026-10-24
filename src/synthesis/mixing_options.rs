@@ -1,5 +1,3 @@
-//! Validate mixer and export features before publishing or writing audio.
-
 use crate::model::Extra;
 use serde_json::Value;
 

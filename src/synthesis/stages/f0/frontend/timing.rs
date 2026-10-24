@@ -2,8 +2,6 @@ use crate::synthesis::voice::{Result, VoiceError};
 
 use super::FrontendNote;
 
-// Rounding adds the greatest f64 below 0.5 and truncates. Preserve
-// this expression instead of replacing it with Rust's ties-away `round`.
 const ROUNDING_BIAS: f64 = f64::from_bits(0x3fdf_ffff_ffff_ffff);
 
 fn rounded_frames(value: f64) -> Result<usize> {
@@ -49,8 +47,6 @@ pub(crate) fn duration_seconds(note: &FrontendNote) -> Result<f64> {
     Ok(duration)
 }
 
-/// Number of 5 ms (normally) frames consumed by this partition and its linked
-/// notes, with each partition boundary rounded independently.
 pub fn frame_count(note: &FrontendNote) -> Result<usize> {
     rounded_frames(duration_seconds(note)? / note.frame_seconds)
 }

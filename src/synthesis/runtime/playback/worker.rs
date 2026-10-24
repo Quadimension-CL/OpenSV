@@ -103,8 +103,7 @@ fn apply(
                 player.clear();
                 return Err(error.to_string());
             }
-            // A queued pause/play without a seek must retain the Load target,
-            // even when that newer command superseded this command's serial.
+
             player.seek(seconds).map_err(|error| error.to_string())?;
             if serial != latest.load(Ordering::Acquire) {
                 return Ok(());
@@ -123,9 +122,7 @@ fn apply(
                 if let Some(seconds) = seek {
                     player.seek(seconds).map_err(|error| error.to_string())?;
                 }
-                // Later pause/play commands inherit an earlier queued seek.
-                // Only the latest command may start output, but every seek
-                // applies in order while source installation is pending.
+
                 if serial != latest.load(Ordering::Acquire) {
                     return Ok(());
                 }

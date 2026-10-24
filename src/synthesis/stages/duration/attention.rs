@@ -1,8 +1,3 @@
-//! Windowed attention with overlapping frames.
-//!
-//! Windows, padding masks, relative positions and overlap weights are part of
-//! the model; replacing this operation with global attention changes its output.
-
 use crate::synthesis::{
     inference::ops::attention_relative::AttentionOptions,
     voice::{PreparedTree, Result, VoiceError},
@@ -35,14 +30,11 @@ pub(super) fn execute(
         return Ok(Vec::new());
     }
     let attention = module.children[0];
-    // Finalizing a sequence shorter than one window bypasses windowing and
-    // its local-attention descriptor entirely.
+
     if frames < config.length {
         return tree.execute_attention(attention, input, input, input, AttentionOptions::default());
     }
 
-    // Finalization appends a whole hop even at an exact hop boundary.
-    // This produces a distinct final window with the right-boundary weights.
     let padded_frames = frames
         .checked_add(config.hop - frames % config.hop)
         .ok_or_else(|| VoiceError::new("Attention padded frame count overflows"))?;
@@ -83,6 +75,7 @@ pub(super) fn execute(
                 window: Some(config.length - config.hop),
                 position_offset: query_start as i32,
                 key_padding_mask: (valid < config.length).then_some(&padding_mask),
+                distance_penalty: 0.0,
             },
         )?;
         if rendered.len() != (query_end - query_start) * features {
@@ -121,7 +114,7 @@ impl Window {
                     .expect("checked payload"),
             )
         };
-        // Flag bit 0 is required; reject unrecognized flag combinations.
+
         if word(0) != 1 {
             return Err(VoiceError::new("Unsupported attention window flags"));
         }
@@ -133,8 +126,6 @@ impl Window {
         Ok(Self { length, hop })
     }
 
-    /// Boundary-dependent weights applied before summing overlapping outputs.
-    /// There is no averaging divisor.
     fn weight(&self, frame: usize, first: bool, last: bool) -> f32 {
         if first && last {
             return 1.0;

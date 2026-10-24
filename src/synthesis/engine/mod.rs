@@ -1,16 +1,13 @@
-//! One voice's offline neural program. Model weights are shared, execution
-//! state belongs to a render. Scoped cancellation reaches model nodes and
-//! numerical blocks as well as the four stage publication checkpoints.
-
 mod acoustics;
 mod components;
+mod ensemble;
+mod ensemble_pitch;
 pub mod incremental;
 mod models;
 mod pitch;
 mod prepared;
 pub mod progressive;
 mod render;
-mod voice_controls;
 
 pub use acoustics::{
     AcousticRender, PreparedRenderAcoustics, StageTimings, prepare_acoustics, synthesize_acoustics,
@@ -18,7 +15,8 @@ pub use acoustics::{
 pub use components::PcmComponents;
 pub use incremental::synthesize_owner;
 pub use prepared::{OwnerSynthesis, PreparedAcoustics, PreparedModelFeatures};
-pub use render::{RenderResult, synthesize};
+pub use render::{RenderResult, synthesize, synthesize_host_pitch};
+pub use pitch::DdsPitchClock;
 
 use serde::Serialize;
 

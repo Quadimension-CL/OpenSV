@@ -1,15 +1,9 @@
-//! The ordinary vocoder source excitation.
-//! LF spectral coefficients are phase-aligned, synthesized through chirp-Z,
-//! and overlap-added with a two-hop Hann window. This is an internal source
-//! for the learned vocoder filters, never a substitute singing output.
-
 use super::{excitation_fourier::ChirpSynthesizer, excitation_spectrum};
 use crate::synthesis::{
     execution::checkpoint,
     voice::{Result, VoiceError},
 };
 
-/// Physical inputs consumed by the excitation generator.
 #[derive(Clone, Copy, Debug)]
 pub struct ExcitationFrame {
     pub f0_hz: f32,
@@ -19,10 +13,9 @@ pub struct ExcitationFrame {
 
 #[derive(Debug)]
 pub struct ExcitationBatch {
-    /// Consecutive hop-sized source waveforms. The first input primes overlap;
-    /// `final_batch` returns the remaining right half of that overlap.
+
     pub samples: Vec<f32>,
-    /// Phase after each accepted input frame, including the priming frame.
+
     pub phase_cycles: Vec<f64>,
 }
 
@@ -43,9 +36,7 @@ pub struct Excitation {
 }
 
 impl Excitation {
-    /// `gain` is `exp(root.excitation_log_gain)`; `frame_period` comes from
-    /// the condition module. For the initial Mo Xu model the hop is 240 and
-    /// the period is float32 0.005. The root selects source mode zero.
+
     pub fn new(hop: usize, frame_period: f32, gain: f32) -> Result<Self> {
         #[cfg(feature = "synth-profile")]
         let _profile = crate::synthesis::profiling::span("vocoder.excitation.prepare");
@@ -90,7 +81,6 @@ impl Excitation {
         })
     }
 
-    /// Reset is an explicit stream boundary, not an unvoiced-frame action.
     pub fn reset(&mut self) {
         self.overlap.fill(0.0);
         self.phase = 0.0;
@@ -135,14 +125,12 @@ impl Excitation {
             .try_reserve_exact(frames.len())
             .map_err(|_| VoiceError::new("Could not allocate vocoder excitation phase history"))?;
 
-        // Spectral/FFT scratch is reusable and has no musical state. Keep the
-        // small overlap/phase state local until every frame has succeeded.
         let mut overlap = self.overlap.clone();
         let mut phase = self.phase;
         let mut priming = self.priming;
         for frame in frames {
             checkpoint()?;
-            // Multiply in f32 before promoting to the running f64 phase.
+
             phase += f64::from(self.frame_period * frame.f0_hz);
             if !phase.is_finite() {
                 return Err(VoiceError::new("Vocoder excitation phase overflow"));
@@ -183,8 +171,7 @@ impl Excitation {
 
     fn synthesize_frame(&mut self, frame: ExcitationFrame, phase: f64) -> Result<()> {
         let limit = (self.sample_rate * 0.5) / frame.f0_hz;
-        // An out-of-range harmonic count skips excitation. A saturating cast
-        // would instead create the maximum allowed set of harmonics.
+
         let count = if limit < i32::MAX as f32 {
             limit as usize
         } else {

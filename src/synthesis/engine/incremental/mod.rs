@@ -1,4 +1,3 @@
-//! Local acoustic invalidation, shared by progressive and complete consumers.
 pub(super) mod acoustics;
 mod range;
 
@@ -12,8 +11,6 @@ use crate::synthesis::{
     voice::{PreparedVoice, Result},
 };
 
-/// Materialize all PCM through the same persistent streaming program used by
-/// preview. There is no separate bounded-render path with a synthetic final.
 pub fn synthesize_owner(
     voice: &PreparedVoice,
     identity: Option<u64>,

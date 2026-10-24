@@ -1,8 +1,3 @@
-//! Root configuration and child layouts of the SV1 and SV2 spectral vocoders.
-//!
-//! Both configurations occupy 18 bytes. SV1 has no positional sampler;
-//! SV2 may bind one.
-
 use crate::synthesis::voice::{PreparedTree, Result, VoiceError, embedded::types::VOCODER_TYPE_ID};
 
 pub const ROOT_TYPE: [u8; 16] = [
@@ -16,15 +11,16 @@ pub struct Configuration {
     pub noise_log_gain: f32,
     pub use_input_projection: bool,
     pub gate_postfilter_noise: bool,
-    /// Copied without conversion, independently of the exponentiated source gains.
+
     pub trailing_scalar: f32,
+    pub has_fast_postfilter: bool,
 }
 
 impl Configuration {
     pub fn parse(payload: &[u8]) -> Result<Self> {
-        if payload.len() != 18 {
+        if !matches!(payload.len(), 18 | 19) {
             return Err(VoiceError::new(
-                "Vocoder root requires an 18-byte configuration",
+                "Vocoder root requires an 18-byte or 19-byte configuration",
             ));
         }
         let word = |at: usize| {
@@ -41,6 +37,7 @@ impl Configuration {
             use_input_projection: payload[12] & 1 != 0,
             gate_postfilter_noise: payload[13] & 1 != 0,
             trailing_scalar: f32::from_bits(word(14)),
+            has_fast_postfilter: payload.get(18).is_some_and(|flag| flag & 1 != 0),
         };
         if config.bands == 0
             || !config.excitation_log_gain.is_finite()
@@ -55,8 +52,6 @@ impl Configuration {
     }
 }
 
-/// Ownership edges explicitly bound by the root's prepare method.
-/// Their order is not a sequential neural network execution order.
 #[derive(Clone, Debug)]
 pub struct Modules {
     pub conditions: usize,
@@ -72,6 +67,7 @@ pub struct Modules {
     pub synthesis_filterbank: usize,
     pub postfilter_network: usize,
     pub postfilter_projection: usize,
+    pub fast_postfilter: Option<usize>,
     pub recurrent_sampler: Option<usize>,
 }
 
@@ -88,8 +84,13 @@ impl Modules {
             }
         };
         let base = 1 + usize::from(config.use_input_projection);
-        // This root always enables the third-filter branch.
-        let required = base + 11;
+        if config.has_fast_postfilter && !positional_allowed {
+            return Err(VoiceError::new(
+                "Fast postfilter requires the SV2 vocoder root",
+            ));
+        }
+
+        let required = base + 11 + usize::from(config.has_fast_postfilter);
         let maximum = required + usize::from(positional_allowed);
         if !(required..=maximum).contains(&node.children.len()) {
             return Err(VoiceError::new(
@@ -111,6 +112,7 @@ impl Modules {
             analysis_filterbank: at(base + 8),
             postfilter_network: at(base + 9),
             postfilter_projection: at(base + 10),
+            fast_postfilter: config.has_fast_postfilter.then(|| at(base + 11)),
             recurrent_sampler: node.children.get(required).copied(),
         })
     }

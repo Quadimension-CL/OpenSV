@@ -9,7 +9,7 @@ pub(super) fn maximum_index(values: &[f32], bins: usize, frames: usize) -> Resul
         .chunks_exact(bins)
         .map(|frame| {
             let mut best = 0;
-            // Retain the first maximum when multiple bins tie.
+
             for index in 1..bins {
                 if frame[index] > frame[best] {
                     best = index;
@@ -24,8 +24,7 @@ pub(super) fn expected_index(values: &[f32], bins: usize, frames: usize) -> Resu
     validate(values, bins, frames)?;
     let mut output = Vec::with_capacity(frames);
     for frame in values.chunks_exact(bins) {
-        // Apply max-subtracted softmax, then compute the weighted bin index
-        // using the prepared [0, 1, ..., bins-1] vector.
+
         let mut weights = frame.to_vec();
         softmax::execute(&mut weights).map_err(|error| VoiceError::new(error.to_string()))?;
         for (index, weight) in weights.iter_mut().enumerate() {
@@ -36,7 +35,6 @@ pub(super) fn expected_index(values: &[f32], bins: usize, frames: usize) -> Resu
     Ok(output)
 }
 
-/// Eight-lane reduction with a fixed accumulation order for consistent rounding.
 fn sum(values: &[f32]) -> f32 {
     let mut lanes = [0.0_f32; 8];
     let (blocks, remainder) = values.as_chunks::<8>();

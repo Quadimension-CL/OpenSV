@@ -1,5 +1,3 @@
-//! Maps the twelve registered aliases to a single canonical type.
-
 use super::{Entry, common, neural, stages, vocoder};
 
 pub(super) fn tag_hash(tag: &[u8]) -> u64 {
@@ -25,8 +23,7 @@ pub(super) fn resolve(alias: u64) -> [u8; 16] {
     {
         return *id;
     }
-    // Keep an unknown registration distinct without dispatching to a guessed
-    // operator. Model preparation will report it as unsupported.
+
     let mut id = [0; 16];
     id[..8].copy_from_slice(b"SV1UNKN\0");
     id[8..].copy_from_slice(&alias.to_le_bytes());

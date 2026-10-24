@@ -11,9 +11,9 @@ use eframe::egui::*;
 pub(super) fn show(app: &mut App, ui: &mut Ui, entry: &VoiceCatalogEntry) {
     ui.spacing_mut().item_spacing.y = 10.0;
     let selection = entry.selection();
-    text(ui, format!("声库类型：{}", family_name(entry)));
+    text(ui, crate::lformat!("声库类型：{}", family_name(entry)));
     if let Some(range) = &entry.pitch_range {
-        weak(ui, format!("推荐音域  {range}"));
+        weak(ui, crate::lformat!("推荐音域  {range}"));
     }
     if let Some(config) = app
         .synthesis
@@ -22,7 +22,7 @@ pub(super) fn show(app: &mut App, ui: &mut Ui, entry: &VoiceCatalogEntry) {
     {
         text(
             ui,
-            format!(
+            crate::lformat!(
                 "支持语言：{}",
                 config
                     .supported_languages
@@ -33,12 +33,15 @@ pub(super) fn show(app: &mut App, ui: &mut Ui, entry: &VoiceCatalogEntry) {
             ),
         );
         if !config.styles.is_empty() {
-            text(ui, format!("唱法：{}", config.styles.join(" · ")));
+            text(ui, crate::lformat!("唱法：{}", config.styles.join(" · ")));
+        }
+        if !config.speakers.is_empty() {
+            text(ui, crate::lformat!("合唱：{} 位成员", config.speakers.len()));
         }
     } else if !entry.languages.is_empty() {
         text(
             ui,
-            format!(
+            crate::lformat!(
                 "语言：{}",
                 entry
                     .languages
@@ -61,4 +64,7 @@ pub(super) fn show(app: &mut App, ui: &mut Ui, entry: &VoiceCatalogEntry) {
         }
     }
     feedback::diagnostics(app, ui, entry);
+    if entry.family.is_some_and(|family| family.requires_identity()) {
+        super::super::duration_key::voice_settings(app, ui, entry);
+    }
 }

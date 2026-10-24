@@ -57,7 +57,7 @@ pub(super) fn encode(
 }
 
 fn sinusoidal(value: f32, width: usize, output: &mut Vec<f32>) {
-    // SV1 computes this scale with exp2 and an f32 exponent coefficient.
+
     let scale = -26.575_424_f32 / width as f32;
     let start = output.len();
     output.resize(start + width, 0.0);

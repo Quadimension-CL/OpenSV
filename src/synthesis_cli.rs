@@ -1,4 +1,3 @@
-//! Headless resource preparation and individual model-module execution.
 #[path = "synthesis_cli/args.rs"]
 mod args;
 #[path = "synthesis_cli/context.rs"]

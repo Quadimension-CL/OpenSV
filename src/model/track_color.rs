@@ -1,6 +1,5 @@
 use serde::{Deserialize, Serialize};
 
-/// SVP stores track colors as eight hexadecimal digits in ARGB order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(try_from = "String", into = "String")]
 pub struct TrackColor(u32);
@@ -39,8 +38,7 @@ impl Default for TrackColor {
 
 impl super::Project {
     pub fn next_track_color(&self) -> TrackColor {
-        // Alternate hue families first; after exhausting unused colors, reuse
-        // the least common one. Vocal and instrumental tracks share the palette.
+
         [4, 7, 0, 3, 9, 5, 11, 1, 6, 10, 2, 8]
             .into_iter()
             .map(|index| TrackColor::PALETTE[index].1)

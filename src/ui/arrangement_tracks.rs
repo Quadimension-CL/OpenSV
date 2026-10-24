@@ -46,7 +46,7 @@ pub fn show(app: &mut App, ui: &mut Ui, timeline_left: f32, scroll: f32) {
             )
             .max(0)
         });
-        // The context position must survive while its popup owns the pointer.
+
         let context_id = Id::new(("insert-group-position", track.id));
         if response.secondary_clicked()
             && let Some(at) = at
@@ -63,7 +63,7 @@ pub fn show(app: &mut App, ui: &mut Ui, timeline_left: f32, scroll: f32) {
             app.editor.select_track(track.id);
         }
         response.context_menu(|ui| {
-            if ui.button("插入新的音符组").clicked() {
+            if ui.button(crate::i18n::t("插入新的音符组")).clicked() {
                 let at = ui
                     .ctx()
                     .data(|d| d.get_temp::<i64>(context_id))
@@ -73,8 +73,8 @@ pub fn show(app: &mut App, ui: &mut Ui, timeline_left: f32, scroll: f32) {
                 ui.close();
             }
             ui.separator();
-            ui.add_enabled(false, Button::new("粘贴"));
-            ui.add_enabled(false, Button::new("作为链接音符组粘贴"));
+            ui.add_enabled(false, Button::new(crate::i18n::t("粘贴")));
+            ui.add_enabled(false, Button::new(crate::i18n::t("作为链接音符组粘贴")));
         });
         let mut references: Vec<_> = track.visible_references().collect();
         references.sort_by_key(|r| app.editor.reference == Some(r.id));
@@ -126,6 +126,7 @@ fn group(app: &mut App, ui: &mut Ui, body: Rect, track: &Track, reference: &Grou
         return;
     }
     let selected = app.editor.reference == Some(reference.id);
+    let missing=app.synthesis.voice_not_installed(track,reference);
     let painter = ui.painter().with_clip_rect(body.intersect(ui.clip_rect()));
     let fill = if selected {
         colors.accent.lerp_to_gamma(CANVAS, 0.15)
@@ -143,8 +144,8 @@ fn group(app: &mut App, ui: &mut Ui, body: Rect, track: &Track, reference: &Grou
     );
     for note in &group.notes {
         if let Some((start, end)) = reference.note_range(note) {
-            let y = (body.top() + 40.0 - (note.pitch + reference.pitch_offset - 60) as f32 * 0.6)
-                .clamp(body.top() + 22.0, body.bottom() - 5.0);
+            let y = (body.top() + if missing {29.0}else{40.0} - (note.pitch + reference.pitch_offset - 60) as f32 * 0.6)
+                .clamp(body.top() + 22.0, body.bottom() - if missing {20.0}else{5.0});
             content.line_segment(
                 [
                     pos2(x_at(body, &app.view.arrangement, beats(start)), y),
@@ -153,6 +154,13 @@ fn group(app: &mut App, ui: &mut Ui, body: Rect, track: &Track, reference: &Grou
                 Stroke::new(1.5, colors.highlight),
             );
         }
+    }
+    if missing {
+        let center=pos2(clip.left()+11.0,body.bottom()-10.0);
+        super::icons::Icon::Warning.paint(ui,Rect::from_center_size(center,Vec2::splat(13.0)),TEXT);
+        let db=crate::model::effective_singer_database(&track.main_ref.database,&reference.database);
+        let name=db.get("name").and_then(serde_json::Value::as_str).unwrap_or("");
+        content.text(center+vec2(9.0,0.0),Align2::LEFT_CENTER,name,FontId::proportional(11.0),TEXT);
     }
     let editable = reference.blick_absolute_end >= 0;
     let response = ui.interact(
@@ -164,6 +172,7 @@ fn group(app: &mut App, ui: &mut Ui, body: Rect, track: &Track, reference: &Grou
             Sense::click()
         },
     );
+    if missing {response.clone().on_hover_text(crate::i18n::t("未安装"));}
     if response.clicked() || response.secondary_clicked() {
         app.commit_lyric();
         app.editor.select_reference(track.id, reference.id);

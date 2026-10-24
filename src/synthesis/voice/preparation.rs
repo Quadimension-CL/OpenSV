@@ -2,21 +2,25 @@ use super::{PreparedTree, PreparedTreeSummary, Result, VoiceError, VoiceFamily};
 use serde::Serialize;
 use std::sync::{Arc, OnceLock};
 
-/// Immutable prepared parameters shared by all future rendering sessions.
-/// Mutable temporal state belongs in a separate session, never in this object.
 pub struct PreparedVoice {
     files: Vec<PreparedFile>,
     pub family: VoiceFamily,
     pub f0_enhancement: Option<f32>,
-    pub style_names: Vec<String>,
+    pub(crate) retained_acoustic_noise_only: bool,
+    pub(crate) vocal_modes: Option<Vec<String>>,
+    pub speakers: Vec<super::Speaker>,
+    pub member_vocal_modes: Arc<[super::MemberVocalModes]>,
+    pub(crate) speaker: Option<usize>,
     summary: OnceLock<PreparationSummary>,
 }
 
+#[derive(Clone)]
 pub(super) struct PreparedFile {
     pub name: String,
     pub trees: Vec<PreparedModel>,
 }
 
+#[derive(Clone)]
 pub(super) struct PreparedModel {
     pub role: &'static str,
     pub tree: Arc<PreparedTree>,
@@ -25,8 +29,7 @@ pub(super) struct PreparedModel {
 #[derive(Serialize)]
 pub struct PreparationSummary {
     pub files: Vec<PreparedFileSummary>,
-    /// Structural readiness, separate from local session conditioning and an
-    /// individual score's supported options.
+
     pub stage_programs_available: bool,
     pub stage_preparation_error: Option<String>,
 }
@@ -48,17 +51,20 @@ impl PreparedVoice {
         files: Vec<PreparedFile>,
         family: VoiceFamily,
         f0_enhancement: Option<f32>,
-        style_names: Vec<String>,
+        speakers: Vec<super::Speaker>,
     ) -> Self {
         let model = Self {
             files,
             family,
             f0_enhancement,
-            style_names,
+            retained_acoustic_noise_only: false,
+            vocal_modes: None,
+            speakers,
+            member_vocal_modes: Arc::from([]),
+            speaker: None,
             summary: OnceLock::new(),
         };
-        // Metadata is prepared with weights on the loader thread, not per UI frame.
-        model.summary();
+
         model
     }
 
@@ -88,11 +94,44 @@ impl PreparedVoice {
         })
     }
 
+    pub(super) fn with_vocal_modes(mut self, names: Option<Vec<String>>) -> Result<Self> {
+        self.vocal_modes = names;
+        self.member_vocal_modes = super::member_modes::prepare(&self)?.into();
+        self.summary();
+        Ok(self)
+    }
+
+    pub(super) fn with_acoustic_version(mut self, version: &str) -> Self {
+        self.retained_acoustic_noise_only = self.family == VoiceFamily::Sv2
+            && super::noise_cadence::retained_only(version);
+        self
+    }
+
     fn prepare_stages(&self) -> Result<()> {
         use crate::synthesis::stages::{
             compatible_duration::CompatibleDurationStage, f0::F0Stage, sv1_f0::Sv1F0Stage,
             sv1_timbre::Sv1TimbreNetwork, timbre::TimbreNetwork, vocoder::VocoderStage,
         };
+        if !self.speakers.is_empty() {
+            for (role, slot) in [("duration", 1), ("f0", 2), ("timbre", 4), ("timbre", 5)] {
+                let tree = self.model(role)?;
+                let root = tree.node(tree.root_index())?;
+                let node = *root
+                    .children
+                    .get(slot)
+                    .ok_or_else(|| VoiceError::new("Choir model has no speaker conditioning"))?;
+                if !matches!(tree.tensor(node)?, super::TensorStorage::FloatMatrix { rows, .. } if *rows == self.speakers.len())
+                {
+                    return Err(VoiceError::new(
+                        "Choir speaker count differs between metadata and model stages",
+                    ));
+                }
+            }
+            for speaker in &self.speakers {
+                self.member(speaker)?.prepare_stages()?;
+            }
+            return Ok(());
+        }
         let duration = self.model("duration")?;
         match self.family {
             VoiceFamily::Sv1 => {
@@ -118,16 +157,40 @@ impl PreparedVoice {
                 super::DurationConfiguration::parse(
                     &duration.resource_bytes(duration.root_index())?,
                 )?;
-                F0Stage::prepare(self.model("f0")?)?;
-                TimbreNetwork::prepare(self.model("timbre")?)?;
+                super::speakers::vector(duration, root.children[1], self.speaker)?;
+                F0Stage::prepare(self.model("f0")?, self.speaker)?;
+                TimbreNetwork::prepare(self.model("timbre")?, self.speaker, self.retained_acoustic_noise_only)?;
             }
         }
         VocoderStage::prepare(self.model("vocoder")?)?;
         Ok(())
     }
 
-    /// Models are identified by their registered resource role, independently
-    /// of container filenames, file ordering, or inline/indexed representation.
+    pub fn member(&self, speaker: &super::Speaker) -> Result<Self> {
+        if self
+            .speakers
+            .get(speaker.id)
+            .is_none_or(|entry| entry.name != speaker.name || entry.part != speaker.part || entry.gain_db.to_bits()!=speaker.gain_db.to_bits())
+        {
+            return Err(VoiceError::new("Speaker is not a member of this choir"));
+        }
+        let catalogue=self.member_vocal_modes.iter().find(|m|m.speaker_id==speaker.id)
+            .ok_or_else(||VoiceError::new("Choir member vocal-mode catalogue has not been prepared"))?;
+        Ok(Self {
+            files: self.files.clone(),
+            family: self.family,
+            f0_enhancement: self.f0_enhancement,
+            retained_acoustic_noise_only: self.retained_acoustic_noise_only,
+            vocal_modes: Some(catalogue.public_names.clone()),
+            member_vocal_modes: Arc::clone(&self.member_vocal_modes),
+            speakers: Vec::new(),
+            speaker: Some(speaker.id),
+            summary: OnceLock::new(),
+        })
+    }
+
+    pub fn selected_speaker(&self) -> Option<usize> {self.speaker}
+
     pub fn model(&self, role: &str) -> Result<&PreparedTree> {
         Ok(self.find_model(role)?.tree.as_ref())
     }
@@ -161,7 +224,6 @@ impl PreparedVoice {
             .ok_or_else(|| VoiceError::new("Prepared model file/tree index is out of range"))
     }
 
-    /// Diagnostic execution of one identified module.
     pub fn execute_module(
         &self,
         file: usize,

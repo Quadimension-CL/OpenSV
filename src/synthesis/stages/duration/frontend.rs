@@ -1,6 +1,3 @@
-//! Explicit-phone duration frontend and frame allocation. All note times
-//! here are seconds.
-
 use serde::{Deserialize, Serialize};
 
 use crate::synthesis::{
@@ -16,22 +13,17 @@ const FRONTEND_TYPE: [u8; 16] = [
 pub struct ExplicitPhone {
     pub language: String,
     pub token: String,
-    #[serde(default)]
-    pub source: Option<crate::model::SourcePhone>,
-    #[serde(default)]
-    pub attributes: crate::model::PhonemeAttributes,
-    /// Global seconds of the source note onset, before context padding.
-    #[serde(default)]
-    pub source_note_onset_seconds: Option<f64>,
+
+    pub onset_offset_seconds: Option<f64>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize)]
 pub struct DurationNote {
-    /// Sample rate from the engine configuration.
+
     pub sample_rate: u32,
-    /// Frame hop in samples from the engine configuration.
+
     pub hop_samples: f64,
-    /// Note duration before any record subdivision.
+
     pub duration_seconds: f64,
     pub pitch: f32,
 }
@@ -40,9 +32,9 @@ pub struct DurationNote {
 pub struct DurationRecord {
     pub phones: Vec<ExplicitPhone>,
     pub note: DurationNote,
-    /// Durations of the linked notes.
+
     pub linked_durations_seconds: Vec<f64>,
-    /// Number of equal temporal partitions and the selected partition index.
+
     pub parts: u32,
     pub part_index: u32,
     pub pitch_offset: f32,
@@ -64,17 +56,10 @@ pub struct PhoneFeatures {
 pub struct PhoneDuration {
     pub record_index: usize,
     pub phone_index: usize,
-    /// SV1 retains continuous allocation seconds; SV2 adapters retain
-    /// their frame-rounded allocation.
-    pub duration_seconds: f64,
-    /// Authoritative acoustic frame count. DDS F0 derives a separate rounded
-    /// clock from duration_seconds; SV2 uses this corrected count.
-    pub frames: usize,
-}
 
-pub(crate) struct PhoneAllocations {
-    pub default_durations: Vec<PhoneDuration>,
-    pub durations: Vec<PhoneDuration>,
+    pub duration_seconds: f64,
+
+    pub frames: usize,
 }
 
 impl DurationRecord {
@@ -95,7 +80,7 @@ impl DurationRecord {
         }
         let step = self.note.hop_samples / f64::from(self.note.sample_rate);
         let part = f64::from(self.part_index);
-        // Preserve multiplication/division order to keep boundary rounding stable.
+
         let start =
             rounded_frames(self.note.duration_seconds * (part / f64::from(self.parts)) / step);
         let end = rounded_frames(
@@ -135,7 +120,6 @@ pub fn prepare_explicit(
     prepare_explicit_typed(tree, records, FRONTEND_TYPE)
 }
 
-/// Explicit-phone feature contract shared by model versions 1 and 2.
 pub(crate) fn prepare_explicit_typed(
     tree: &PreparedTree,
     records: &[DurationRecord],
@@ -196,32 +180,49 @@ pub(crate) fn prepare_explicit_typed(
     Ok(output)
 }
 
-/// Restore seconds and frame boundaries from the duration network's one-scalar
-/// output. This operates on the supplied records in their chronological order.
-pub(crate) fn postprocess(
+pub fn postprocess(
     tree: &PreparedTree,
     records: &[DurationRecord],
     raw_scalar: &[f32],
-    phrase_start_seconds: f64,
-) -> Result<PhoneAllocations> {
-    postprocess_typed(
-        tree,
-        records,
-        raw_scalar,
-        FRONTEND_TYPE,
-        phrase_start_seconds,
-    )
+) -> Result<Vec<PhoneDuration>> {
+
+    let allocation_scalar = sv2_allocation_scalars(raw_scalar);
+    postprocess_typed(tree, records, &allocation_scalar, FRONTEND_TYPE)
 }
 
-/// Both model versions use inverse normalization, per-record softmax,
-/// rounded boundaries and phoneme onset adjustments.
+fn sv2_allocation_scalars(raw: &[f32]) -> Vec<f32> {
+    raw.iter()
+        .map(|&value| {
+
+            let scaled = value * 0.5;
+            scaled + 0.5
+        })
+        .collect()
+}
+
 pub(crate) fn postprocess_typed(
     tree: &PreparedTree,
     records: &[DurationRecord],
     raw_scalar: &[f32],
     expected_type: [u8; 16],
-    phrase_start_seconds: f64,
-) -> Result<PhoneAllocations> {
+) -> Result<Vec<PhoneDuration>> {
+    postprocess_biased(tree,records,raw_scalar,expected_type,None)
+}
+
+pub fn postprocess_controlled(
+    tree:&PreparedTree,records:&[DurationRecord],prediction:&super::DurationPrediction,control:f32,
+)->Result<Vec<PhoneDuration>> {
+    if !control.is_finite() || prediction.impulse_values.len()!=prediction.scalars.len() {
+        return Err(VoiceError::new("Invalid consonant duration conditions"));
+    }
+    let adjustment=(1.0+control.clamp(-0.9,0.9)).ln();
+    let biases:Vec<_>=prediction.impulse_values.iter().map(|&value|if value>0.0 {adjustment}else{0.0}).collect();
+    postprocess_biased(tree,records,&sv2_allocation_scalars(&prediction.scalars),FRONTEND_TYPE,Some(&biases))
+}
+
+fn postprocess_biased(
+    tree:&PreparedTree,records:&[DurationRecord],raw_scalar:&[f32],expected_type:[u8;16],biases:Option<&[f32]>,
+)->Result<Vec<PhoneDuration>> {
     let frontend = tree.node(frontend_node(tree, expected_type)?)?;
     if frontend.children.len() != 4 {
         return Err(VoiceError::new("Duration frontend requires four children"));
@@ -236,10 +237,7 @@ pub(crate) fn postprocess_typed(
         ));
     }
     if records.is_empty() {
-        return Ok(PhoneAllocations {
-            default_durations: Vec::new(),
-            durations: Vec::new(),
-        });
+        return Ok(Vec::new());
     }
     let normalizer = tree.range_normalizer(frontend.children[3])?;
     if normalizer.channels() != 1 {
@@ -255,6 +253,12 @@ pub(crate) fn postprocess_typed(
         return Err(VoiceError::new(
             "Duration output normalization returned invalid scalars",
         ));
+    }
+    if let Some(biases)=biases {
+        if biases.len()!=count || biases.iter().any(|v|!v.is_finite()) {
+            return Err(VoiceError::new("Duration allocation bias differs from phone records"));
+        }
+        for (value,bias) in transformed.iter_mut().zip(biases) {*value+=bias;}
     }
     let mut output = Vec::with_capacity(count);
     let mut cursor = 0;
@@ -290,12 +294,69 @@ pub(crate) fn postprocess_typed(
             });
         }
     }
+
     let (step, _) = records[0].timing()?;
-    super::controls::allocate_boundaries(records, output, step, phrase_start_seconds)
+    let phones: Vec<_> = records.iter().flat_map(|record| &record.phones).collect();
+    let mut seconds = 0.0;
+    let mut previous = 0_usize;
+    for (index, phone) in output.iter_mut().enumerate() {
+        seconds += phone.duration_seconds;
+        let offset = phones
+            .get(index + 1)
+            .and_then(|p| p.onset_offset_seconds)
+            .unwrap_or(0.0);
+        if !offset.is_finite() {
+            return Err(VoiceError::new("Non-finite phoneme onset offset"));
+        }
+        let boundary = rounded_frames((seconds + offset) / step);
+        if !boundary.is_finite() || boundary > i32::MAX as f64 {
+            return Err(VoiceError::new(
+                "Phoneme boundary exceeds supported frame range",
+            ));
+        }
+        let minimum = if index == 0 { 0 } else { previous + 1 };
+        let end = (boundary.max(0.0) as usize).max(minimum);
+        phone.frames = end - previous;
+        previous = end;
+    }
+    Ok(output)
 }
 
-pub(super) fn rounded_frames(value: f64) -> f64 {
-    // Add a sign-matched bias and truncate; replacing this with round()
-    // would change the tie rule.
+fn rounded_frames(value: f64) -> f64 {
+
     (value + f64::from_bits(0x3fdf_ffff_ffff_ffff).copysign(value)).trunc()
+}
+
+#[cfg(test)]
+mod sv2_allocation_tests {
+    use super::sv2_allocation_scalars;
+
+    #[test]
+    fn conversion_is_a_copy_and_retains_raw_backprojection_input() {
+        let raw = [-1.0_f32, -0.5, -0.0, 0.0, 0.5, 1.0];
+        let original_bits = raw.map(f32::to_bits);
+        let mut allocation = sv2_allocation_scalars(&raw);
+        assert_eq!(allocation, [0.0, 0.25, 0.5, 0.5, 0.75, 1.0]);
+        assert_eq!(raw.map(f32::to_bits), original_bits);
+
+        allocation[0] = 123.0;
+        assert_eq!(raw.map(f32::to_bits), original_bits);
+    }
+
+    #[test]
+    fn no_clipping_or_bulk_boundary_exception() {
+        let raw = [-3.0_f32, -2.0, -1.0, -0.5, 0.0, 0.5, 1.0, 2.0, 3.0];
+        let expected = [-1.0_f32, -0.5, 0.0, 0.25, 0.5, 0.75, 1.0, 1.5, 2.0];
+        for count in [0, 1, 7, 8, 9] {
+            assert_eq!(sv2_allocation_scalars(&raw[..count]), expected[..count]);
+        }
+    }
+
+    #[test]
+    fn invalid_scalars_are_not_repaired_before_typed_validation() {
+        let allocation = sv2_allocation_scalars(&[f32::NAN, f32::INFINITY, f32::NEG_INFINITY]);
+        assert!(allocation[0].is_nan());
+        assert_eq!(allocation[1], f32::INFINITY);
+        assert_eq!(allocation[2], f32::NEG_INFINITY);
+    }
 }

@@ -2,4 +2,6 @@ pub mod midi;
 pub mod model;
 pub mod platform;
 pub mod storage;
+pub mod style_presets;
+pub mod project_import;
 pub mod synthesis;

@@ -1,10 +1,7 @@
-//! Bounded, ordered acoustic-to-PCM handoff. Only the worker owns mutable
-//! vocoder state; the caller can publish ready PCM before producing more input.
-
 use crate::synthesis::{
     execution::{self, Cancellation},
     inference::Sequence,
-    stages::vocoder::{VocoderOutput, VocoderStage, VoiceControl},
+    stages::vocoder::{VocoderOutput, VocoderStage},
     voice::{PreparedTree, Result, VoiceError},
 };
 use std::{
@@ -16,8 +13,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-// Bound prefetch by counting all submitted-but-unconsumed batches, including
-// currently executing work.
 const MAX_OUTSTANDING: usize = 2;
 const WAIT: Duration = Duration::from_millis(10);
 
@@ -25,7 +20,6 @@ struct Input {
     sequence: usize,
     physical: Sequence,
     controls: Option<Sequence>,
-    voice_controls: Option<Vec<VoiceControl>>,
     natural_final: bool,
 }
 
@@ -47,12 +41,11 @@ pub(super) struct Pipeline {
 }
 
 impl Pipeline {
-    pub fn new(tree: Arc<PreparedTree>) -> Result<Self> {
+    pub fn new(tree: Arc<PreparedTree>,effects:Option<crate::synthesis::stages::vocoder::effects::EffectTimeline>,compatible_dispatch:bool,seeds:Option<Arc<[u64]>>) -> Result<Self> {
         let cancellation = Cancellation::child(execution::current());
         let worker_cancellation = cancellation.clone();
         let (input, inputs) = mpsc::sync_channel(MAX_OUTSTANDING);
-        // Outstanding accounting bounds this queue too. An unblocked sender
-        // lets Drop close both ends and join even when no result is requested.
+
         let (outputs, output) = mpsc::channel();
         #[cfg(feature = "synth-profile")]
         let profile = crate::synthesis::profiling::parallel_work("pipeline.vocoder");
@@ -64,6 +57,9 @@ impl Pipeline {
                         &tree,
                         &inputs,
                         &outputs,
+                        effects,
+                        compatible_dispatch,
+                        seeds,
                         #[cfg(feature = "synth-profile")]
                         profile,
                     );
@@ -91,7 +87,6 @@ impl Pipeline {
         &mut self,
         physical: Sequence,
         controls: Option<Sequence>,
-        voice_controls: Option<Vec<VoiceControl>>,
         natural_final: bool,
     ) -> Result<()> {
         if !self.can_submit()
@@ -100,9 +95,6 @@ impl Pipeline {
             || controls.as_ref().is_some_and(|controls| {
                 controls.channels != 2 || physical.frames != controls.frames
             })
-            || voice_controls
-                .as_ref()
-                .is_some_and(|controls| controls.len() != physical.frames)
         {
             return Err(VoiceError::new("Invalid progressive vocoder submission"));
         }
@@ -111,7 +103,6 @@ impl Pipeline {
             sequence: self.submitted,
             physical,
             controls,
-            voice_controls,
             natural_final,
         };
         match self.input.as_ref().expect("open pipeline").try_send(input) {
@@ -124,9 +115,7 @@ impl Pipeline {
                 "Progressive vocoder exceeded its queue budget",
             )),
             Err(TrySendError::Disconnected(_)) => {
-                // Setup failures are queued before the input receiver closes.
-                // Preserve that diagnosis rather than replacing it with a
-                // generic channel failure or silently reverting to serial work.
+
                 while self.poll()?.is_some() {}
                 Err(VoiceError::new(
                     "Progressive vocoder worker stopped accepting input",
@@ -144,8 +133,6 @@ impl Pipeline {
         self.accept(result).map(Some)
     }
 
-    /// A short wait yields CPU while still allowing the caller to consume
-    /// edits/seeks between advances instead of blocking on a whole model tail.
     pub fn wait(&mut self) -> Result<Option<Output>> {
         let result = match self
             .output
@@ -176,8 +163,7 @@ impl Pipeline {
         self.input.take();
         self.output.take();
         if let Some(worker) = self.worker.take() {
-            // Normal errors are sent through output. Drop cannot propagate a
-            // panic, while an unexpected worker exit is reported by poll/wait.
+
             let _ = worker.join();
         }
     }
@@ -197,11 +183,18 @@ fn run(
     tree: &PreparedTree,
     inputs: &Receiver<Input>,
     outputs: &mpsc::Sender<Result<Output>>,
+    effects:Option<crate::synthesis::stages::vocoder::effects::EffectTimeline>,
+    compatible_dispatch:bool,
+    seeds:Option<Arc<[u64]>>,
     #[cfg(feature = "synth-profile")] profile: crate::synthesis::profiling::ParallelWork,
 ) -> Result<()> {
     execution::checkpoint()?;
     let started = Instant::now();
-    let mut vocoder = VocoderStage::prepare(tree)?.into_stream()?;
+    let mut stage=VocoderStage::prepare(tree)?;
+    stage.effects=effects;
+    if compatible_dispatch {stage.set_compatible_dispatch();}
+    if let Some(seeds)=seeds {stage.set_editor_seed_source(seeds);}
+    let mut vocoder = stage.into_stream()?;
     let mut setup_ms = started.elapsed().as_secs_f64() * 1000.0;
     loop {
         execution::checkpoint()?;
@@ -217,7 +210,6 @@ fn run(
             vocoder.process(
                 &input.physical,
                 input.controls.as_ref(),
-                input.voice_controls.as_deref(),
                 input.natural_final,
             )
         })?;
@@ -225,7 +217,6 @@ fn run(
         let pcm = vocoder.process(
             &input.physical,
             input.controls.as_ref(),
-            input.voice_controls.as_deref(),
             input.natural_final,
         )?;
         let elapsed_ms = started.elapsed().as_secs_f64() * 1000.0 + std::mem::take(&mut setup_ms);

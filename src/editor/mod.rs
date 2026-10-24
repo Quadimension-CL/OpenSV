@@ -1,4 +1,3 @@
-mod automation;
 mod clipboard;
 mod commands;
 mod dictionary;
@@ -8,14 +7,19 @@ mod instrumental;
 mod loop_region;
 mod lyrics;
 mod midi;
+mod project_import;
 mod note_properties;
 mod performance;
-mod phoneme;
+mod parameters;
+mod unison;
+mod phonemes;
+mod automation;
 mod retakes;
 mod time_events;
 mod transport;
 mod voice;
-mod voice_parameters;
+mod vocal_modes;
+mod voice_presets;
 pub use groups::GroupEdit;
 pub use loop_region::LoopRegion;
 pub use lyrics::{LyricSelection, split_lyrics};
@@ -23,7 +27,7 @@ pub use midi::ImportSummary;
 pub use performance::{PerformanceParameter, PerformanceSelection};
 pub use retakes::RetakeSelection;
 pub use transport::Transport;
-pub use voice_parameters::{VoiceEditParameter, VoiceParameterState};
+pub use vocal_modes::VocalModeEditCapability;
 
 use crate::model::*;
 use history::History;
@@ -44,8 +48,6 @@ pub struct Editor {
     pub transport: Transport,
     history: History,
     performance_edit: Option<performance::PerformanceEdit>,
-    voice_edit: Option<voice_parameters::VoiceEdit>,
-    phoneme_edit: Option<phoneme::PhonemeEdit>,
 }
 impl Editor {
     pub fn new(project: Project) -> Self {
@@ -64,8 +66,6 @@ impl Editor {
             transport: Transport::default(),
             history: History::default(),
             performance_edit: None,
-            voice_edit: None,
-            phoneme_edit: None,
         }
     }
     pub fn current_track(&self) -> &Track {
@@ -124,8 +124,6 @@ impl Editor {
     }
     pub fn finish(&mut self) {
         self.performance_edit = None;
-        self.voice_edit = None;
-        self.phoneme_edit = None;
         if self.history.finish(&self.project) {
             self.revision += 1;
             self.reconcile();
@@ -133,8 +131,6 @@ impl Editor {
     }
     pub fn cancel(&mut self) {
         self.performance_edit = None;
-        self.voice_edit = None;
-        self.phoneme_edit = None;
         if let Some(selection) = self.history.cancel(&mut self.project) {
             self.restore_selection(selection);
         }
@@ -156,8 +152,6 @@ impl Editor {
     }
     pub fn undo(&mut self) {
         self.performance_edit = None;
-        self.voice_edit = None;
-        self.phoneme_edit = None;
         let selection = self.selection();
         if let Some(selection) = self.history.undo(&mut self.project, selection) {
             self.revision += 1;
@@ -166,8 +160,6 @@ impl Editor {
     }
     pub fn redo(&mut self) {
         self.finish_performance_edit();
-        self.finish_voice_edit();
-        self.finish_phoneme_edit();
         let selection = self.selection();
         if let Some(selection) = self.history.redo(&mut self.project, selection) {
             self.revision += 1;
@@ -181,8 +173,7 @@ impl Editor {
             .iter()
             .any(|t| t.id == self.track && !t.is_instrumental())
         {
-            // A backing-only project retains an internal track anchor, with no
-            // selected row or note reference. Prefer a vocal track when present.
+
             self.track = self
                 .project
                 .tracks

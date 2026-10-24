@@ -1,12 +1,9 @@
-//! Display publication follows stable PCM intervals, independent of complete
-//! owner history. Cached disjoint patches survive a metadata-only plan rebuild.
-
 use super::{Event, state::equivalent_owners};
 use crate::synthesis::{
     audio::RenderedAudio,
     engine::progressive::PreparedRender,
     plan::{OwnerId, OwnerInput, RenderPlan},
-    rendered::{PitchTrack, RenderVisuals, RenderedPhonemeTrack, VisualPatch, Waveform},
+    rendered::{PitchTrack, RenderVisuals, VisualPatch, Waveform},
     runtime::events::Events,
     score::SAMPLE_RATE,
     voice::Result,
@@ -16,7 +13,7 @@ use std::{ops::Range, sync::Arc};
 pub(super) struct SessionVisuals {
     input: Arc<OwnerInput>,
     pitch: PitchTrack,
-    phonemes: RenderedPhonemeTrack,
+    phonemes:crate::synthesis::rendered::PhonemeTrack,
     patches: Vec<VisualPatch>,
 }
 
@@ -24,13 +21,11 @@ impl SessionVisuals {
     pub fn new(prepared: &PreparedRender, input: Arc<OwnerInput>) -> Result<Self> {
         let mut visuals = Self {
             pitch: prepared.pitch_track()?,
-            phonemes: prepared.phoneme_track(),
+            phonemes:prepared.phoneme_track(),
             input,
             patches: Vec::new(),
         };
-        // The complete model clock proves these portions are silent even when
-        // its inner PCM is pending. Clear old tails after deleting/moving notes,
-        // including owners whose visible end is not explicitly bounded.
+
         let model = prepared.model_samples();
         let rate = f64::from(SAMPLE_RATE);
         let start = visuals.input.tempo.position_at(model.start as f64 / rate).0;
@@ -49,8 +44,6 @@ impl SessionVisuals {
         Ok(visuals)
     }
 
-    /// Build extrema only for the newly ready PCM. Pitch sample storage is
-    /// shared across all intervals; it is never recopied for each audio block.
     pub fn audio(&mut self, audio: &RenderedAudio, highlight: bool) -> Option<VisualPatch> {
         let start = self.input.tempo.position_at(audio.start_seconds()).0;
         let end = self.input.tempo.position_at(audio.end_seconds()).0;
@@ -59,8 +52,8 @@ impl SessionVisuals {
             input: Arc::clone(&self.input),
             range,
             data: Some(Arc::new(RenderVisuals {
+                phonemes:self.phonemes.clone(),
                 pitch: self.pitch.clone(),
-                phonemes: self.phonemes.clone(),
                 waveform: Waveform::new(audio),
             })),
             highlight,
@@ -80,12 +73,8 @@ impl SessionVisuals {
             .collect()
     }
 
-    pub fn phonemes(&self) -> &RenderedPhonemeTrack {
-        &self.phonemes
-    }
-
     fn visible_range(&self) -> Range<i64> {
-        self.input.visible_begin.0..self.input.visible_end.map_or(i64::MAX, |end| end.0)
+        self.input.publication_range()
     }
 
     fn clip(&self, range: Range<i64>) -> Option<Range<i64>> {

@@ -9,6 +9,7 @@ default-run = "rynthv"
 [features]
 # Opt-in CPU timing spans; absent from normal editor builds.
 synth-profile = []
+acoustic-diagnostic = []
 
 [[bin]]
 name = "rynthv-synth"

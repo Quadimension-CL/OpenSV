@@ -1,6 +1,3 @@
-//! Preparation of typed module schemas. Ownership lists never imply a
-//! forward program; only the explicit Sequential type has sequential semantics.
-
 use std::sync::Arc;
 
 use crate::synthesis::inference::{
@@ -17,6 +14,7 @@ use crate::synthesis::inference::{
         normalization::{
             CHANNEL_AFFINE_TYPE_ID, ChannelAffine, LAYER_NORM_TYPE_ID, LayerNorm, LayerNormConfig,
         },
+        rms_normalization::{RMS_NORM_TYPE_ID,RmsNorm},
         parameterized::{LEAKY_RELU_TYPE_ID, LeakyRelu},
         range_normalizer::{RANGE_NORMALIZER_TYPE_ID, RangeNormalizer},
         sampler_network::SAMPLER_NETWORK_TYPE_ID,
@@ -33,6 +31,7 @@ pub(super) fn prepare_operator(
     payload: &[u8],
     nodes: &[PreparedNode],
     children: &[usize],
+    legacy_numeric: bool,
 ) -> Result<Option<PreparedModule>> {
     let module = match type_id {
         POOL_TYPE_ID => {
@@ -57,6 +56,10 @@ pub(super) fn prepare_operator(
             PreparedModule::LayerNorm(
                 LayerNorm::new(config.channels, config.epsilon, gain, bias).map_err(voice_error)?,
             )
+        }
+        RMS_NORM_TYPE_ID => {
+            count(children,1,"RMS normalization")?;
+            PreparedModule::RmsNorm(RmsNorm::new(payload,vector(nodes,children[0])?).map_err(voice_error)?)
         }
         CHANNEL_AFFINE_TYPE_ID => {
             empty(payload)?;
@@ -130,7 +133,7 @@ pub(super) fn prepare_operator(
             let layers = layers
                 .try_into()
                 .map_err(|_| VoiceError::new("GRU needs six affine pairs"))?;
-            PreparedModule::Gru(Gru::new(layers).map_err(voice_error)?)
+            PreparedModule::Gru(Gru::new_execution(layers,legacy_numeric).map_err(voice_error)?)
         }
         BIDIRECTIONAL_GRU_TYPE_ID => {
             empty(payload)?;
@@ -204,8 +207,7 @@ pub(super) fn prepare_operator(
         }
         _ => return Ok(None),
     };
-    // Sequential and ModuleList accept any number of children. They still need
-    // valid arena indices, including when this factory is called independently.
+
     for &index in children {
         node(nodes, index)?;
     }
@@ -259,6 +261,11 @@ fn validate_conditional(
     if lists[0].is_empty() || lists[1].len() != lists[0].len() || lists[2].len() != lists[0].len() {
         return Err(VoiceError::new(
             "Conditional branch lists must have the same nonzero length",
+        ));
+    }
+    if config.prunable_layers >= lists[0].len() {
+        return Err(VoiceError::new(
+            "Conditional pruning count would remove the complete stack",
         ));
     }
     let mut input_channels = config.input_channels;

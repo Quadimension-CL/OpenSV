@@ -62,7 +62,7 @@ impl PreparedTree {
             tensor_shapes: Vec::new(),
             executable_nodes: Vec::new(),
             root_supported: !matches!(self.nodes[self.root].module, PreparedModule::Unsupported),
-            // Containment alone does not identify the stage's forward program.
+
             complete_tree_execution_available: false,
             duration_input: self.duration_input.clone(),
         };
@@ -189,6 +189,7 @@ fn descriptor(
             Some(op.channels()),
             false,
         ),
+        PreparedModule::RmsNorm(op) => ("rms_norm",Some(op.channels()),Some(op.channels()),true),
         PreparedModule::ChannelAffine(op) => (
             "channel_affine",
             Some(op.channels()),

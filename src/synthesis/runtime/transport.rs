@@ -21,14 +21,12 @@ impl Runtime {
         }
         let snapshot = self.playback.snapshot();
         if snapshot.ready {
-            // Pending blocks keep the device clock at the requested position.
-            // After the actual source end, let the editor finish its own tail.
+
             return (snapshot.playing || snapshot.buffering)
                 .then_some(snapshot.position_seconds)
                 .flatten();
         }
-        // Loading a new source must not advance the editor's wall clock while
-        // the worker or device is still preparing the first requested block.
+
         (!self.planner.plan().requests.is_empty()
             || self.recordings.end > 0
             || self.metronome_enabled()
@@ -43,8 +41,7 @@ impl Runtime {
             0.0
         };
         let changed = playing != self.desired_playing;
-        // The device wraps independently. Only synthesis priority needs a
-        // seek notification when its clock jumps back to the loop entrance.
+
         let wrapped = playing && self.loop_range.is_some() && seconds < self.desired_seconds;
         if changed || seek {
             self.playback.control(playing, Some(seconds));

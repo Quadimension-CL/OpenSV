@@ -14,7 +14,7 @@ pub struct NoteInput {
     pub lyrics: String,
     pub phonemes: String,
     pub musical_type: String,
-    /// Includes note-level `muted`; it is not equivalent to track mixer mute.
+
     pub attributes: Extra,
     pub extensions: Extra,
 }
@@ -35,10 +35,10 @@ impl From<&Note> for NoteInput {
     }
 }
 
-/// Preserve both raw option layers as conservative dependencies: a partially
-/// filled instance object must not hide an inherited track-level dependency.
 #[derive(Clone, Debug, PartialEq)]
 pub struct VoiceInput {
+
+    pub track_default_is_self: bool,
     pub model_content_identity: Option<String>,
     pub database: Value,
     pub instance_options: Extra,
@@ -66,7 +66,7 @@ impl TempoMapping {
     pub(super) fn new(project: &Project) -> Self {
         let mut points: Vec<TempoPoint> = Vec::new();
         for tempo in &project.time.tempo {
-            // A redundant marker with the same BPM does not alter time mapping.
+
             if points.last().is_none_or(|p| p.bpm != tempo.bpm) {
                 points.push(TempoPoint {
                     position: GlobalBlick(tempo.position),
@@ -108,7 +108,6 @@ impl TempoMapping {
         seconds
     }
 
-    /// Inverse of this immutable render's tempo map, independent of later edits.
     pub fn position_at(&self, seconds: f64) -> GlobalBlick {
         let mut remaining = seconds - self.origin_seconds;
         if remaining < 0.0 {
@@ -123,7 +122,7 @@ impl TempoMapping {
                     continue;
                 }
             }
-            // Match TimeAxis's truncation toward zero.
+
             return GlobalBlick(
                 tempo.position.0 + (remaining * tempo.bpm / 60.0 * QUARTER as f64) as i64,
             );
@@ -132,21 +131,17 @@ impl TempoMapping {
     }
 }
 
-/// Exact structural dependency identity, not a revision number or a hash with
-/// unchecked collisions. Unknown synthesis fields are retained, not defaulted.
 #[derive(Clone, Debug, PartialEq)]
 pub struct OwnerInput {
     pub group_id: String,
     pub content_offset: GlobalBlick,
     pub visible_begin: GlobalBlick,
     pub visible_end: Option<GlobalBlick>,
+
+    pub section_bounds: Option<(GlobalBlick, Option<GlobalBlick>)>,
     pub pitch_offset: i32,
     pub notes: Vec<NoteInput>,
     pub automation: BTreeMap<String, Automation>,
-    pub vocal_modes: BTreeMap<String, Automation>,
-    pub track_automation: BTreeMap<String, Automation>,
-    pub track_vocal_modes: BTreeMap<String, Automation>,
-    pub track_automation_offset: GlobalBlick,
     pub pitch_controls: Vec<PitchControl>,
     pub group_options: Extra,
     pub voice: VoiceInput,
@@ -157,7 +152,7 @@ pub struct OwnerInput {
 }
 
 impl OwnerInput {
-    /// Reject stale visual snapshots before deriving editable controls from them.
+
     pub fn matches_project(
         &self,
         project: &Project,
@@ -165,14 +160,13 @@ impl OwnerInput {
         reference: &GroupRef,
         group: &Group,
     ) -> bool {
-        *self
-            == Self::new(
+        Self::new(
                 project,
                 track,
                 reference,
                 group,
                 self.voice.model_content_identity.as_deref(),
-            )
+            ).sections().iter().any(|(_,input)| input==self)
     }
 
     pub(super) fn new(
@@ -199,7 +193,7 @@ impl OwnerInput {
             output_options.remove(key);
         }
         let mut track_options = synthesis_extensions(&track.extra);
-        // The editor's export enable switch is not a neural model input.
+
         track_options.remove("renderEnabled");
         Self {
             group_id: group.uuid.clone(),
@@ -207,24 +201,16 @@ impl OwnerInput {
             visible_begin: GlobalBlick(reference.blick_absolute_begin),
             visible_end: (reference.blick_absolute_end >= 0)
                 .then_some(GlobalBlick(reference.blick_absolute_end)),
+            section_bounds: None,
             pitch_offset: reference.pitch_offset,
             notes: group.notes.iter().map(NoteInput::from).collect(),
-            automation: group.parameters.clone(),
-            vocal_modes: group.vocal_modes.clone(),
-            track_automation: if reference.id == track.main_ref.id {
-                BTreeMap::new()
-            } else {
-                track.main_group.parameters.clone()
-            },
-            track_vocal_modes: if reference.id == track.main_ref.id {
-                BTreeMap::new()
-            } else {
-                track.main_group.vocal_modes.clone()
-            },
-            track_automation_offset: GlobalBlick(track.main_ref.blick_offset),
+            automation: group.parameters.iter().map(|(k,v)|(k.clone(),v.clone()))
+                .chain(group.vocal_modes.iter().map(|(k,v)|(format!("vocalMode_{k}"),v.clone())))
+                .collect(),
             pitch_controls: group.pitch_controls.clone(),
             group_options: group_extensions(&group.extra),
             voice: VoiceInput {
+                track_default_is_self: reference.id == track.main_ref.id,
                 model_content_identity: voice_identity.map(str::to_owned),
                 database: reference.database.clone(),
                 instance_options: reference_extensions(&reference.extra),
@@ -234,16 +220,13 @@ impl OwnerInput {
                 dictionary: project.dictionary_for(track, reference).cloned(),
             },
             tempo: TempoMapping::new(project),
-            // Synthesis coverage is native PCM time; export format conversion
-            // does not invalidate neural inference or interrupt preview.
+
             sample_rate: crate::synthesis::score::SAMPLE_RATE,
             output_options,
             project_options: project_extensions(&project.extra),
         }
     }
 
-    /// Dependency input contains the whole owner, including hidden notes; the
-    /// visible interval limits intended publication, never the model context.
     pub fn coverage(&self) -> Option<Coverage> {
         if self.sample_rate == 0 {
             return None;
@@ -260,11 +243,23 @@ impl OwnerInput {
             })
             .collect();
         let last_note = *note_ends.iter().max()?;
-        let end = self.visible_end.unwrap_or(GlobalBlick(last_note));
-        if end.0 <= self.visible_begin.0 {
+        let (publication_begin, publication_end) = self.publication_bounds();
+        let first_note = self.notes.iter().filter(|n| n.attributes.get("muted").and_then(Value::as_bool)!=Some(true))
+            .filter_map(|n|n.onset.0.checked_add(self.content_offset.0)).min()?;
+
+        let first_seconds = self.tempo.seconds_at(GlobalBlick(first_note));
+        let context_start = ((first_seconds-0.5)/0.005/8.0).floor()*0.005*8.0;
+        let start = if publication_begin.0 == 0 {
+            GlobalBlick(self.tempo.position_at(context_start).0.saturating_sub(1).max(0))
+        } else {publication_begin};
+        let end = publication_end.unwrap_or_else(|| {
+            let last_seconds = self.tempo.seconds_at(GlobalBlick(last_note));
+            GlobalBlick(self.tempo.position_at(((last_seconds+0.5)/0.005).ceil()*0.005).0.saturating_add(1))
+        });
+        if end.0 <= start.0 {
             return None;
         }
-        let start_sample = self.tempo.seconds_at(self.visible_begin) * self.sample_rate as f64;
+        let start_sample = self.tempo.seconds_at(start) * self.sample_rate as f64;
         let end_sample = self.tempo.seconds_at(end) * self.sample_rate as f64;
         if !start_sample.is_finite()
             || !end_sample.is_finite()
@@ -274,7 +269,7 @@ impl OwnerInput {
             return None;
         }
         Some(Coverage {
-            start: self.visible_begin,
+            start,
             end,
             sample_start: SampleFrame(start_sample.floor() as i64),
             sample_end: SampleFrame(end_sample.ceil() as i64),
@@ -293,7 +288,7 @@ fn synthesis_extensions(extra: &Extra) -> Extra {
 
 fn group_extensions(extra: &Extra) -> Extra {
     let mut options = synthesis_extensions(extra);
-    // Scale highlighting changes the editor grid, not the rendered pitch.
+
     options.remove("musicalScale");
     options
 }
@@ -302,13 +297,28 @@ fn reference_extensions(extra: &Extra) -> Extra {
     let mut options = synthesis_extensions(extra);
     options.remove("timestampLMR");
     options.remove("timestampLRSR");
+
+    if options.get("voicePresetName").is_some_and(Value::is_string) {
+        options.insert("voicePresetName".into(),Value::String(String::new()));
+    }
+
+    if options.get("isInstrumental").and_then(Value::as_bool) != Some(true)
+        && options.get("audio").and_then(Value::as_object).is_some_and(|audio| {
+            audio.iter().all(|(key,value)|match key.as_str() {
+                "filename" => value.as_str()==Some(""),
+                "duration" | "bpm" => value.as_f64()==Some(0.0),
+                "alternativeBPMs" | "beatLocations" => value.as_array().is_some_and(Vec::is_empty),
+                _ => false,
+            })
+        }) {options.remove("audio");}
     options
 }
 
 fn project_extensions(extra: &Extra) -> Extra {
     let mut options = synthesis_extensions(extra);
-    // Linking room controls is editor state; retain unsupported mixer fields
-    // so they cannot silently disappear from synthesis validation.
+
+    for key in ["loopBegin", "loopEnd", "loopEnabled"] {options.remove(key);}
+
     if let Some(Value::Object(mixer)) = options.get_mut("projectMixer") {
         if mixer.get("linkRoomSettings").is_some_and(Value::is_boolean) {
             mixer.remove("linkRoomSettings");

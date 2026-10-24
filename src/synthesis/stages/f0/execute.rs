@@ -28,9 +28,6 @@ impl F0Stage<'_> {
         self.predict_region(request, prepared, None)
     }
 
-    /// Evaluate a complete-note frame interval using the full prepared context
-    /// and full-timeline seed events. The interval is a work region, not an
-    /// independently prepared phrase or a claim of a finite dirty radius.
     pub fn predict_prepared_frames(
         &self,
         request: &PitchRequest<'_>,
@@ -83,7 +80,6 @@ impl F0Stage<'_> {
                 "F0 controls do not match the note timeline",
             ));
         }
-        self.style.validate_weights(frames, request.style_weights)?;
         if frame_range.is_empty() {
             return Ok(PitchResult {
                 pitch: Vec::new(),
@@ -108,9 +104,7 @@ impl F0Stage<'_> {
             },
             None,
         )?;
-        // Keep source timing, noise and scalar smoothing on the complete owner,
-        // but project only the sampler's work rows. The feature network derives
-        // its read halo from the actual operators before cropping the result.
+
         let projected = self
             .features
             .project_range(&expanded, frame_range.clone())?;
@@ -119,10 +113,14 @@ impl F0Stage<'_> {
                 "F0 feature network changed the frame count",
             ));
         }
-        let source = projected
-            .pointwise
-            .as_ref()
-            .ok_or_else(|| VoiceError::new("F0 feature network lacks its source head"))?;
+        let source = if self.features.shared_frame_source() {
+            &projected.convolutional
+        } else {
+            projected
+                .pointwise
+                .as_ref()
+                .ok_or_else(|| VoiceError::new("F0 feature network lacks its source head"))?
+        };
         let mut modulation = request.modulation.to_vec();
         let mut syllables = Vec::with_capacity(notes.len());
         let mut cursor = 0;
@@ -168,7 +166,15 @@ impl F0Stage<'_> {
                     .collect()
             },
         )?;
-        let style = self.style.weighted_frames(frames, request.style_weights)?;
+        let style = match request.vocal_modes {
+            Some(modes) if modes.animated() => {
+                let mut rows=Vec::with_capacity(frames*self.style.dimensions);
+                for frame in 0..frames {rows.extend(self.style.frame(&modes.pitch_weights_at(&self.style.names,frame))?);}
+                rows
+            }
+            Some(modes) => self.style.constant_frames(frames, &modes.pitch_weights(&self.style.names))?,
+            None => self.style.neutral_frames(frames)?,
+        };
         let style_condition = super::window::matrix(&style, frames, &frame_range)?;
         let mut runtime = ModelRuntime::new(self.tree);
         let sampled = self.sampler.predict(
@@ -202,12 +208,18 @@ impl F0Stage<'_> {
                     return Err(VoiceError::new("Invalid F0 child input sequence"));
                 }
                 let input = Sequence::new(frames, input.len() / frames, input.to_vec())?;
+                #[cfg(feature = "acoustic-diagnostic")]
+                let slot=self.sampler.child_slot(index).ok_or_else(||VoiceError::new("Unknown F0 sampler child"))?;
+                #[cfg(feature = "acoustic-diagnostic")]
+                super::diagnostic::capture(format!("sampler_{slot}_input"),&input)?;
                 let output = if let Some(condition) = condition {
                     if !condition.len().is_multiple_of(frames) {
                         return Err(VoiceError::new("Invalid F0 child condition sequence"));
                     }
                     let condition =
                         Sequence::new(frames, condition.len() / frames, condition.to_vec())?;
+                    #[cfg(feature = "acoustic-diagnostic")]
+                    super::diagnostic::capture(format!("sampler_{slot}_condition"),&condition)?;
                     runtime.execute_conditioned(index, &input, &condition, true)?
                 } else {
                     runtime.execute(index, &input, true)?
@@ -215,6 +227,8 @@ impl F0Stage<'_> {
                 if output.frames != frames {
                     return Err(VoiceError::new("F0 sampler child changed the frame count"));
                 }
+                #[cfg(feature = "acoustic-diagnostic")]
+                super::diagnostic::capture(format!("sampler_{slot}_output"),&output)?;
                 Ok(output.values)
             },
             |input| {

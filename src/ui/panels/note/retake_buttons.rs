@@ -25,7 +25,7 @@ pub(super) fn show(ui: &mut Ui, duration_unavailable: Option<&str>) -> Option<Re
                 if response.clicked() {
                     clicked = Some(component);
                 } else if let Some(reason) = reason {
-                    response.on_disabled_hover_text(reason);
+                    response.on_disabled_hover_text(crate::i18n::message(&reason));
                 }
             }
         });
@@ -36,10 +36,10 @@ pub(super) fn show(ui: &mut Ui, duration_unavailable: Option<&str>) -> Option<Re
 fn button(ui: &mut Ui, width: f32, component: RetakeComponent) -> Response {
     let enabled = ui.is_enabled();
     let label = match component {
-        RetakeComponent::All | RetakeComponent::PitchAndTimbre => "全部",
-        RetakeComponent::Duration => "时值",
-        RetakeComponent::Pitch => "音高",
-        RetakeComponent::Timbre => "音色",
+        RetakeComponent::All | RetakeComponent::PitchAndTimbre => crate::i18n::t("全部"),
+        RetakeComponent::Duration => crate::i18n::t("时值"),
+        RetakeComponent::Pitch => crate::i18n::t("音高"),
+        RetakeComponent::Timbre => crate::i18n::t("音色"),
     };
     let (rect, response) = ui.allocate_exact_size(
         vec2(width, 88.0),
@@ -85,7 +85,7 @@ fn button(ui: &mut Ui, width: f32, component: RetakeComponent) -> Response {
         FontId::proportional(12.0),
         ink,
     );
-    response.on_hover_text(format!("重录{label}采样"))
+    response.on_hover_text(crate::lformat!("重录{label}采样"))
 }
 
 fn lips(ui: &Ui, center: Pos2, ink: Color32) {

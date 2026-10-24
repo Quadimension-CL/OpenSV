@@ -29,11 +29,14 @@ file on Windows x64 without requiring a running editor. A file path is required;
 no default directory is searched. Contexts are imported only on request; loading
 a voice reads only the saved RynthV context. Native SV1 voices do not need model
 contexts.
+--session-key U64 retries exhausted session decryption only (decimal or 0x hex).
+This is not --duration-identity; it is never saved or printed.
 Only the matching voice and model generation are imported; raw session data and
 model-condition values are not printed in the report.
 render-score: --profile FILE (requires a build with --features synth-profile)
-              --duration-identity U64 (explicit research conditioning;
-              otherwise uses the saved RynthV context;
+              --duration-identity U64 (invocation global override;
+              exact voice-revision override takes precedence; otherwise uses
+              configured global override, then saved context/session;
               not used by original SV1 models)
 
 render-score takes explicit note/phone records and writes native float32 WAV.
@@ -117,6 +120,7 @@ impl Args {
                         "--voice",
                         "--process-id",
                         "--session-file",
+                        "--session-key",
                         "--context-file",
                         "--identity",
                         "--output",

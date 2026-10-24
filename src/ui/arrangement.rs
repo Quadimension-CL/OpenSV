@@ -11,10 +11,6 @@ use eframe::egui::*;
 
 pub fn show(app: &mut App, ui: &mut Ui) {
     let rect = ui.max_rect();
-    if ui.rect_contains_pointer(rect) && ui.input(|input| input.pointer.any_pressed()) {
-        super::lanes::parameter_deactivate(app);
-        super::phonemes::phoneme_deactivate(app);
-    }
     ui.painter().rect_filled(rect, 4, CANVAS);
     let gutter = 250.0_f32.min(rect.width() * 0.36);
     let header = Rect::from_min_size(rect.min, vec2(rect.width(), 42.0));
@@ -52,7 +48,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                     } else {
                         Icon::ChevronDown
                     },
-                    "展开 / 折叠编排",
+                    crate::i18n::t("展开 / 折叠编排"),
                 )
                 .size(vec2(12.0, 24.0))
                 .icon_size(12.0),
@@ -61,17 +57,17 @@ pub fn show(app: &mut App, ui: &mut Ui) {
         {
             app.view.arrangement_collapsed = !app.view.arrangement_collapsed;
         }
-        super::section_title(ui, "编排", DragPayload::Arrangement);
+        super::section_title(ui, crate::i18n::t("编排"), DragPayload::Arrangement);
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             let create = ui.add(
-                IconButton::new(Icon::Plus, "创建音轨")
+                IconButton::new(Icon::Plus, crate::i18n::t("创建音轨"))
                     .size(vec2(23.0, 24.0))
                     .icon_size(17.0),
             );
             Popup::menu(&create).show(|ui| super::instrumental::create_menu(app, ui));
             if ui
                 .add(
-                    IconButton::new(Icon::TempoTracks, "显示 / 隐藏曲速和拍号轨")
+                    IconButton::new(Icon::TempoTracks, crate::i18n::t("显示 / 隐藏曲速和拍号轨"))
                         .size(vec2(24.0, 24.0))
                         .icon_size(17.0)
                         .selected(app.show_time_tracks)
@@ -114,10 +110,17 @@ pub fn show(app: &mut App, ui: &mut Ui) {
         - pan.x as f64 / app.view.arrangement.beat_width as f64)
         .max(0.0);
     let response = ui.interact(body, Id::new("arrangement-background"), Sense::click());
+    let header_scroll = Rect::from_min_max(
+        pos2(rect.left(), header.bottom() + time_height),
+        pos2(body.left(), body.bottom()),
+    );
     let vertical = if app.view_pan.is_active() {
         pan.y
+    } else if ui.rect_contains_pointer(header_scroll) {
+
+        wheel_delta(ui, header_scroll.height()).y
     } else {
-        scroll(ui, &response, body, &mut app.view.arrangement)
+        scroll(ui, &response, body, &mut app.view.arrangement,2.0..=100.0)
     };
     let scroll_id = Id::new("track-scroll");
     let max_scroll =
@@ -139,7 +142,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
             && app.audio_drag.is_none()
             && !app.view_pan.is_active(),
     );
-    loop_region::show(
+    let hover_position = loop_region::show(
         ui,
         Id::new("arrangement-ruler"),
         ruler,
@@ -176,7 +179,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
         ARRANGEMENT_GRID,
     );
     if app.show_time_tracks {
-        for (index, text) in ["拍号", "曲速"].into_iter().enumerate() {
+        for (index, text) in [crate::i18n::t("拍号"), crate::i18n::t("曲速")].into_iter().enumerate() {
             let y = header.bottom() + index as f32 * 28.0;
             ui.painter().rect_filled(
                 Rect::from_min_size(pos2(rect.left(), y), vec2(gutter, 28.0)),
@@ -215,6 +218,9 @@ pub fn show(app: &mut App, ui: &mut Ui) {
         &mut app.view.arrangement,
         beats(app.editor.project.end()) + 32.0,
     );
+    if let Some(position) = hover_position {
+        hover_playhead(ui,Rect::from_min_max(ruler.min,body.max),ruler.bottom(),&app.view.arrangement,position);
+    }
     playhead(
         ui,
         Rect::from_min_max(ruler.min, body.max),
@@ -222,4 +228,5 @@ pub fn show(app: &mut App, ui: &mut Ui) {
         &app.view.arrangement,
         app.editor.transport.position,
     );
+    super::rendering_hint::show(ui,body,app.synthesis.is_synthesizing());
 }

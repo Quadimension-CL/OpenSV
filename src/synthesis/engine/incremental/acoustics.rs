@@ -1,7 +1,3 @@
-//! Local acoustic edits over an existing complete owner. The dense context is
-//! evaluated with the complete note list; only explicitly selected rows and
-//! frame results replace the previous snapshot.
-
 mod duration;
 mod topology;
 
@@ -21,8 +17,6 @@ pub struct RecomputedAcoustics {
     pub timings: StageTimings,
 }
 
-/// The caller supplies separate calculation-record and publication-frame
-/// intervals. Both refer to the complete prepared owner, including its context.
 pub fn recompute(
     voice: &PreparedVoice,
     duration_identity: u64,
@@ -31,12 +25,16 @@ pub fn recompute(
     edit: &super::IncrementalEdit,
     mut checkpoint: impl FnMut(RenderStage) -> Result<()>,
 ) -> Result<RecomputedAcoustics> {
+    if phrase.vocal_modes != base.prepared.phrase.vocal_modes {
+        return Err(VoiceError::new("Vocal-mode edits require whole-owner acoustic recomputation"));
+    }
+    let mut prepared_phrase = phrase.clone();
+    prepared_phrase.mode_coefficients = crate::synthesis::vocal_modes::for_phrase(voice,phrase)?;
     let (base_pitch_features, base_timbre_features) = base.prepared.sv2_features()?;
     let mapping = topology::validate(phrase, &base.prepared.phrase, edit)?;
     checkpoint(RenderStage::Duration)?;
     let started = Instant::now();
-    // Both pitch and phoneme identity condition the duration model. Predict
-    // the small model again, then reuse unchanged records using explicit maps.
+
     let duration::Prepared {
         duration,
         phones,
@@ -63,7 +61,7 @@ pub fn recompute(
     }
     checkpoint(RenderStage::Pitch)?;
     let started = Instant::now();
-    let stage = F0Stage::prepare(voice.model("f0")?)?;
+    let stage = F0Stage::prepare(voice.model("f0")?, voice.speaker)?;
     let fresh = stage.prepare_features(&phrase.notes, &phones)?;
     let pitch_features =
         fresh.reuse_rows_from(base_pitch_features, &mapping.note_rows, &phone_rows)?;
@@ -78,22 +76,15 @@ pub fn recompute(
         .iter()
         .map(|seeds| seeds.map(|seeds| seeds.pitch))
         .collect();
-    let styles = crate::synthesis::engine::voice_controls::sample_styles(
-        phrase,
-        stage.style_names(),
-        crate::model::VocalModeComponent::Pitch,
-        crate::synthesis::score::FRAME_SECONDS,
-        total,
-    )?;
-    let mut patch = stage.predict_singing_prepared(
+    let patch = stage.predict_singing_prepared(
         &phrase.notes,
         &phones,
         &pitch_features,
         PitchInputControls {
+            vocal_modes: prepared_phrase.mode_coefficients.as_ref(),
             pitch_seeds: Some(&pitch_seeds),
             absolute_pitch: controls.as_deref(),
             expressiveness: expressiveness.as_deref(),
-            style_weights: styles.as_ref(),
         },
         Some(work_frames.clone()),
     )?;
@@ -106,7 +97,6 @@ pub fn recompute(
             "Local pitch output differs from its requested frame interval",
         ));
     }
-    crate::synthesis::engine::pitch::apply_pitch_delta(phrase, &mut patch, work_frames.start)?;
     let local = write_frames.start - work_frames.start..write_frames.end - work_frames.start;
     let mut pitch = base.pitch.clone();
     pitch.pitch[write_frames.clone()].copy_from_slice(&patch.pitch[local.clone()]);
@@ -118,7 +108,7 @@ pub fn recompute(
 
     checkpoint(RenderStage::Timbre)?;
     let started = Instant::now();
-    let stage = TimbreNetwork::prepare(voice.model("timbre")?)?;
+    let stage = TimbreNetwork::prepare(voice.model("timbre")?, voice.speaker, voice.retained_acoustic_noise_only)?;
     let fresh = stage.prepare_features(&phrase.notes, &phones)?;
     let timbre_features =
         fresh.reuse_rows_from(base_timbre_features, &mapping.note_rows, &phone_rows)?;
@@ -126,7 +116,7 @@ pub fn recompute(
     Ok(RecomputedAcoustics {
         state: OwnerSynthesis {
             prepared: PreparedAcoustics {
-                phrase: phrase.clone(),
+                phrase: prepared_phrase,
                 phones,
                 features: PreparedModelFeatures::Sv2 {
                     pitch: pitch_features,

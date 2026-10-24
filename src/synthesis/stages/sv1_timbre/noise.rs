@@ -1,5 +1,3 @@
-//! SV1 and SV2-compatible acoustic seed queues.
-
 use super::Contract;
 use crate::synthesis::{
     inference::Sequence,
@@ -13,9 +11,6 @@ struct SeedEntry {
     seed: u32,
 }
 
-/// Emits unit normal noise. The caller applies the frame amplitude separately.
-/// `local_parameters` contains the adapted note/per-phone seed. The compatible
-/// owner forwards its note seed; SV1 default phone options leave it zero.
 pub(super) struct Generator {
     normal: Normal,
     queue: VecDeque<SeedEntry>,
@@ -53,13 +48,11 @@ impl Generator {
             let count = i32::try_from(count).map_err(|_| {
                 VoiceError::new("SV1 acoustic noise phone duration exceeds signed range")
             })?;
-            // The root supplies an empty suffix and global parameter zero. IDs
-            // are causal: previous, before-previous, current.
+
             let seed = hash(format!("{previous}_{before_previous}_{id}_{local}0").as_bytes());
             before_previous = previous;
             previous = id;
-            // Queue the supplied seek suffix before producing any noise.
-            // Counts are stored unchanged, without cumulative endpoints.
+
             queue.push_back(SeedEntry {
                 remaining: count,
                 seed,
@@ -88,9 +81,7 @@ impl Generator {
         }
         let mut output = Sequence::zeros(frames, self.channels)?;
         for frame in output.values.chunks_exact_mut(self.channels) {
-            // Push one phone and produce all of its input-frame noise before
-            // adding another. Insertion includes the last queued remaining
-            // count; preloading the whole owner would change seed events.
+
             while self.native_phone_remaining == 0 {
                 let Some(mut entry) = self.native_pending.pop_front() else {
                     break;
@@ -102,9 +93,7 @@ impl Generator {
                 self.queue.push_back(entry);
             }
             if self.queue.front().is_some_and(|entry| entry.remaining == 0) {
-                // Pop exactly one boundary, including zero-duration phones.
-                // Binding clears the initial dummy boundary, so the first
-                // positive phone keeps the MT default seed rather than reseeding.
+
                 self.queue.pop_front();
                 if let Some(entry) = self.queue.front() {
                     self.normal.reseed(entry.seed);

@@ -8,16 +8,12 @@ mod timeline;
 pub use flash::VisualFlash;
 pub use timeline::VisualTimeline;
 
-/// Render data and the immutable musical geometry that produced it. Keeping
-/// them together prevents retained regions from moving with later note edits.
 #[derive(Clone, Debug)]
 pub struct VisualSnapshot {
     pub data: Arc<RenderVisuals>,
     pub input: Arc<OwnerInput>,
 }
 
-/// An atomically published pitch/waveform interval in global musical time.
-/// A ready silent interval has no data and removes any old display beneath it.
 #[derive(Clone, Debug)]
 pub struct VisualPatch {
     pub input: Arc<OwnerInput>,
@@ -26,7 +22,6 @@ pub struct VisualPatch {
     pub highlight: bool,
 }
 
-/// A visible half-open region backed by one immutable render snapshot.
 #[derive(Clone, Debug)]
 pub struct VisualPiece {
     pub range: Range<i64>,

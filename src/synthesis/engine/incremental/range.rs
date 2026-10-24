@@ -1,4 +1,3 @@
-//! Content-edit invalidation with distinct source, model and PCM ranges.
 mod input;
 mod records;
 
@@ -23,36 +22,30 @@ pub struct IncrementalEdit {
 }
 
 impl IncrementalEdit {
-    /// Classify before execution. Source timing, placement and voice changes
-    /// invalidate the owner; an error during an admitted local job is reported.
+
     pub fn between(
         old: &OwnerInput,
         new: &OwnerInput,
         previous: &PreparedPhrase,
         phrase: &PreparedPhrase,
     ) -> Result<Option<Self>> {
-        // Row reuse keeps each record's phone allocation on the score clock.
-        // Manual boundaries can cross records, so prepare the complete owner.
-        if previous
-            .records
-            .iter()
-            .chain(&phrase.records)
-            .flat_map(|record| &record.phones)
-            .any(|phone| phone.attributes.left_offset.is_some())
-        {
-            return Ok(None);
-        }
         let Some(changed) = input::changed_notes(old, new) else {
             return Ok(None);
         };
+
+        if previous.notes.iter().zip(&previous.source_note_ids)
+            .chain(phrase.notes.iter().zip(&phrase.source_note_ids))
+            .any(|(note,source)|source.is_some() && note.kind!=0)
+            || !previous.note_errors.is_empty() || !phrase.note_errors.is_empty() {
+            return Ok(None);
+        }
         let notes = &new.notes;
         let start = notes[changed.start].onset.0;
         let end = notes[changed.end - 1]
             .onset
             .0
             .saturating_add(notes[changed.end - 1].duration);
-        // Invalidate whole events, including the event crossing either
-        // two-quarter boundary.
+
         let mut first = changed.start.saturating_sub(1);
         let mut left_time = start;
         while first > 0 && left_time >= start.saturating_sub(2 * QUARTER) {
@@ -67,7 +60,7 @@ impl IncrementalEdit {
         }
         let core_begin = notes[first].onset.0;
         let core_end = notes[last].onset.0.saturating_add(notes[last].duration);
-        // The second expansion supplies model input, not a PCM write range.
+
         let mut input_first = first;
         while input_first > 0 {
             input_first -= 1;
@@ -94,7 +87,17 @@ impl IncrementalEdit {
         let previous_records = previous_layout.records(input_first..input_last + 1);
         let work_records = layout.records(input_first..input_last + 1);
         let write_frames = layout.frames(&layout.records(first..last + 1));
-        // Different syllable counts may change row counts, never absolute time.
+
+        let begin_seconds=phrase.start_seconds+write_frames.start as f64*crate::synthesis::score::FRAME_SECONDS;
+        let end_seconds=phrase.start_seconds+write_frames.end as f64*crate::synthesis::score::FRAME_SECONDS;
+        for source in previous.phoneme_controls.keys().chain(phrase.phoneme_controls.keys()) {
+            let old=previous.phoneme_controls.get(source).and_then(|v|v.onset_seconds);
+            let new=phrase.phoneme_controls.get(source).and_then(|v|v.onset_seconds);
+            if old!=new && old.into_iter().chain(new).any(|seconds|seconds<begin_seconds || seconds>=end_seconds) {
+                return Ok(None);
+            }
+        }
+
         if previous.start_seconds != phrase.start_seconds
             || previous.visible_begin_seconds != phrase.visible_begin_seconds
             || previous.visible_end_seconds != phrase.visible_end_seconds

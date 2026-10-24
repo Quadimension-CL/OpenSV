@@ -34,8 +34,6 @@ enum Transport {
     Clear,
 }
 
-/// Device setup and source retirement stay off the UI thread. The device stream
-/// persists while sources and their independently ready blocks are replaced.
 pub(super) struct Playback {
     tx: Sender<Command>,
     state: Arc<Mutex<Snapshot>>,
@@ -112,9 +110,7 @@ impl Playback {
     }
 
     pub fn audition_key(&self, note: Option<u8>) {
-        // This shared control survives device initialization. A release or a
-        // newer key cannot be overwritten by a queued note-on, and audition
-        // never supersedes the independent project transport command serial.
+
         self.piano.set_note(note);
         if note.is_some() && self.tx.send(Command::Audition).is_err() {
             self.thread_stopped();
@@ -122,8 +118,7 @@ impl Playback {
     }
 
     pub fn control(&self, playing: bool, seek: Option<f64>) {
-        // An installed source only needs atomic controls. Avoid the command
-        // queue and avoid replaying a seek after the callback already advanced.
+
         if let Ok(mut state) = self.state.lock()
             && state.ready
             && state.serial == self.latest.load(Ordering::Acquire)

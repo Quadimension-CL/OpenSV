@@ -1,5 +1,3 @@
-//! Stateful reset-after GRU with prepared gate biases and reusable frame buffers.
-
 #[path = "recurrent/tanh.rs"]
 mod tanh;
 
@@ -45,16 +43,13 @@ impl From<InferenceError> for RecurrentError {
     }
 }
 
-/// Immutable, shareable GRU weights. Runtime state belongs to each render stream.
 #[derive(Clone)]
 pub struct Gru {
-    // Input reset, input update, input candidate; then recurrent reset,
-    // recurrent update, recurrent candidate, exactly as stored in the tree.
+
     layers: [Affine; 6],
+    legacy_numeric:bool,
 }
 
-/// A resumable frame-boundary state, including reusable execution buffers.
-/// Cloning provides an independent checkpoint; immutable weights stay in Gru.
 #[derive(Clone)]
 pub struct GruState {
     hidden: Vec<f32>,
@@ -86,10 +81,12 @@ impl GruState {
 }
 
 impl Gru {
-    /// Six affine pairs in serialized order: children (0,1), (2,3), ... (10,11).
-    /// Every pair must include its bias. Gate biases 0+3 and 1+4 are merged
-    /// once before execution.
+
     pub fn new(serialized_layers: [Affine; 6]) -> Result<Self, MatrixError> {
+        Self::new_execution(serialized_layers,false)
+    }
+
+    pub(crate) fn new_execution(serialized_layers:[Affine;6],legacy_numeric:bool)->Result<Self,MatrixError> {
         let inputs = serialized_layers[0].input_channels();
         let hidden = serialized_layers[0].output_channels();
         for (index, layer) in serialized_layers.iter().enumerate() {
@@ -124,6 +121,7 @@ impl Gru {
             hidden_candidate,
         ] = serialized_layers;
         Ok(Self {
+            legacy_numeric,
             layers: [
                 Affine::new(input_reset.matrix().clone(), Some(reset_bias))?,
                 Affine::new(input_update.matrix().clone(), Some(update_bias))?,
@@ -154,15 +152,12 @@ impl Gru {
         }
     }
 
-    /// Consume one frame without allocating. The new hidden state is the output.
     pub fn step(&self, input: &[f32], state: &mut GruState) -> Result<(), RecurrentError> {
         check_length("GRU input", self.input_channels(), input.len())?;
         self.check_state(state)?;
         self.step_validated(input, state)
     }
 
-    /// Consume a contiguous, frame-major chunk, retaining the final hidden state
-    /// for the next chunk. All shapes are checked before any state/output change.
     pub fn execute_sequence(
         &self,
         input: &[f32],
@@ -202,20 +197,19 @@ impl Gru {
     fn step_validated(&self, input: &[f32], state: &mut GruState) -> Result<(), RecurrentError> {
         self.layers[0].execute(input, &mut state.scratch)?;
         self.layers[3].execute_accumulate(&state.hidden, &mut state.scratch)?;
-        sigmoid(&state.scratch, &mut state.reset)?;
+        self.sigmoid(&state.scratch, &mut state.reset)?;
 
         self.layers[1].execute(input, &mut state.scratch)?;
         self.layers[4].execute_accumulate(&state.hidden, &mut state.scratch)?;
-        sigmoid(&state.scratch, &mut state.update)?;
+        self.sigmoid(&state.scratch, &mut state.update)?;
 
-        // Reset is applied AFTER the recurrent candidate affine, including its
-        // bias, not to h before the matrix multiply.
         self.layers[5].execute(&state.hidden, &mut state.candidate)?;
         for (candidate, reset) in state.candidate.iter_mut().zip(&state.reset) {
             *candidate *= reset;
         }
         self.layers[2].execute_accumulate(input, &mut state.candidate)?;
-        tanh::apply(&state.candidate, &mut state.scratch);
+        if self.legacy_numeric {super::legacy_activation::tanh(&state.candidate,&mut state.scratch);}
+        else {tanh::apply(&state.candidate, &mut state.scratch);}
 
         for ((hidden, update), candidate) in state
             .hidden
@@ -223,13 +217,18 @@ impl Gru {
             .zip(&state.update)
             .zip(&state.scratch)
         {
-            // Keep this multiply, subtraction, multiply, add sequence for stable rounding.
+
             *hidden *= update;
             let remaining = 1.0 - update;
             let contribution = candidate * remaining;
             *hidden += contribution;
         }
         Ok(())
+    }
+
+    fn sigmoid(&self,input:&[f32],output:&mut[f32])->Result<(),InferenceError> {
+        if self.legacy_numeric {super::legacy_activation::sigmoid(input,output);Ok(())}
+        else {sigmoid(input,output)}
     }
 }
 

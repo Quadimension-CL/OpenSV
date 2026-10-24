@@ -1,7 +1,3 @@
-//! Complete export mixing and sparse live preview publication. Neither path
-//! synthesizes, resamples, normalizes, or limits PCM. Pan uses a conventional
-//! equal-power mono law / unity-center stereo balance.
-
 mod live;
 mod recordings;
 pub(super) use live::LiveMixer;
@@ -34,9 +30,6 @@ struct Span<'a> {
     right: f64,
 }
 
-/// Mix current publications using the complete project's solo set, including
-/// solo tracks whose synthesis has not finished. Frame zero remains project
-/// time zero; silence before the first owner is retained for transport seeks.
 pub(super) fn mix(
     owners: &[PublishedOwner],
     solo_tracks: &BTreeSet<u64>,
@@ -87,12 +80,18 @@ pub(super) fn mix_with_recordings(
         spans.push(span);
     }
     for layer in recordings {
+        let skipped = if layer.start_frame < 0 {
+            layer.start_frame.unsigned_abs().min(layer.frames as u64) as usize
+        } else { 0 };
+        let source_start = layer.source_start + skipped;
+        let frames = layer.frames - skipped;
+        if frames == 0 { continue; }
         output_frames = output_frames.max(layer.end_frame());
         spans.push(Span {
             audio: &layer.audio,
-            output_start: layer.start_frame,
-            source_start: 0,
-            frames: layer.frames,
+            output_start: layer.start_frame.max(0) as usize,
+            source_start,
+            frames,
             left: f64::from(layer.gains[0]),
             right: f64::from(layer.gains[1]),
         });
@@ -132,13 +131,11 @@ fn prepare_span(owner: &PublishedOwner, controls: Controls) -> Result<Option<Spa
     if coverage.sample_rate == 0 || coverage.sample_end.0 < coverage.sample_start.0 {
         return Err(format!("音符组 {} 的音频覆盖范围无效", owner.owner.0));
     }
-    // Select native sample timestamps inside the half-open project interval.
-    // Integer arithmetic avoids drift when a project uses, for example, 44100 Hz.
+
     let first = native_bound(coverage.sample_start.0, coverage.sample_rate)?;
     let last = native_bound(coverage.sample_end.0, coverage.sample_rate)?;
     let origin = (owner.audio.start_seconds() * f64::from(NATIVE_SAMPLE_RATE)).round();
-    // `as usize` saturates; check before conversion rather than accepting a
-    // silently truncated placement. Vec's signed address limit is stricter.
+
     if !origin.is_finite() || origin < 0.0 || origin >= isize::MAX as f64 {
         return Err(format!(
             "音符组 {} 的 PCM 开始位置超出地址范围",

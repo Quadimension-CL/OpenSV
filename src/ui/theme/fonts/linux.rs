@@ -33,7 +33,6 @@ pub(super) fn load(bold: bool) -> Result<FontData, String> {
             "No Simplified Chinese UI font is installed. {INSTALL_HINT}"
         ));
     }
-    // The upper 16 bits of a Fontconfig face index describe a named variable
-    // font instance; egui expects the collection face index only.
+
     super::read_font(Path::new(path), index & 0xffff)
 }

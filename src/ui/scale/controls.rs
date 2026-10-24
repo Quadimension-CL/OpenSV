@@ -8,7 +8,7 @@ use serde_json::{Value, json};
 
 pub fn toolbar(app: &mut App, ui: &mut Ui) {
     ui.add_space(15.0);
-    ui.label(RichText::new("调式音阶").color(MUTED));
+    ui.label(RichText::new(crate::i18n::t("调式音阶")).color(MUTED));
     ui.add_space(8.0);
     ui.push_id("scale-toolbar", |ui| controls(app, ui, false));
 }
@@ -131,7 +131,7 @@ fn update(app: &mut App, field: &str, value: &str) {
         return;
     }
     app.commit_lyric();
-    app.editor.begin("修改调式音阶");
+    app.editor.begin(crate::i18n::t("修改调式音阶"));
     if let Some(group) = app.editor.group_mut() {
         let raw = group
             .extra

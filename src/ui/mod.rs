@@ -10,9 +10,11 @@ mod lane_tabs;
 pub mod lanes;
 pub mod midi_import;
 pub mod panels;
-pub mod phonemes;
 pub mod piano;
+pub mod phonemes;
+pub mod prompt;
 pub mod rename;
+mod rendering_hint;
 pub mod retakes;
 pub mod scale;
 pub mod scrollbars;
@@ -33,6 +35,10 @@ pub mod voice_library;
 pub mod workspace;
 
 use eframe::egui::*;
+pub fn parameter_label(parameter: &crate::model::Parameter) -> &str {
+    if matches!(parameter,crate::model::Parameter::VocalMode(_)) {parameter.label()}
+    else {crate::i18n::t(parameter.label())}
+}
 pub fn child(ui: &mut Ui, rect: Rect, id: impl std::hash::Hash + std::fmt::Debug) -> Ui {
     let mut child = ui.new_child(UiBuilder::new().id(Id::new(id)).max_rect(rect));
     child.set_clip_rect(ui.clip_rect().intersect(rect));

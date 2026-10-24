@@ -1,8 +1,3 @@
-//! Explicit, read-only import from a supported running online session.
-//!
-//! Normal voice loading never invokes this reader. Only the derived model
-//! condition reaches RynthV's context file; the original field is zeroized.
-
 use std::path::PathBuf;
 
 use super::{Result, VoiceError};
@@ -16,14 +11,10 @@ pub struct OnlineContextSource {
     pub label: String,
 }
 
-/// Whether this build can explicitly read the original editor's online session.
 pub const fn supports_online_import() -> bool {
     cfg!(all(windows, target_arch = "x86_64"))
 }
 
-/// Lists only original-editor processes owned by this user in this session.
-/// Selecting a process does not imply that its binary version is supported;
-/// the import validates the executable before reading its model context.
 pub fn online_context_sources() -> Result<Vec<OnlineContextSource>> {
     #[cfg(all(windows, target_arch = "x86_64"))]
     {
@@ -35,8 +26,6 @@ pub fn online_context_sources() -> Result<Vec<OnlineContextSource>> {
     }
 }
 
-/// Performs a user-requested import for one voice from one explicitly selected
-/// process. This neither modifies authorization state nor contacts a server.
 pub fn import_online_context(
     voice_name: &str,
     model_version: u8,

@@ -35,7 +35,7 @@ impl MetronomeState {
                 Arc::clone(&self.enabled),
             ));
         }
-        // Match the editor's transport limit, including an otherwise empty song.
+
         let seconds = project
             .time
             .seconds_at(project.end().max(32 * QUARTER))
@@ -51,8 +51,7 @@ impl Runtime {
 
     pub fn set_metronome(&mut self, enabled: bool) {
         self.metronome.enabled.store(enabled, Ordering::Relaxed);
-        // Existing playback sources share this switch. Do not seek/reload them
-        // on a toggle; only an empty project needs a new silent clock source.
+
         if enabled && !self.playback.snapshot().ready {
             self.refresh_playback();
         }

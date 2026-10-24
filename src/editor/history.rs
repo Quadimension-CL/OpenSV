@@ -14,6 +14,7 @@ pub struct History {
     pending: Option<Entry>,
     state: u64,
     saved: u64,
+    imported_unsaved: bool,
     next: u64,
 }
 impl History {
@@ -52,11 +53,13 @@ impl History {
         Some(entry.selection)
     }
     pub fn dirty(&self, project: &Project) -> bool {
-        self.state != self.saved || self.pending.as_ref().is_some_and(|e| e.project != *project)
+        self.imported_unsaved || self.state != self.saved || self.pending.as_ref().is_some_and(|e| e.project != *project)
     }
     pub fn mark_saved(&mut self) {
         self.saved = self.state;
+        self.imported_unsaved = false;
     }
+    pub fn mark_unsaved(&mut self) {self.imported_unsaved=true;}
     pub fn can_undo(&self) -> bool {
         !self.undo.is_empty()
     }

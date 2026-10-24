@@ -60,7 +60,8 @@ impl GatedState {
             .map(|queue| queue.take(frames))
             .transpose()?;
         let mut output = Sequence::zeros(frames, self.config.output_channels)?;
-        gated::activate_projected(
+        let activate=if runtime.tree.legacy_numeric(){gated::activate_projected_legacy}else{gated::activate_projected};
+        activate(
             &main.values,
             condition
                 .as_ref()

@@ -1,7 +1,3 @@
-//! Grouped two-pass DDS pitch sampler with expression controls.
-//!
-//! The final payload integer specifies temporal grouping, not a diffusion
-//! iteration count. SV1 and SV2 compatibility models share this contract.
 mod controls;
 mod inputs;
 
@@ -67,6 +63,10 @@ pub(super) fn sample(
     require_shape(&scalar, source.frames, 1, "source projection")?;
     let packed = inputs::pack_scalar(&scalar, config.group_frames)?;
     let base = inputs::group_mean(context, config.group_frames)?;
+    #[cfg(feature="acoustic-diagnostic")]
+    for (label,value) in [("compatible_f0_scalar",&scalar),("compatible_f0_packed",&packed),("compatible_f0_base",&base)] {
+        crate::synthesis::stages::f0::diagnostic::capture(label.into(),value)?;
+    }
     let mut condition = inputs::condition(
         &base,
         positions,
@@ -74,14 +74,21 @@ pub(super) fn sample(
         config.group_frames,
         config.positional_width,
         config.positional_scale,
+        tree.legacy_numeric(),
     )?;
+    #[cfg(feature="acoustic-diagnostic")]
+    crate::synthesis::stages::f0::diagnostic::capture("compatible_f0_first_condition".into(),&condition)?;
     let first = runtime.execute_conditioned(children[5], &packed, &condition, true)?;
+    #[cfg(feature="acoustic-diagnostic")]
+    crate::synthesis::stages::f0::diagnostic::capture("compatible_f0_first_hidden".into(),&first)?;
     let preliminary = runtime.execute(
         children[7],
         &inputs::repeat_frames(&first, source.frames, config.group_frames)?,
         true,
     )?;
     require_shape(&preliminary, source.frames, 1, "preliminary pitch head")?;
+    #[cfg(feature="acoustic-diagnostic")]
+    crate::synthesis::stages::f0::diagnostic::capture("compatible_f0_preliminary".into(),&preliminary)?;
     let preliminary = preliminary
         .values
         .iter()
@@ -103,8 +110,6 @@ pub(super) fn sample(
         contract,
     )?;
 
-    // Expressiveness and explicit pitch controls use the same grouped frame
-    // grid before their learned projections.
     let mut expression = inputs::group_mean(
         &Sequence::new(source.frames, 1, expression.to_vec())?,
         config.group_frames,
@@ -161,12 +166,18 @@ pub(super) fn sample(
     }
 
     let final_hidden = runtime.execute_conditioned(children[6], &first, &condition, true)?;
+    #[cfg(feature="acoustic-diagnostic")]
+    for (label,value) in [("compatible_f0_final_condition",&condition),("compatible_f0_final_hidden",&final_hidden)] {
+        crate::synthesis::stages::f0::diagnostic::capture(label.into(),value)?;
+    }
     let pitch = runtime.execute(
         children[8],
         &inputs::repeat_frames(&final_hidden, source.frames, config.group_frames)?,
         true,
     )?;
     require_shape(&pitch, source.frames, 1, "final pitch head")?;
+    #[cfg(feature="acoustic-diagnostic")]
+    crate::synthesis::stages::f0::diagnostic::capture("compatible_normalized_head".into(), &pitch)?;
     Ok(SampleResult {
         pitch: pitch.values,
         predicted_controls,

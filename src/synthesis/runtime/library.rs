@@ -138,8 +138,7 @@ impl VoiceLibrary {
         self.catalog.as_ref()?.entry(selection)
     }
     fn rescan(&mut self, repaint: eframe::egui::Context) {
-        // Dropping the receiver prevents an earlier directory scan from
-        // replacing the catalog after the user changes paths again.
+
         self.scan = None;
         self.catalog = None;
         self.catalog_error = None;
@@ -186,6 +185,29 @@ impl VoiceLibrary {
 }
 
 impl Runtime {
+    pub fn set_voice_duration_key_override(&mut self, voice: VoiceSelection, enabled: bool, value: u64) {
+        let mut settings = self.library.settings.clone();
+        settings.set_voice_duration_key_override(voice.clone(), enabled, value);
+        if settings == self.library.settings { return; }
+        if self.library.update(settings) {
+
+            self.visuals.retain(|owner, _| self.routes.get(owner) != Some(&voice));
+            self.phonemes.retain(|owner, _| self.routes.get(owner) != Some(&voice));
+            self.reload_voice(&voice);
+        }
+    }
+
+    pub fn set_duration_key_override(&mut self, enabled: bool, value: u64) {
+        let mut settings = self.library.settings.clone();
+        settings.duration_key_override_enabled = enabled;
+        settings.duration_key_override_value = value;
+        if self.library.update(settings) {
+            self.clear_voices();
+            self.visuals.clear();
+            self.phonemes.clear();
+        }
+    }
+
     pub fn dictionaries(&self) -> Option<&Path> {
         self.library.settings.dictionaries.as_deref()
     }

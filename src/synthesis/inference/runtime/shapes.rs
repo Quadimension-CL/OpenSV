@@ -2,9 +2,7 @@ use super::ModelRuntime;
 use crate::synthesis::voice::{PreparedModule, Result};
 
 impl ModelRuntime<'_> {
-    /// Return the channel width declared by the operator or its explicit
-    /// sequential program. A dynamic-width operation still needs a shaped
-    /// Sequence; an ownership list never supplies an inferred dimension.
+
     pub fn input_channels(&self, index: usize) -> Result<Option<usize>> {
         let node = self.tree.node(index)?;
         Ok(match &node.module {
@@ -14,6 +12,7 @@ impl ModelRuntime<'_> {
             PreparedModule::Gru(layer) => Some(layer.input_channels()),
             PreparedModule::BidirectionalGru(layer) => Some(layer.input_channels()),
             PreparedModule::LayerNorm(layer) => Some(layer.channels()),
+            PreparedModule::RmsNorm(layer) => Some(layer.channels()),
             PreparedModule::ChannelAffine(layer) => Some(layer.channels()),
             PreparedModule::RangeNormalizer(layer) => Some(layer.channels()),
             PreparedModule::StandardNormalizer(layer) => Some(layer.channels()),

@@ -1,9 +1,3 @@
-//! Per-render execution state over shared, immutable prepared weights.
-//!
-//! `reset` begins a new independent sequence (including each diffusion step).
-//! Convolution, recurrent and composite programs retain state between chunks.
-//! Branch queues publish each aligned stable prefix before the final flush.
-
 mod bidirectional;
 mod composites;
 mod shapes;
@@ -20,7 +14,6 @@ use bidirectional::BidirectionalState;
 use composites::CompositeState;
 use std::collections::{HashMap, HashSet};
 
-/// Clone creates an independent stream checkpoint while retaining shared weights.
 #[derive(Clone)]
 pub struct ModelRuntime<'a> {
     tree: &'a PreparedTree,
@@ -47,7 +40,6 @@ impl<'a> ModelRuntime<'a> {
         }
     }
 
-    /// Discard all stream state. Immutable weights remain shared with the tree.
     pub fn reset(&mut self) {
         self.convolutions.clear();
         self.transposed.clear();
@@ -71,9 +63,11 @@ impl<'a> ModelRuntime<'a> {
                 #[cfg(feature = "synth-profile")]
                 let _profile = crate::synthesis::profiling::span("op.unary");
                 let mut output = Sequence::zeros(input.frames, input.channels)?;
-                operator
-                    .execute(&input.values, &mut output.values)
-                    .map_err(error)?;
+                if tree.legacy_numeric() {
+                    super::legacy_activation::execute(*operator,&input.values,&mut output.values).map_err(error)?;
+                } else {
+                    operator.execute(&input.values, &mut output.values).map_err(error)?;
+                }
                 output
             }
             PreparedModule::LeakyRelu(operator) => {
@@ -185,6 +179,11 @@ impl<'a> ModelRuntime<'a> {
                 operator
                     .execute_batch(&input.values, &mut output.values, input.frames)
                     .map_err(error)?;
+                output
+            }
+            PreparedModule::RmsNorm(operator) => {
+                let mut output=Sequence::zeros(input.frames,input.channels)?;
+                operator.execute_batch(&input.values,&mut output.values,input.frames).map_err(error)?;
                 output
             }
             PreparedModule::ChannelAffine(operator) => {

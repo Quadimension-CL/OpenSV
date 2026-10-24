@@ -1,5 +1,5 @@
-//! Decoded audio belongs to currently referenced files, not undo history.
 mod decode;
+pub(crate) use decode::load;
 
 use super::{audio::RenderedAudio, rendered::Waveform};
 use crate::model::Project;

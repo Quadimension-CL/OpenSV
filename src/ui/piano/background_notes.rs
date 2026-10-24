@@ -4,8 +4,6 @@ use crate::{
 };
 use eframe::egui::{Rect, Stroke, Ui};
 
-/// Other tracks provide a visual reference only; hit testing still uses the
-/// selected track's scene. Read project notes directly without cloning them.
 pub(super) fn draw(app: &App, ui: &Ui, canvas: Rect) {
     for track in &app.editor.project.tracks {
         if track.id == app.editor.track

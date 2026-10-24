@@ -99,7 +99,7 @@ pub(super) fn apply(
                 Some(control.clone())
             }
         })
-        // Overflow or invalid imported geometry must never corrupt a whole gesture.
+
         .collect::<Option<Vec<_>>>()
         .unwrap_or_else(|| original.to_vec())
 }
@@ -225,7 +225,6 @@ fn span(left: i64, right: i64) -> f64 {
     (i128::from(right) - i128::from(left)) as f64
 }
 
-/// Keep at least one blick between neighboring samples when compressing a curve.
 fn minimum_width(controls: &[PitchControl], selected: &BTreeSet<String>, area: Bounds) -> i64 {
     let step = controls
         .iter()

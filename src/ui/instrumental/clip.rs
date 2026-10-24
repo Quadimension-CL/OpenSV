@@ -9,7 +9,7 @@ use eframe::egui::*;
 pub fn show(app: &mut App, ui: &mut Ui, body: Rect, track: &Track) {
     let row = ui.interact(body, Id::new(("audio-row", track.id)), Sense::click());
     row.context_menu(|ui| {
-        if ui.button("导入 / 替换音频…").clicked() {
+        if ui.button(crate::i18n::t("导入 / 替换音频…")).clicked() {
             ui.close();
             app.import_audio(Some(track.id), ui.ctx());
         }
@@ -24,9 +24,9 @@ pub fn show(app: &mut App, ui: &mut Ui, body: Rect, track: &Track) {
             body.left_center() + vec2(12.0, 0.0),
             Align2::LEFT_CENTER,
             if loading {
-                "正在导入音频…"
+                crate::i18n::t("正在导入音频…")
             } else {
-                "双击导入伴奏音频…"
+                crate::i18n::t("双击导入伴奏音频…")
             },
             FontId::proportional(12.0),
             MUTED,
@@ -35,7 +35,7 @@ pub fn show(app: &mut App, ui: &mut Ui, body: Rect, track: &Track) {
             app.import_audio(Some(track.id), ui.ctx());
         }
         response.context_menu(|ui| {
-            if ui.button("导入音频…").clicked() {
+            if ui.button(crate::i18n::t("导入音频…")).clicked() {
                 ui.close();
                 app.import_audio(Some(track.id), ui.ctx());
             }
@@ -43,6 +43,7 @@ pub fn show(app: &mut App, ui: &mut Ui, body: Rect, track: &Track) {
         return;
     };
     let time = &app.editor.project.time;
+    let (visible_begin, visible_end) = track.audio_window().unwrap();
     let x = |seconds| {
         x_at(
             body,
@@ -51,8 +52,8 @@ pub fn show(app: &mut App, ui: &mut Ui, body: Rect, track: &Track) {
         )
     };
     let region = Rect::from_min_max(
-        pos2(x(clip.onset_seconds), body.top() + 1.0),
-        pos2(x(clip.end_seconds()), body.bottom() - 1.0),
+        pos2(x(visible_begin), body.top() + 1.0),
+        pos2(x(visible_end), body.bottom() - 1.0),
     );
     let visible = region.intersect(body).intersect(ui.clip_rect());
     if !visible.is_positive() {
@@ -66,14 +67,14 @@ pub fn show(app: &mut App, ui: &mut Ui, body: Rect, track: &Track) {
     let error = app.synthesis.instrumentals.error(&clip.path);
     let asset = app.synthesis.instrumentals.asset(&clip.path);
     let title = if error.is_some() {
-        format!("{} · 加载失败", clip.name())
+        crate::lformat!("{} · 加载失败", clip.name())
     } else if asset.is_none() {
-        format!("{} · 加载中…", clip.name())
+        crate::lformat!("{} · 加载中…", clip.name())
     } else {
         clip.name().to_owned()
     };
     painter.text(
-        region.min + vec2(6.0, 4.0),
+        pos2(visible.left() + 6.0, region.top() + 4.0),
         Align2::LEFT_TOP,
         title,
         FontId::proportional(11.0),
@@ -109,13 +110,13 @@ pub fn show(app: &mut App, ui: &mut Ui, body: Rect, track: &Track) {
     }
     let hover = error.map_or_else(
         || {
-            format!(
+            crate::lformat!(
                 "{}\n{:.2} 秒 · 拖动调整位置，双击替换音频",
                 clip.path.display(),
                 clip.duration_seconds
             )
         },
-        str::to_owned,
+        crate::i18n::message,
     );
     let response = ui
         .interact(
@@ -135,7 +136,7 @@ pub fn show(app: &mut App, ui: &mut Ui, body: Rect, track: &Track) {
         && let Some(pointer) = ui.input(|i| i.pointer.press_origin())
     {
         app.commit_lyric();
-        app.editor.begin("移动伴奏");
+        app.editor.begin(crate::i18n::t("移动伴奏"));
         app.audio_drag = Some(AudioDrag {
             track: track.id,
             pointer_x: pointer.x,
@@ -144,21 +145,21 @@ pub fn show(app: &mut App, ui: &mut Ui, body: Rect, track: &Track) {
         });
     }
     response.context_menu(|ui| {
-        if ui.button("替换音频…").clicked() {
+        if ui.button(crate::i18n::t("替换音频…")).clicked() {
             ui.close();
             app.import_audio(Some(track.id), ui.ctx());
         }
-        if ui.button("重新加载音频").clicked() {
+        if ui.button(crate::i18n::t("重新加载音频")).clicked() {
             app.reload_audio(track.id, ui.ctx());
             ui.close();
         }
-        if ui.button("移到工程开头").clicked() {
-            app.editor.begin("移动伴奏");
+        if ui.button(crate::i18n::t("移到工程开头")).clicked() {
+            app.editor.begin(crate::i18n::t("移动伴奏"));
             app.editor.move_audio_clip(track.id, 0.0);
             app.editor.finish();
             ui.close();
         }
-        if ui.button("移除音频").clicked() {
+        if ui.button(crate::i18n::t("移除音频")).clicked() {
             app.editor.set_audio_clip(track.id, None);
             ui.close();
         }

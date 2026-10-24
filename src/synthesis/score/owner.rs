@@ -16,24 +16,15 @@ pub fn prepare_owner(
     family: VoiceFamily,
 ) -> Result<PreparedPhrase> {
     let mut phrase = ExplicitScore::from_owner(input, lexicon, duration_tree, family)?
-        .prepare(duration_tree, family)?;
-    phrase.automations = super::PreparedAutomations::new(input)?.map(std::sync::Arc::new);
-    phrase.voice_controls =
-        super::PreparedVoiceControls::new(input, family, phrase.automations.clone())?;
-    let tuning = phrase
-        .voice_controls
-        .as_ref()
-        .map_or(0.0, super::PreparedVoiceControls::tuning_semitones);
-    if tuning != 0.0 {
-        // Apply tuning to model conditions after validating the score's MIDI
-        // pitches. Rest and boundary records share the same group tuning.
-        for (record, note) in phrase.records.iter_mut().zip(&mut phrase.notes) {
-            record.pitch_offset += tuning as f32;
-            note.pitch_offset += tuning as f32;
-        }
-    }
-    phrase.pitch_controls = super::PreparedPitchControls::new(input, tuning);
+        .prepare(duration_tree, family, lexicon.default_language_key())?;
+    phrase.pitch_controls = super::PreparedPitchControls::new(input)?;
+    phrase.automation = super::PreparedAutomation::new(input);
     phrase.performance_controls = super::PreparedPerformanceControls::new(input)?;
+    phrase.voice_parameters=crate::synthesis::parameters::VoiceParameters::from_input(&input.voice)?;
+    phrase.phoneme_controls=super::phonemes::from_owner(input)?;
+    phrase.unison=crate::synthesis::unison::UnisonSettings::from_input(&input.voice)?;
+
+    if family == VoiceFamily::Sv2Compatible { phrase.unison = Default::default(); }
     Ok(phrase)
 }
 
@@ -47,6 +38,7 @@ impl ExplicitScore {
         options::validate_owner(input, family)?;
         validate_tempo(&input.tempo)?;
         let language = lexicon.language(input)?;
+        let transpose=crate::synthesis::parameters::transpose(&input.voice)?;
         let mut sources = Vec::new();
         for note in &input.notes {
             if options::muted(&note.attributes)? {
@@ -75,9 +67,12 @@ impl ExplicitScore {
                 "Overlapping notes within one synthesis owner are not supported",
             ));
         }
-        let visible_begin_seconds = seconds_at(&input.tempo, input.visible_begin)?;
-        let visible_end_seconds = input
-            .visible_end
+        let pronunciations = super::pronunciation::resolve_owner(
+            &sources.iter().map(|(_,_,note)| *note).collect::<Vec<_>>(), language,
+            input, lexicon, duration_tree, family)?;
+        let (publication_begin, publication_end) = input.publication_bounds();
+        let visible_begin_seconds = seconds_at(&input.tempo, publication_begin)?;
+        let visible_end_seconds = publication_end
             .map(|end| seconds_at(&input.tempo, end))
             .transpose()?;
         let start_seconds = sources
@@ -86,19 +81,25 @@ impl ExplicitScore {
             .transpose()?
             .unwrap_or(visible_begin_seconds);
         let mut score = Self {
+            vocal_modes: crate::synthesis::vocal_modes::from_owner(input, family)?,
             start_seconds,
             visible_begin_seconds,
             visible_end_seconds,
             notes: Vec::new(),
         };
-        let mut previous_time = 0.0;
+        let mut previous_time = if family == VoiceFamily::Sv1 {
+            start_seconds
+        } else {
+            quantized_seconds(start_seconds)?
+        };
         let mut previous_end_seconds = start_seconds;
         let mut previous_pitch = 60.0;
-        for (begin, end, note) in sources {
+        for ((begin, end, note), pronunciation) in sources.into_iter().zip(pronunciations) {
+            let super::pronunciation::ResolvedNote { language: note_language, placeholder_language, syllables, kind, error } = pronunciation;
             let begin_seconds = seconds_at(&input.tempo, GlobalBlick(begin))?;
             let end_seconds = seconds_at(&input.tempo, GlobalBlick(end))?;
-            let begin_time = relative_time(begin_seconds - start_seconds, family)?;
-            let end_time = relative_time(end_seconds - start_seconds, family)?;
+            let begin_time = if family == VoiceFamily::Sv1 {begin_seconds} else {quantized_seconds(begin_seconds)?};
+            let end_time = if family == VoiceFamily::Sv1 {end_seconds} else {quantized_seconds(end_seconds)?};
             let (duration_seconds, gap_seconds) = if family == VoiceFamily::Sv1 {
                 (
                     end_seconds - begin_seconds,
@@ -106,8 +107,8 @@ impl ExplicitScore {
                 )
             } else {
                 (
-                    (end_time - begin_time) * FRAME_SECONDS,
-                    (begin_time - previous_time) * FRAME_SECONDS,
+                    end_time - begin_time,
+                    begin_time - previous_time,
                 )
             };
             if end_time <= begin_time {
@@ -116,86 +117,71 @@ impl ExplicitScore {
                     note.id
                 )));
             }
-            if gap_seconds > 0.0 {
-                // SV1 gaps are flagged rest records (kind 1); SV2 gaps
-                // use the default kind and an unset flag.
-                score.notes.push(ScoreNote {
-                    source_note_id: None,
-                    retake_seeds: Default::default(),
-                    performance: Default::default(),
-                    duration_seconds: gap_seconds,
-                    pitch: previous_pitch,
-                    phones: vec![ScorePhone {
-                        language: language.id().to_owned(),
-                        token: "sil".to_owned(),
-                        source: None,
-                        attributes: Default::default(),
-                        source_note_onset_seconds: None,
-                    }],
-                    kind: u32::from(family == VoiceFamily::Sv1),
-                    flag: family == VoiceFamily::Sv1,
-                    tag: None,
-                    parts: 1,
-                    part_index: 0,
-                });
-            }
             let pitch = note
                 .pitch
                 .checked_add(input.pitch_offset)
                 .filter(|pitch| (0..=127).contains(pitch))
                 .ok_or_else(|| {
                     VoiceError::new(format!("Note {} pitch is outside MIDI range", note.id))
-                })? as f32;
-            let note_language = lexicon.note_language(note, language)?;
-            let syllables = super::pronunciation::resolve_note(
-                note,
-                note_language,
-                lexicon,
-                input.voice.dictionary.as_ref(),
-                duration_tree,
-            )?;
+                })? as f32 + transpose + note.extensions.get("detune").and_then(serde_json::Value::as_f64).unwrap_or(0.0) as f32/100.0;
+            if !pitch.is_finite() || !(0.0..=127.0).contains(&pitch) {
+                return Err(VoiceError::new(format!("Note {} transposed pitch is outside MIDI range",note.id)));
+            }
+            let performance = crate::model::NotePerformance::from_parts(
+                &note.musical_type,
+                &note.attributes,
+            ).map_err(VoiceError::new)?;
+            if gap_seconds > 0.0 {
+
+                score.notes.push(ScoreNote {
+                    source_note_id: None,
+                    note_error: None,
+                    retake_seeds: Default::default(),
+
+                    performance: crate::model::NotePerformance {
+                        mode: if family == VoiceFamily::Sv2 {performance.mode} else {Default::default()},
+                        choir_pitch: performance.choir_pitch,
+                        ..Default::default()
+                    },
+                    duration_seconds: gap_seconds,
+
+                    pitch: if family != VoiceFamily::Sv1 {pitch} else {previous_pitch},
+                    phones: vec![ScorePhone {
+                        language: language.id().to_owned(),
+                        token: "sil".to_owned(),
+                        display_token: None,
+                        onset_offset_seconds: None,
+                    }],
+                    kind: 1,
+                    flag: family == VoiceFamily::Sv1,
+                    tag: None,
+                    parts: 1,
+                    part_index: 0,
+                });
+            }
+            let mut syllables = super::model_phones::materialize(syllables, note_language, lexicon, duration_tree,
+                note.attributes.get("evenSyllableDuration").and_then(serde_json::Value::as_bool) != Some(false))?;
+            if placeholder_language.is_some() {
+                for phone in syllables.iter_mut().flatten() {
+                    phone.language = lexicon.default_language_key().to_owned();
+                }
+            }
             let parts = u32::try_from(syllables.len())
                 .map_err(|_| VoiceError::new("Too many syllables in one note"))?;
-            if parts == 0 || syllables.iter().any(Vec::is_empty) {
+            if parts == 0 || (kind != 2 && syllables.iter().any(Vec::is_empty)) {
                 return Err(VoiceError::new(format!("Note {} has no phonemes", note.id)));
             }
-            let phoneme_attributes =
-                crate::model::PhonemeAttributes::read(&note.attributes).map_err(VoiceError::new)?;
-            let mut phone_index = 0;
             for (part_index, tokens) in syllables.into_iter().enumerate() {
                 score.notes.push(ScoreNote {
                     source_note_id: Some(note.id),
+                    note_error: error.clone(),
                     retake_seeds: Some(super::retakes::note_seeds(note, family)?),
-                    performance: crate::model::NotePerformance::from_parts(
-                        &note.musical_type,
-                        &note.attributes,
-                    )
-                    .map_err(VoiceError::new)?,
+                    performance,
                     duration_seconds,
                     pitch,
-                    phones: tokens
-                        .into_iter()
-                        .map(|token| {
-                            let index = phone_index;
-                            phone_index += 1;
-                            ScorePhone {
-                                language: note_language.id().to_owned(),
-                                token,
-                                source: Some(crate::model::SourcePhone {
-                                    note_id: note.id,
-                                    phone_index: index,
-                                }),
-                                attributes: phoneme_attributes
-                                    .get(index)
-                                    .copied()
-                                    .unwrap_or_default(),
-                                source_note_onset_seconds: Some(begin_seconds),
-                            }
-                        })
-                        .collect(),
-                    kind: 0,
-                    // SV1 uses the note flag for even syllable splitting,
-                    // which is enabled unless the note explicitly disables it.
+                    phones: tokens,
+                    kind,
+
                     flag: family == VoiceFamily::Sv1
                         && note
                             .attributes
@@ -216,32 +202,20 @@ impl ExplicitScore {
             previous_end_seconds = end_seconds;
             previous_pitch = pitch;
         }
-        // ExplicitScore::prepare materializes the boundary context
-        // and moves leading consonants into the preceding temporal record.
+
         Ok(score)
     }
 }
 
-/// Native SV1 retains seconds; SV2 uses integer frame positions. The latter
-/// remain exact f64 integers so subtraction happens before scaling to seconds.
-fn relative_time(seconds: f64, family: VoiceFamily) -> Result<f64> {
+fn quantized_seconds(seconds: f64) -> Result<f64> {
     let frames = seconds / FRAME_SECONDS;
-    if !frames.is_finite() || frames < 0.0 || frames >= u32::MAX as f64 {
+    if !frames.is_finite() || frames.abs() >= u32::MAX as f64 {
         return Err(VoiceError::new(
             "Score time exceeds the supported model frame range",
         ));
     }
-    match family {
-        // SV1 retains the mapped note duration in seconds. Both
-        // syllable partitioning and phone timing corrections precede its
-        // acoustic consumer's cumulative frame quantization.
-        VoiceFamily::Sv1 => Ok(seconds),
-        // Quantize SV2 absolute boundaries relative to the phrase origin,
-        // rather than each duration independently, to avoid accumulated drift.
-        VoiceFamily::Sv2Compatible | VoiceFamily::Sv2 => {
-            Ok((frames + f64::from_bits(0x3fdf_ffff_ffff_ffff)).trunc())
-        }
-    }
+
+    Ok(frames.round() * FRAME_SECONDS)
 }
 
 fn validate_tempo(mapping: &TempoMapping) -> Result<()> {

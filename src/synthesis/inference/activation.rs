@@ -1,8 +1,3 @@
-//! Rational sigmoid and SiLU activation kernels.
-//!
-//! The scalar path uses division; the four-lane SSE path refines a reciprocal
-//! estimate. Their rounding can differ, as can implementations that use FMA.
-
 use super::InferenceError;
 
 pub const SIGMOID_TYPE_ID: [u8; 16] = [
@@ -12,8 +7,6 @@ pub const SILU_TYPE_ID: [u8; 16] = [
     0x2a, 0x79, 0xa4, 0xa9, 0x12, 0xc7, 0x78, 0x99, 0xed, 0x8d, 0x45, 0xdd, 0xc5, 0x59, 0xe1, 0xf8,
 ];
 
-// Keep the rounded float32 coefficients exact; substituting integer or f64
-// coefficients changes intermediate rounding.
 const NUMERATOR: [f32; 11] = [
     f32::from_bits(0x4304_0000),
     f32::from_bits(0x4606_1000),
@@ -51,8 +44,6 @@ impl ActivationOperator {
         }
     }
 
-    /// Scalar remainder formula, independent of the slice length.
-    /// It intentionally differs from the four-lane SSE path at some roundings.
     pub fn execute_reference(
         self,
         input: &[f32],
@@ -63,10 +54,6 @@ impl ActivationOperator {
         Ok(())
     }
 
-    /// Non-overlapping baseline kernel: four-element SSE batches,
-    /// followed by scalar division for the remaining zero to three elements.
-    /// SSE is mandatory on x86_64; the caller's floating-point environment is
-    /// preserved, so this assumes the normal round-to-nearest environment.
     #[cfg(target_arch = "x86_64")]
     pub fn execute_baseline(self, input: &[f32], output: &mut [f32]) -> Result<(), InferenceError> {
         check_lengths(input, output)?;
@@ -77,9 +64,7 @@ impl ActivationOperator {
             .iter()
             .zip(output[..vector_len].as_chunks_mut::<4>().0.iter_mut())
         {
-            // SAFETY: x86_64 has SSE; both chunks contain exactly four f32
-            // elements. Unaligned loads/stores are used and the Rust borrows
-            // ensure input/output do not overlap.
+
             unsafe { self.sse_four(source.as_ptr(), target.as_mut_ptr()) };
         }
         self.scalar_remainder(&input[vector_len..], &mut output[vector_len..]);
@@ -103,8 +88,6 @@ impl ActivationOperator {
             _mm_setzero_ps, _mm_storeu_ps, _mm_sub_ps,
         };
 
-        // SAFETY: the enclosing function's caller guarantees four readable /
-        // writable elements, and every intrinsic here requires only SSE.
         unsafe {
             let x = _mm_loadu_ps(input);
             let z = _mm_mul_ps(x, x);
@@ -117,8 +100,7 @@ impl ActivationOperator {
             for coefficient in &DENOMINATOR[2..] {
                 denominator = _mm_add_ps(_mm_mul_ps(denominator, z), _mm_set1_ps(*coefficient));
             }
-            // Keep these operations separate: division or FMA changes the
-            // result and the behaviour on overflow/underflow.
+
             let reciprocal = _mm_rcp_ps(denominator);
             let estimate = _mm_mul_ps(numerator, reciprocal);
             let residual = _mm_sub_ps(numerator, _mm_mul_ps(denominator, estimate));
@@ -154,8 +136,7 @@ fn sigmoid_reference(x: f32) -> f32 {
         denominator = denominator * z + coefficient;
     }
     let ratio = numerator / denominator;
-    // MAXSS(value, +0) then MINSS(value, +1): a NaN ratio becomes positive
-    // zero. f32::clamp would preserve NaN and is therefore incorrect here.
+
     let nonnegative = if ratio > 0.0 { ratio } else { 0.0 };
     if nonnegative < 1.0 { nonnegative } else { 1.0 }
 }

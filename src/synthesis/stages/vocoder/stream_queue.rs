@@ -1,5 +1,3 @@
-//! Frame-preserving joins between branches with different streaming latency.
-
 use std::collections::VecDeque;
 
 use crate::synthesis::{
@@ -45,7 +43,6 @@ impl FrameQueue {
     }
 }
 
-/// Only explicit stream finalization requires both upstream tails to agree.
 pub(crate) fn paired(
     first: &mut FrameQueue,
     second: &mut FrameQueue,

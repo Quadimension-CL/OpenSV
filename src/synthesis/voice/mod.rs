@@ -1,8 +1,3 @@
-//! Strict, read-only loading of DNNI v3 and SV1 AI NOFS resources.
-//!
-//! Immutable parameters are shared by the native stage programs.
-//! Decoded model resources are not serialized.
-
 mod archive;
 mod catalog;
 mod config;
@@ -11,38 +6,65 @@ pub(crate) mod embedded;
 mod family;
 mod format;
 mod inventory;
+mod materialized_flat;
+mod member_modes;
 mod nofs;
+mod noise_cadence;
 mod phones;
+mod phonetic;
 mod preparation;
 mod prepared;
+mod revision;
 pub mod session_identity;
+pub(crate) mod speakers;
 mod stream;
 mod tensor;
 mod tree;
 
-pub use catalog::{VoiceAvailability, VoiceCatalog, VoiceCatalogEntry};
+pub use catalog::{VoiceArtwork, VoiceAvailability, VoiceCatalog, VoiceCatalogEntry};
 pub use duration_frontend::{DURATION_ROOT_TYPE_ID, DurationConfiguration};
 pub use family::VoiceFamily;
 pub use inventory::VoiceInventory;
+pub use materialized_flat::load_materialized_flat;
+pub use member_modes::MemberVocalModes;
 pub use phones::{PHONE_SET_TYPE_ID, PhoneLookup, PhoneSet, ResolvedPhone, resolve_explicit};
+pub use phonetic::{PHONETIC_MAP_TYPE_ID, PhoneticMap};
 pub use preparation::{PreparationSummary, PreparedVoice};
 pub use prepared::{PreparedModule, PreparedNode, PreparedTree, PreparedTreeSummary};
+pub use revision::VoiceRevision;
+pub use speakers::Speaker;
 pub use tensor::{TensorLayout, TensorStorage};
 
 use std::{fmt, ops::Range};
 
 #[derive(Clone, Debug)]
-pub struct VoiceError(String);
+pub struct VoiceError {
+    message: String,
+    session_decryption_exhausted: bool,
+}
 
 impl VoiceError {
     pub(crate) fn new(message: impl Into<String>) -> Self {
-        Self(message.into())
+        Self { message: message.into(), session_decryption_exhausted: false }
+    }
+
+    pub fn is_session_decryption_exhausted(&self) -> bool {
+        self.session_decryption_exhausted
+    }
+
+    pub(crate) fn decryption_exhausted() -> Self {
+        Self { message: "无法解密所选 session：自动解密方式均未成功。".into(), session_decryption_exhausted: true }
+    }
+
+    pub(crate) fn with_context(mut self, context: &str) -> Self {
+        self.message = format!("{context}：{}", self.message);
+        self
     }
 }
 
 impl fmt::Display for VoiceError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.0)
+        f.write_str(&self.message)
     }
 }
 
@@ -50,7 +72,7 @@ impl std::error::Error for VoiceError {}
 
 impl From<std::io::Error> for VoiceError {
     fn from(error: std::io::Error) -> Self {
-        Self(error.to_string())
+        Self::new(error.to_string())
     }
 }
 

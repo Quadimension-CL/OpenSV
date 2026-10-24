@@ -5,9 +5,6 @@ use std::sync::RwLockReadGuard;
 
 type Block<'a> = (usize, RwLockReadGuard<'a, LiveBlock>);
 
-/// Read locks protect immutable block revisions for one device callback. A
-/// normal callback touches one block; crossing its edge acquires its neighbour
-/// once. No per-sample locking, Arc ownership changes or allocations occur.
 pub(super) struct Sampler<'a> {
     source: &'a LiveAudio,
     current: Option<Block<'a>>,
@@ -23,8 +20,6 @@ impl<'a> Sampler<'a> {
         }
     }
 
-    /// Interpolation waits for the actual neighbouring block, rather than
-    /// extending each block's final sample. Only the true project end holds.
     pub fn sample(&mut self, position: f64) -> Option<[f32; 2]> {
         let left = position.floor() as usize;
         if left >= self.source.total_frames() {

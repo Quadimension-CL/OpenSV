@@ -27,23 +27,23 @@ pub(super) fn primary(
     let loaded = matches!(voice, VoiceState::Loaded(_)) && !problem;
     let missing_dictionary = app.synthesis.dictionaries().is_none();
     let label = if !entry.availability.is_loadable() {
-        "不可用"
+        crate::i18n::t("不可用")
     } else if current && loading {
-        "正在加载…"
+        crate::i18n::t("正在加载…")
     } else if needs_context {
-        "导入模型上下文…"
+        crate::i18n::t("导入模型上下文…")
     } else if problem {
-        "处理问题"
+        crate::i18n::t("处理问题")
     } else if current && loaded {
-        "取消当前音轨歌声"
+        crate::i18n::t("取消当前音轨歌声")
     } else if loaded {
-        "用于当前音轨"
+        crate::i18n::t("用于当前音轨")
     } else if missing_dictionary {
-        "设置词典目录"
+        crate::i18n::t("设置词典目录")
     } else if current && matches!(voice, VoiceState::Failed(_)) {
-        "重试加载"
+        crate::i18n::t("重试加载")
     } else {
-        "加载歌声"
+        crate::i18n::t("加载歌声")
     };
     let enabled = stable
         && entry.availability.is_loadable()
@@ -97,13 +97,13 @@ pub(super) fn menu(
         ui.painter()
             .circle_filled(rect.center() + vec2(0.0, offset), 1.5, MUTED);
     }
-    response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, "更多声库操作"));
+    response.widget_info(|| WidgetInfo::labeled(WidgetType::Button, true, crate::i18n::t("更多声库操作")));
     Popup::menu(&response).show(|ui| {
         if ui
             .button(if state.expanded.as_ref() == Some(&entry.database_id) {
-                "收起详情"
+                crate::i18n::t("收起详情")
             } else {
-                "详情与诊断"
+                crate::i18n::t("详情与诊断")
             })
             .clicked()
         {
@@ -118,10 +118,10 @@ pub(super) fn menu(
             && ui
                 .add_enabled(
                     app.synthesis.can_import_context(&entry.selection()),
-                    Button::new("重新导入上下文…"),
+                    Button::new(crate::i18n::t("重新导入上下文…")),
                 )
-                .on_hover_text("重新选择上下文来源，导入成功后重新加载使用此上下文的歌声")
-                .on_disabled_hover_text("当前声库不可用，或正在扫描声库、导入上下文")
+                .on_hover_text(crate::i18n::t("重新选择上下文来源，导入成功后重新加载使用此上下文的歌声"))
+                .on_disabled_hover_text(crate::i18n::t("当前声库不可用，或正在扫描声库、导入上下文"))
                 .clicked()
         {
             app.synthesis.open_context_import(entry.selection());
@@ -137,14 +137,14 @@ pub(super) fn menu(
                         app.synthesis.voice_state(&entry.selection()),
                         VoiceState::Loading
                     ),
-                    Button::new("重新加载"),
+                    Button::new(crate::i18n::t("重新加载")),
                 )
                 .clicked()
             {
                 app.synthesis.reload_voice(&entry.selection());
                 ui.close();
             }
-            if current && ui.button("取消当前音轨歌声").clicked() {
+            if current && ui.button(crate::i18n::t("取消当前音轨歌声")).clicked() {
                 app.unload_voice();
                 ui.close();
             }

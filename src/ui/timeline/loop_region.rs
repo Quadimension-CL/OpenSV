@@ -57,8 +57,6 @@ fn hit(marker: Rect, ruler: Rect, pointer: Pos2) -> Option<Part> {
     }
 }
 
-/// Own the ruler's pointer response so loop edits cannot also seek the playhead.
-/// Call before drawing ruler labels to keep the marker behind the bar numbers.
 pub fn show(
     ui: &Ui,
     id: Id,
@@ -66,7 +64,7 @@ pub fn show(
     view: &Viewport,
     transport: &mut Transport,
     options: RulerOptions,
-) {
+) -> Option<i64> {
     let response = ui.interact(ruler, id, Sense::click_and_drag());
     let drag_id = id.with("loop-drag");
     let menu_id = id.with("loop-menu-position");
@@ -84,7 +82,7 @@ pub fn show(
     if !enabled || !transport.looping {
         drag = None;
     } else if primary_pressed {
-        // Capture the original hit, before egui's drag threshold is crossed.
+
         drag = pointer
             .filter(|_| response.contains_pointer())
             .and_then(|pointer| {
@@ -136,12 +134,12 @@ pub fn show(
             let Some(at) = ui.ctx().data(|data| data.get_temp::<i64>(menu_id)) else {
                 return;
             };
-            if ui.button("将循环开始标记移至此处").clicked() {
+            if ui.button(crate::i18n::t("将循环开始标记移至此处")).clicked() {
                 transport.loop_region.place_start(at);
                 transport.looping = true;
                 ui.close();
             }
-            if ui.button("将循环结束标记移至此处").clicked() {
+            if ui.button(crate::i18n::t("将循环结束标记移至此处")).clicked() {
                 transport.loop_region.place_end(at);
                 transport.looping = true;
                 ui.close();
@@ -183,4 +181,10 @@ pub fn show(
             data.remove::<Drag>(drag_id);
         }
     });
+
+    if enabled && !ui.input(|i| i.pointer.any_down()) && !Popup::is_any_open(ui.ctx()) && response.contains_pointer() {
+        ui.input(|i|i.pointer.hover_pos()).filter(|p| {
+            !transport.looping || hit(marker_rect(ruler,view,transport),ruler,*p).is_none()
+        }).map(|p|position(beat_at(ruler,view,p.x),options.seek_step))
+    } else {None}
 }

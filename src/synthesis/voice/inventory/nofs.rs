@@ -65,7 +65,7 @@ pub(super) fn load(path: &Path) -> Result<VoiceInventory> {
         resources: resource_count,
         borrowed_resources: resource_count,
         encoded_resources: 0,
-        // NOFS has structural checks, not DNNI v3 signatures or resource digests.
+
         header_signature_equal_branch_verified: false,
         index_digest_verified: false,
         all_resource_digests_verified: false,

@@ -7,15 +7,11 @@ use std::ops::Range;
 use super::{ExpandedFeatures, FeatureNetwork, FrameConditioning};
 
 impl FeatureNetwork<'_> {
-    /// Project a complete sequence through two independent branches that
-    /// share the same initial projection.
+
     pub fn project(&self, expanded: &ExpandedFeatures) -> Result<FrameConditioning> {
         self.project_range(expanded, 0..expanded.frames)
     }
 
-    /// Project a global frame interval with the branches' actual convolution
-    /// support. Input note/phone encodings and positions still belong to the
-    /// complete owner; only the frame projection's independent rows are cut.
     pub fn project_range(
         &self,
         expanded: &ExpandedFeatures,
@@ -23,10 +19,17 @@ impl FeatureNetwork<'_> {
     ) -> Result<FrameConditioning> {
         #[cfg(feature = "synth-profile")]
         let _profile = crate::synthesis::profiling::span("features.project");
-        let PreparedModule::Affine(projection) = &self.tree.node(self.children[7])?.module else {
-            return Err(VoiceError::new("Feature frame projection is not prepared"));
+        let projection=if self.phonetic(){None}else{
+            let PreparedModule::Affine(projection)=&self.tree.node(self.children[7])?.module else{
+                return Err(VoiceError::new("Feature frame projection is not prepared"));
+            };Some(projection)
         };
-        if expanded.full_width != projection.input_features
+        let input_channels=if let Some(projection)=projection{projection.input_features}else{
+            let PreparedModule::Conditional(config)=&self.tree.node(self.children[9])?.module else{
+                return Err(VoiceError::new("Phonetic expanded frame program is not prepared"));
+            };config.input_channels
+        };
+        if expanded.full_width != input_channels
             || expanded.frames.checked_mul(expanded.full_width) != Some(expanded.full.len())
             || frames.start > frames.end
             || frames.end > expanded.frames
@@ -54,7 +57,7 @@ impl FeatureNetwork<'_> {
         };
         let values =
             &expanded.full[read.start * expanded.full_width..read.end * expanded.full_width];
-        let projected = self.tree.execute_node(self.children[7], values)?;
+        let projected = if projection.is_some(){self.tree.execute_node(self.children[7], values)?}else{values.to_vec()};
         let pointwise = if empty_pointwise {
             None
         } else {

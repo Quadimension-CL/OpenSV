@@ -1,8 +1,3 @@
-//! Scalar-pitch vocoder condition modules.
-//!
-//! The physical input is kept separate from normalized network
-//! conditioning: excitation still needs F0 in Hz, not the normalized log F0.
-
 use crate::synthesis::{
     inference::{Sequence, ops::range_normalizer::RangeNormalizer},
     voice::{PreparedTree, Result, VoiceError},
@@ -21,16 +16,13 @@ const IDENTITY_TYPE_ID: [u8; 16] = [
 pub const CHANNELS: usize = 72;
 pub const PITCH_CHANNEL: usize = 1;
 
-/// The four-child, one-pitch-channel condition variants in SV1 and SV2.
-/// Other variants have different conditioning and excitation programs.
 #[derive(Clone)]
 pub struct VocoderCondition {
     normalizer: RangeNormalizer,
     pub sample_rate: u32,
     pub frame_seconds: f32,
     pub frame_samples: usize,
-    /// Child 1 is a separate sample-domain normalizer. It does not normalize
-    /// the 72 acoustic features; its consumption belongs to the root program.
+
     pub sample_normalizer_node: usize,
 }
 
@@ -61,11 +53,7 @@ impl VocoderCondition {
             .iter()
             .map(|bytes| u32::from_le_bytes(*bytes))
             .collect();
-        // These fields select the scalar pitch representation, no optional
-        // pitch transform, and no alternate excitation module. Unsupported
-        // variants must not silently run this numerical program. The 48-byte
-        // layout has no input-overwrite switch; the 52-byte layout stores it
-        // as its final word. Only disabled input overwrite is implemented.
+
         if words[0] != CHANNELS as u32
             || words[1] != 1
             || words[4..12] != [72, 1, 1, 0, 1, 1, 1, 0]
@@ -86,7 +74,7 @@ impl VocoderCondition {
                 "Vocoder condition normalizer must have 72 channels",
             ));
         }
-        // Identity children do not add any transforms after normalization.
+
         for &child in &node.children[2..] {
             if tree.node(child)?.type_id != IDENTITY_TYPE_ID
                 || !tree.node(child)?.children.is_empty()
@@ -107,8 +95,6 @@ impl VocoderCondition {
         })
     }
 
-    /// Input layout: acoustic[0], F0_Hz, acoustic[1], 64 spectral values,
-    /// and the final five acoustic auxiliary values. Only index 1 takes log.
     pub fn normalize(&self, physical: &Sequence) -> Result<Sequence> {
         physical.validate()?;
         if physical.channels != CHANNELS {

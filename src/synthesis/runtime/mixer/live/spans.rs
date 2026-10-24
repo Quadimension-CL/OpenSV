@@ -1,6 +1,3 @@
-//! Ordered, nonoverlapping views into immutable owner PCM. Splitting a view
-//! adjusts its source offset; replacing a seam never copies whole owner audio.
-
 use super::{Controls, LIVE_CHANNELS, LIVE_SAMPLE_RATE, RenderedAudio, intersection};
 use std::{collections::BTreeMap, ops::Range, sync::Arc};
 
@@ -109,8 +106,7 @@ impl ReadySpans {
             .next_back()
             .filter(|(_, span)| span.end > range.start)
             .map_or(range.start, |(start, _)| *start);
-        // Empty intersections can have an end before the start. Normalize the
-        // BTree range instead of asking it to construct a reversed range.
+
         self.spans
             .range(start..range.end.max(start))
             .map(|(start, span)| (*start, span))

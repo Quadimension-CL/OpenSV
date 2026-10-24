@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use super::{VoiceAvailability, VoiceCatalogEntry};
-use crate::synthesis::voice::{Result, VoiceFamily, nofs};
+use crate::synthesis::voice::{Result, VoiceFamily, VoiceRevision, nofs};
 
 pub(super) fn entry(path: &Path) -> Result<VoiceCatalogEntry> {
     let icon_path = path
@@ -9,8 +9,9 @@ pub(super) fn entry(path: &Path) -> Result<VoiceCatalogEntry> {
         .map(|directory| directory.join("profile.png"))
         .filter(|path| path.is_file());
     let mut entry = VoiceCatalogEntry {
+        configuration: None,
         database_id: nofs::database_id(path)?,
-        revision: 0,
+        revision: VoiceRevision::release(0),
         model_version: Some(1),
         family: Some(VoiceFamily::Sv1),
         directory: path.to_owned(),
@@ -24,7 +25,8 @@ pub(super) fn entry(path: &Path) -> Result<VoiceCatalogEntry> {
         genres: Vec::new(),
         pitch_range: None,
         languages: Vec::new(),
-        icon_path,
+        icon: icon_path.map(|path| super::VoiceArtwork::File {path}),
+        portrait: None,
         availability: VoiceAvailability::Loadable,
     };
     let description =

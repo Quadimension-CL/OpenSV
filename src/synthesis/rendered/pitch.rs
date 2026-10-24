@@ -5,16 +5,23 @@ use crate::synthesis::{
 };
 use std::{ops::Range, sync::Arc};
 
-/// Pitch on the model's frame clock, expressed in editor score coordinates.
-/// The group's pitch offset is included; voice tuning is removed for display.
 #[derive(Clone, Debug)]
 pub struct PitchTrack {
     pub start_seconds: f64,
     pub frame_seconds: f64,
     pub values: Arc<[f32]>,
-    /// Maximal contiguous sounding-note ranges. Rest records break the curve;
-    /// adjacent syllables remain joined so their predicted transition survives.
+
     pub segments: Vec<Range<usize>>,
+    pub rap_controls: Arc<[RenderedRapControl]>,
+
+    pub unison_range: Option<[Arc<[f32]>; 2]>,
+}
+
+#[derive(Clone, Debug)]
+pub struct RenderedRapControl {
+    pub note_id: u64,
+    pub tone: f32,
+    pub intonation: f32,
 }
 
 impl PitchTrack {
@@ -27,11 +34,9 @@ impl PitchTrack {
         Self::from_phrase_with_frames(phrase, prediction, &frames)
     }
 
-    /// Publish using the generating model's note clock. Compatibility DDS
-    /// uses cumulative model-frame boundaries; version 2 uses per-record counts.
     pub(crate) fn from_phrase_with_frames(
         phrase: &PreparedPhrase,
-        mut prediction: PitchResult,
+        prediction: PitchResult,
         frames: &[usize],
     ) -> Result<Self> {
         if frames.len() != phrase.notes.len() {
@@ -49,13 +54,23 @@ impl PitchTrack {
             ));
         }
         let mut segments: Vec<Range<usize>> = Vec::new();
+        let mut rap_controls = Vec::new();
         let mut cursor = 0_usize;
-        for (note, &count) in phrase.notes.iter().zip(frames) {
+        for (index, (note, &count)) in phrase.notes.iter().zip(frames).enumerate() {
             let end = cursor
                 .checked_add(count)
                 .ok_or_else(|| VoiceError::new("Rendered pitch frame count overflow"))?;
-            // This is the shared note frontend's explicit rest/breath condition,
-            // not an amplitude threshold or an invented voicing estimate.
+            if count > 0 && let Some(note_id) = phrase.source_note_ids[index] {
+                let tone = prediction.predicted_controls.offset.get(cursor);
+                let intonation = prediction.predicted_controls.slope.get(cursor);
+                if let (Some(&tone), Some(&intonation)) = (tone, intonation)
+                    && tone.is_finite() && intonation.is_finite()
+                    && !rap_controls.iter().any(|v: &RenderedRapControl| v.note_id == note_id)
+                {
+                    rap_controls.push(RenderedRapControl {note_id, tone, intonation});
+                }
+            }
+
             let silent = note.phones.len() == 1
                 && (note.kind == 1 || matches!(note.phones[0].as_str(), "sil" | "pau" | "br"));
             if !silent && cursor < end {
@@ -74,20 +89,13 @@ impl PitchTrack {
                 "Rendered pitch does not cover the prepared note timeline",
             ));
         }
-        let tuning = phrase
-            .voice_controls
-            .as_ref()
-            .map_or(0.0, |controls| controls.tuning_semitones() as f32);
-        if tuning != 0.0 {
-            for value in &mut prediction.pitch {
-                *value -= tuning;
-            }
-        }
         Ok(Self {
             start_seconds: phrase.start_seconds,
             frame_seconds: prediction.frame_seconds,
             values: prediction.pitch.into(),
             segments,
+            rap_controls: rap_controls.into(),
+            unison_range: None,
         })
     }
 
@@ -96,6 +104,8 @@ impl PitchTrack {
             self.segments
                 .capacity()
                 .saturating_mul(std::mem::size_of::<Range<usize>>()),
-        )
+        ).saturating_add(std::mem::size_of_val(self.rap_controls.as_ref()))
+        .saturating_add(self.unison_range.as_ref().map_or(0,|range|
+            range.iter().map(|values|std::mem::size_of_val(values.as_ref())).sum()))
     }
 }

@@ -1,4 +1,4 @@
-use crate::model::{AutomationTarget, Parameter, new_id};
+use crate::model::{Parameter, new_id};
 use serde::{Deserialize, Serialize};
 
 use super::scale::ScaleDisplay;
@@ -22,12 +22,12 @@ impl Column {
     ];
     pub fn label(self) -> &'static str {
         match self {
-            Self::Editor => "编辑器",
-            Self::Voice => "歌声",
-            Self::Note => "音符",
-            Self::Dictionary => "词典",
-            Self::Render => "渲染",
-            Self::Script => "脚本",
+            Self::Editor => crate::i18n::t("编辑器"),
+            Self::Voice => crate::i18n::t("歌声"),
+            Self::Note => crate::i18n::t("音符"),
+            Self::Dictionary => crate::i18n::t("词典"),
+            Self::Render => crate::i18n::t("渲染"),
+            Self::Script => crate::i18n::t("脚本"),
         }
     }
     pub fn icon(self) -> super::icons::Icon {
@@ -45,31 +45,32 @@ impl Column {
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Lane {
     pub id: u64,
-    pub foreground: AutomationTarget,
-    pub background: AutomationTarget,
-    pub tool: ParameterTool,
-    pub zoom: f32,
+    pub foreground: Parameter,
+    pub background: Parameter,
     pub visible: bool,
     pub height: f32,
+    pub tool: CurveTool,
+    pub zoom: f32,
+}
+#[derive(Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CurveTool {
+    #[default]
+    Point,
+    Pencil,
+    Line,
 }
 impl Lane {
     pub fn new() -> Self {
         Self {
             id: new_id(),
-            foreground: AutomationTarget::Parameter(Parameter::Pitch),
-            background: AutomationTarget::Parameter(Parameter::Loudness),
-            tool: ParameterTool::ControlPoints,
-            zoom: 1.0,
+            foreground: Parameter::Pitch,
+            background: Parameter::Loudness,
             visible: true,
-            height: 148.0,
+            height: 100.0,
+            tool: CurveTool::Point,
+            zoom: 100.0,
         }
     }
-}
-#[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum ParameterTool {
-    ControlPoints,
-    Freehand,
-    Line,
 }
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Viewport {
@@ -79,6 +80,8 @@ pub struct Viewport {
 #[derive(Clone, Serialize, Deserialize)]
 pub struct ViewState {
     pub columns: Vec<Column>,
+    #[serde(default="panel_order")]
+    pub panel_order: Vec<Column>,
     pub panel_width: f32,
     pub arrangement_first: bool,
     pub arrangement_height: f32,
@@ -93,12 +96,12 @@ pub struct ViewState {
     pub scale: ScaleDisplay,
     pub lanes: Vec<Lane>,
     pub phonemes: bool,
-    pub phonemes_height: f32,
 }
 impl Default for ViewState {
     fn default() -> Self {
         Self {
             columns: vec![Column::Editor],
+            panel_order: panel_order(),
             panel_width: 234.0,
             arrangement_first: true,
             arrangement_height: 264.0,
@@ -122,7 +125,6 @@ impl Default for ViewState {
                 ..Lane::new()
             }],
             phonemes: false,
-            phonemes_height: 128.0,
         }
     }
 }
@@ -131,12 +133,10 @@ impl ViewState {
         if self.columns.contains(&column) {
             self.columns.retain(|c| *c != column);
         } else {
-            let editor = self
-                .columns
-                .iter()
-                .position(|c| *c == Column::Editor)
-                .unwrap();
-            self.columns.insert(editor + 1, column);
+            let rank = self.panel_order.iter().position(|c|*c==column).unwrap();
+            let index = self.columns.iter().position(|c|
+                self.panel_order.iter().position(|p|p==c).unwrap()>rank).unwrap_or(self.columns.len());
+            self.columns.insert(index, column);
         }
     }
     pub fn step(&self) -> f64 {
@@ -150,7 +150,9 @@ impl ViewState {
         }
     }
     pub fn valid(&self) -> bool {
-        self.columns
+        self.panel_order.len()==6
+            && self.panel_order.iter().collect::<std::collections::HashSet<_>>().len()==6
+            && self.columns
             .iter()
             .filter(|c| **c == Column::Editor)
             .count()
@@ -169,23 +171,26 @@ impl ViewState {
                 v.start.is_finite()
                     && v.start >= 0.0
                     && v.beat_width.is_finite()
-                    && (4.0..=640.0).contains(&v.beat_width)
+                    && v.beat_width>0.0
             })
+            && (2.0..=100.0).contains(&self.arrangement.beat_width)
+            && (10.0..=500.0).contains(&self.piano.beat_width)
             && self.top_pitch.is_finite()
             && (12.0..=127.0).contains(&self.top_pitch)
             && self.row_height.is_finite()
             && (8.0..=48.0).contains(&self.row_height)
             && [4, 8, 16, 32, 64, 128].contains(&self.grid)
-            && self.phonemes_height.is_finite()
-            && (64.0..=500.0).contains(&self.phonemes_height)
             && self.lanes.len() <= 16
             && self.lanes.iter().all(|l| {
                 l.height.is_finite()
                     && (64.0..=600.0).contains(&l.height)
                     && l.zoom.is_finite()
-                    && (0.25..=16.0).contains(&l.zoom)
+                    && (50.0..=200.0).contains(&l.zoom)
             })
     }
+}
+fn panel_order()->Vec<Column> {
+    vec![Column::Editor,Column::Voice,Column::Note,Column::Dictionary,Column::Render,Column::Script]
 }
 #[derive(Clone, Copy)]
 pub enum DragPayload {

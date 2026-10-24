@@ -132,7 +132,7 @@ impl Runtime {
                 .plan()
                 .requests
                 .keys()
-                .all(|id| !self.routes.contains_key(id) && !self.binding_errors.contains_key(id))
+                .all(|id| !self.routes.contains_key(&id.reference()) && !self.binding_errors.contains_key(&id.reference()))
                 || (!self.is_busy() && self.stats.failed == 0 && self.error.is_none()))
             && (!self.export_owners.is_empty() || !self.recordings.layers.is_empty())
     }
@@ -154,7 +154,7 @@ impl Runtime {
                 let _wake = WakeOnExit(repaint);
                 let sender = tx;
                 let result = (|| {
-                    // Validate all selected sources before writing the first file.
+
                     let mut sources = Vec::new();
                     for (path, track) in request.outputs {
                         let audio = if let Some(track) = track {

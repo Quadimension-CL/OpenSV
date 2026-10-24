@@ -1,9 +1,3 @@
-//! Mandarin lookup from the configured pronunciation resources.
-//!
-//! Exact lexical lookup does not disambiguate pronunciation from context.
-//! Different phoneme readings require explicit phonemes; tone-only
-//! alternatives share the score's sung pitch.
-
 use std::{collections::HashMap, fs, path::Path};
 
 use crate::synthesis::voice::{Result, VoiceError};
@@ -61,7 +55,6 @@ impl MandarinLexicon {
         })
     }
 
-    /// Returns one phoneme list per syllable, preserving lyric order.
     pub fn resolve(&self, lyrics: &str) -> Result<Vec<Vec<String>>> {
         let lyrics = lyrics.trim();
         if lyrics.is_empty() {

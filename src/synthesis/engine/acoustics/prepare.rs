@@ -13,13 +13,21 @@ use crate::synthesis::{
 };
 use std::time::Instant;
 
-/// Prepare whole-phrase contextual features once, independently of the order in
-/// which the caller will request acoustic frames.
 pub fn prepare_acoustics(
     voice: &PreparedVoice,
     duration_identity: Option<u64>,
     phrase: &PreparedPhrase,
+    checkpoint: impl FnMut(RenderStage) -> Result<()>,
+ ) -> Result<PreparedRenderAcoustics> {
+    prepare_acoustics_with_host(voice, duration_identity, phrase, checkpoint, None)
+}
+
+pub(super) fn prepare_acoustics_with_host(
+    voice: &PreparedVoice,
+    duration_identity: Option<u64>,
+    phrase: &PreparedPhrase,
     mut checkpoint: impl FnMut(RenderStage) -> Result<()>,
+    host_pitch: Option<&mut crate::synthesis::engine::pitch::HostPitchSampler<'_>>,
 ) -> Result<PreparedRenderAcoustics> {
     if phrase.records.is_empty()
         || phrase.records.len() != phrase.notes.len()
@@ -30,6 +38,7 @@ pub fn prepare_acoustics(
         ));
     }
     let mut prepared_phrase = phrase.clone();
+    prepared_phrase.mode_coefficients = crate::synthesis::vocal_modes::for_phrase(voice,phrase)?;
     let duration_seeds: Vec<_> = phrase
         .retake_seeds
         .iter()
@@ -45,7 +54,7 @@ pub fn prepare_acoustics(
     let started = Instant::now();
     #[cfg(feature = "synth-profile")]
     let profile = crate::synthesis::profiling::span("stage.duration");
-    let duration = match voice.family {
+    let mut duration = match voice.family {
         VoiceFamily::Sv1 => {
             if duration_identity.is_some() {
                 return Err(VoiceError::new(
@@ -59,8 +68,7 @@ pub fn prepare_acoustics(
                     "SV1 derived note durations differ from the phrase",
                 ));
             }
-            // DDS receives the derived clock after stop/semivowel borrowing.
-            // Each record has already been split into its effective duration.
+
             for (note, seconds) in prepared_phrase.notes.iter_mut().zip(native.record_seconds) {
                 note.duration_seconds = seconds;
                 note.parts = 1;
@@ -73,17 +81,22 @@ pub fn prepare_acoustics(
             voice.model("duration")?,
             models::required_identity(duration_identity)?,
         )?
-        .predict_explicit(&phrase.records, phrase.start_seconds)?,
+        .predict_explicit(&phrase.records)?,
         VoiceFamily::Sv2 => DurationStage::prepare(
             voice.model("duration")?,
             models::required_identity(duration_identity)?,
+            voice.speaker,
         )?
-        .predict_explicit_seeded(
-            &phrase.records,
-            &duration_seeds,
-            phrase.start_seconds,
-        )?,
+        .predict_explicit_seeded(&phrase.records, &duration_seeds)?,
     };
+    if voice.family==VoiceFamily::Sv2 {
+        if prepared_phrase.voice_parameters.consonant_duration!=0.0 {
+            duration.durations=crate::synthesis::stages::duration::frontend::postprocess_controlled(
+                voice.model("duration")?,&prepared_phrase.records,&duration.prediction,
+                prepared_phrase.voice_parameters.consonant_duration)?;
+        }
+        crate::synthesis::score::phonemes::apply(&prepared_phrase,&mut duration)?;
+    }
     if duration
         .prediction
         .phones
@@ -168,18 +181,11 @@ pub fn prepare_acoustics(
             )
         }
         VoiceFamily::Sv2 => {
-            let stage = F0Stage::prepare(voice.model("f0")?)?;
+            let stage = F0Stage::prepare(voice.model("f0")?, voice.speaker)?;
             let features = stage.prepare_features(&phrase.notes, &phones)?;
             let controls = crate::synthesis::engine::pitch::sv2_controls(phrase)?;
             let expressiveness = crate::synthesis::engine::pitch::expressiveness(
                 phrase,
-                crate::synthesis::score::FRAME_SECONDS,
-                note_frames.iter().sum(),
-            )?;
-            let styles = crate::synthesis::engine::voice_controls::sample_styles(
-                phrase,
-                stage.style_names(),
-                crate::model::VocalModeComponent::Pitch,
                 crate::synthesis::score::FRAME_SECONDS,
                 note_frames.iter().sum(),
             )?;
@@ -188,10 +194,10 @@ pub fn prepare_acoustics(
                 &phones,
                 &features,
                 PitchInputControls {
+                    vocal_modes: prepared_phrase.mode_coefficients.as_ref(),
                     pitch_seeds: Some(&pitch_seeds),
                     absolute_pitch: controls.as_deref(),
                     expressiveness: expressiveness.as_deref(),
-                    style_weights: styles.as_ref(),
                 },
                 None,
             )?;
@@ -201,7 +207,10 @@ pub fn prepare_acoustics(
     if voice.family != VoiceFamily::Sv2 {
         crate::synthesis::engine::pitch::apply_dds_curves(&prepared_phrase, &mut pitch)?;
     }
-    crate::synthesis::engine::pitch::apply_pitch_delta(&prepared_phrase, &mut pitch, 0)?;
+    if let Some(sampler) = host_pitch {
+        crate::synthesis::engine::pitch::apply_host_dds_pitch(&prepared_phrase, &mut pitch, sampler)?;
+    }
+    crate::synthesis::engine::pitch::apply_deviation(&prepared_phrase,&mut pitch);
     let pitch_ms = started.elapsed().as_secs_f64() * 1000.0;
     #[cfg(feature = "synth-profile")]
     drop(profile);
@@ -213,12 +222,13 @@ pub fn prepare_acoustics(
     let features = match pitch_features {
         Some(pitch) => PreparedModelFeatures::Sv2 {
             pitch,
-            timbre: TimbreNetwork::prepare(voice.model("timbre")?)?
+            timbre: TimbreNetwork::prepare(voice.model("timbre")?, voice.speaker, voice.retained_acoustic_noise_only)?
                 .prepare_features(&phrase.notes, &phones)?,
         },
         None => PreparedModelFeatures::Sv1Local,
     };
     Ok(PreparedRenderAcoustics {
+        family: voice.family,
         duration,
         pitch,
         timings: StageTimings {

@@ -1,8 +1,11 @@
 use std::sync::Arc;
 
 use crate::synthesis::{
-    inference::Sequence,
-    stages::f0::{TimedPhone, features::FrameFeatureInputs, frontend::FrontendNote},
+    stages::f0::{
+        TimedPhone,
+        features::{FeatureRows, FrameFeatureInputs},
+        frontend::FrontendNote,
+    },
     voice::{Result, VoiceError},
 };
 
@@ -15,21 +18,20 @@ use super::{
 };
 
 pub struct TimbreRequest<'a> {
+
+    pub mode_coefficients: Option<&'a crate::synthesis::vocal_modes::VocalModeCoefficients>,
     pub notes: &'a [FrontendNote],
     pub phones: &'a [TimedPhone],
     pub midi_pitch: &'a [f32],
     pub note_modulation: &'a [AcousticNote],
-    /// The duration model's paired boundary/transition predictions.
+
     pub phone_impulses: Option<&'a [Option<PhoneImpulse>]>,
     pub frame_controls: Option<&'a [FrameControl]>,
-    /// Full-rate, full-owner vocal-mode weights in the model's style order.
-    pub primary_style_weights: Option<&'a Sequence>,
-    pub secondary_style_weights: Option<&'a Sequence>,
     pub requested_frame: usize,
 }
 
 impl<'tree> TimbreNetwork<'tree> {
-    /// Full local acoustic path from duration-corrected phones and the F0 result.
+
     pub fn render(
         &self,
         request: &TimbreRequest<'_>,
@@ -41,8 +43,6 @@ impl<'tree> TimbreNetwork<'tree> {
         self.render_prepared(request, config, &features)
     }
 
-    /// Render current frame conditions using note/phone rows from this model.
-    /// The caller must keep the cached rows aligned with the current notes/phones.
     pub fn render_prepared(
         &self,
         request: &TimbreRequest<'_>,
@@ -52,8 +52,6 @@ impl<'tree> TimbreNetwork<'tree> {
         self.render_prepared_until(request, config, features, request.midi_pitch.len())
     }
 
-    /// Keep full prepared record identity while limiting returned acoustic rows.
-    /// The pipeline derives required right context from the model's operations.
     pub fn render_prepared_until(
         &self,
         request: &TimbreRequest<'_>,
@@ -64,17 +62,27 @@ impl<'tree> TimbreNetwork<'tree> {
         #[cfg(feature = "synth-profile")]
         let _profile = crate::synthesis::profiling::span("timbre.render_prepared");
         let frames =
-            Arc::new(self.prepare_frame_features(request.notes, request.phones, features)?);
+            Arc::new(self.prepare_frame_features_with_modes(
+                request.notes, request.phones, features, request.mode_coefficients)?);
         self.start_prepared(request, config, frames)?
             .collect_until(end_frame)
     }
 
-    /// Expand the current owner once, leaving frame projection demand-driven.
     pub fn prepare_frame_features(
         &self,
         notes: &[FrontendNote],
         phones: &[TimedPhone],
         features: &PreparedTimbreFeatures,
+    ) -> Result<PreparedTimbreFrames> {
+        self.prepare_frame_features_with_modes(notes, phones, features, None)
+    }
+
+    pub fn prepare_frame_features_with_modes(
+        &self,
+        notes: &[FrontendNote],
+        phones: &[TimedPhone],
+        features: &PreparedTimbreFeatures,
+        modes: Option<&crate::synthesis::vocal_modes::VocalModeCoefficients>,
     ) -> Result<PreparedTimbreFrames> {
         let input = self.feature_inputs(notes, phones)?;
         let feature_config = input.network.configuration();
@@ -83,9 +91,11 @@ impl<'tree> TimbreNetwork<'tree> {
                 "Timbre frame feature width differs from its program",
             ));
         }
-        if feature_config.style_channels != 0 {
+        if feature_config.condition_channels != 0
+            && feature_config.condition_channels != self.styles.neutral.len()
+        {
             return Err(VoiceError::new(
-                "Feature note style presence or shape differs from model",
+                "Timbre frame style differs from feature condition width",
             ));
         }
         if features.note_count != notes.len()
@@ -111,16 +121,26 @@ impl<'tree> TimbreNetwork<'tree> {
         };
         let note_durations = convert(&input.notes.frame_counts)?;
         let positions = convert(&input.notes.frame_positions)?;
+        let style = self.feature_style(notes.len())?;
+        let frame_count = input.notes.frame_counts.iter().sum();
+        let mode_styles = self.mode_styles(modes,0..frame_count)?;
+        let frame_style = (feature_config.condition_channels != 0).then(||
+            mode_styles.as_ref().map_or_else(||self.styles.neutral.repeat(frame_count),
+                |styles|styles.primary.values.clone()));
         let expanded = input.network.expand_encoding(
             &FrameFeatureInputs {
                 notes: &input.normalized_notes,
-                style: None,
+                style: style.as_deref(),
                 encoding: features,
                 note_durations: &note_durations,
                 note_positions: &positions,
                 phone_durations: &input.phone_durations,
             },
-            None,
+            frame_style.as_ref().map(|values| FeatureRows {
+                rows: frame_count,
+                width: feature_config.condition_channels,
+                values,
+            }),
         )?;
         Ok(PreparedTimbreFrames::new(
             expanded,
@@ -129,7 +149,6 @@ impl<'tree> TimbreNetwork<'tree> {
         ))
     }
 
-    /// Prepare a persistent acoustic stream with current-owner frame conditions.
     pub fn start_prepared<'network>(
         &'network self,
         request: &TimbreRequest<'_>,
@@ -167,6 +186,13 @@ impl<'tree> TimbreNetwork<'tree> {
                 impulse: request.phone_impulses.and_then(|values| values[index]),
             })
             .collect();
+        let config = RecordsConfig {
+            retained_noise_only: self.retained_noise_only,
+            stride: self.layout.stride,
+            ppg_width: self.layout.ppg_noise_channels,
+            timbre_width: self.layout.timbre_noise_channels,
+            ..*config
+        };
         let records = config.prepare(RecordsInput {
             phones: &acoustic_phones,
             notes: request.note_modulation,
@@ -174,12 +200,35 @@ impl<'tree> TimbreNetwork<'tree> {
             controls: request.frame_controls,
             requested_frame: request.requested_frame,
         })?;
-        TimbreStream::from_prepared(
-            self,
-            features,
-            &records,
-            request.primary_style_weights,
-            request.secondary_style_weights,
-        )
+        let styles = self.mode_styles(request.mode_coefficients,records.low_rate_positions.iter().copied())?;
+        TimbreStream::from_prepared(self, features, &records, styles.as_ref())
+    }
+
+    fn mode_styles(
+        &self,
+        modes: Option<&crate::synthesis::vocal_modes::VocalModeCoefficients>,
+        positions: impl IntoIterator<Item=usize>,
+    ) -> Result<Option<super::styles::AcousticStyles>> {
+        let Some(modes) = modes else { return Ok(None); };
+        let style_node = crate::synthesis::voice::speakers::style(
+            self.tree, self.layout.styles, self.speaker)?;
+        let names = crate::synthesis::vocal_modes::ordered_style_names(
+            self.tree, style_node, self.styles.variants.len())?;
+        let mut primary=Vec::new();let mut secondary=Vec::new();
+
+        let constant=(!modes.animated()).then(||Ok::<_,VoiceError>((
+            self.styles.blend(&modes.weights(&names,true))?,
+            self.styles.blend(&modes.weights(&names,false))?))).transpose()?;
+        for frame in positions {
+            if let Some((a,b))=&constant {primary.extend_from_slice(a);secondary.extend_from_slice(b);}
+            else {
+                primary.extend(self.styles.blend(&modes.weights_at(&names,true,frame))?);
+                secondary.extend(self.styles.blend(&modes.weights_at(&names,false,frame))?);
+            }
+        }
+        Ok(Some(super::styles::AcousticStyles {
+            primary:crate::synthesis::inference::Sequence::from_values(self.styles.neutral.len(),primary)?,
+            secondary:crate::synthesis::inference::Sequence::from_values(self.styles.neutral.len(),secondary)?,
+        }))
     }
 }

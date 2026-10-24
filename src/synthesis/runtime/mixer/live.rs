@@ -1,6 +1,3 @@
-//! Mix only completely available timeline blocks. Missing synthesis is never
-//! inferred to be silence, including gaps inside an owner's requested span.
-
 mod spans;
 
 use super::{Controls, native_bound};
@@ -71,8 +68,7 @@ impl LiveMixer {
         }
         let source = (total_frames > 0).then(|| Arc::new(LiveAudio::new(total_frames)));
         let mixer = Self { source, owners };
-        // Regions with no audible dependency are known immediately, even when
-        // an earlier/later owner is still preparing its acoustic context.
+
         mixer.publish_blocks(0..total_frames)?;
         Ok(mixer)
     }
@@ -81,9 +77,6 @@ impl LiveMixer {
         self.source.clone()
     }
 
-    /// Equivalent inputs share one numerical result. Update every matching
-    /// owner before mixing so a seam replacement cannot briefly combine the
-    /// new contribution from one instance with the old contribution of another.
     pub(crate) fn publish_for(
         &mut self,
         ids: &[OwnerId],
@@ -110,9 +103,6 @@ impl LiveMixer {
         }
     }
 
-    /// Completing an owner confirms that requested coverage outside the
-    /// actual voice result is silent. Publish once after both updates, never
-    /// expose a temporary all-silent version of already available PCM.
     pub(crate) fn complete(
         &mut self,
         id: OwnerId,
@@ -129,9 +119,6 @@ impl LiveMixer {
         self.publish_blocks(range)
     }
 
-    /// The prepared model's exact native sample range proves the silence
-    /// outside it. Intersect with the mixer's own converted coverage bounds so
-    /// independently rounded project seconds cannot leave a sample pending.
     pub(crate) fn prepared(&mut self, id: OwnerId, model: Range<i64>) -> Result<(), String> {
         let Some(owner) = self.owners.get_mut(&id) else {
             return Ok(());
@@ -143,15 +130,13 @@ impl LiveMixer {
         let end = usize::try_from(model.end.max(0)).map_err(|_| "模型结束位置超出地址范围")?;
         let before = owner.coverage.start..owner.coverage.end.min(start);
         let after = owner.coverage.start.max(end)..owner.coverage.end;
-        // Set both regions before mixing either boundary block. A short model
-        // can have both silent sides inside the very same playback block.
+
         owner.ready.insert_silence(before.clone());
         owner.ready.insert_silence(after.clone());
         self.publish_blocks(before)?;
         self.publish_blocks(after)
     }
 
-    /// Whether this owner prevents the requested half-second block playing.
     pub(crate) fn needs(&self, id: OwnerId, seconds: f64) -> bool {
         let Some(owner) = self.owners.get(&id) else {
             return false;
@@ -165,8 +150,6 @@ impl LiveMixer {
         !range.is_empty() && owner.ready.first_missing(range).is_some()
     }
 
-    /// Find this owner's next unresolved interval in playback order, then
-    /// wrap to an earlier gap so background work eventually completes.
     pub(crate) fn next_needed(&self, id: OwnerId, seconds: f64) -> Option<f64> {
         let owner = self.owners.get(&id)?;
         let frame = frame_at(seconds);

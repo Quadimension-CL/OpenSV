@@ -29,7 +29,7 @@ pub(super) fn show(app: &mut App, ui: &mut Ui) {
     let original_tracks = tracks.clone();
     let mut export_clicked = false;
     padded(ui, |ui| {
-        ui.weak("目标文件夹");
+        ui.weak(crate::i18n::t("目标文件夹"));
         let mut directory = string(&config, "destination");
         ui.horizontal(|ui| {
             let width = (ui.available_width() - 34.0).max(20.0);
@@ -41,7 +41,7 @@ pub(super) fn show(app: &mut App, ui: &mut Ui) {
                     .background_color(BORDER),
             );
             if folder_button(ui).clicked() {
-                let mut picker = rfd::FileDialog::new().set_title("选择导出文件夹");
+                let mut picker = rfd::FileDialog::new().set_title(crate::i18n::t("选择导出文件夹"));
                 if !directory.is_empty() {
                     picker = picker.set_directory(&directory);
                 }
@@ -51,7 +51,7 @@ pub(super) fn show(app: &mut App, ui: &mut Ui) {
             }
         });
         config.insert("destination".into(), directory.into());
-        ui.weak("文件名称");
+        ui.weak(crate::i18n::t("文件名称"));
         let mut name = string(&config, "filename");
         field(ui, &mut name);
         config.insert("filename".into(), name.into());
@@ -60,20 +60,20 @@ pub(super) fn show(app: &mut App, ui: &mut Ui) {
         export_clicked = ui
             .add_enabled(
                 ready,
-                Button::new("导出为文件").min_size(vec2(ui.available_width(), 28.0)),
+                Button::new(crate::i18n::t("导出为文件")).min_size(vec2(ui.available_width(), 28.0)),
             )
-            .on_disabled_hover_text("等待伴奏加载和当前歌声合成完成后导出")
+            .on_disabled_hover_text(crate::i18n::t("等待伴奏加载和当前歌声合成完成后导出"))
             .clicked();
         if app.synthesis.is_exporting() {
             ui.horizontal(|ui| {
                 ui.spinner();
-                ui.label("正在导出…");
+                ui.label(crate::i18n::t("正在导出…"));
             });
         }
         if let Some(result) = &app.synthesis.export_result {
             match result {
                 Ok(paths) => {
-                    ui.label(format!("已导出 {} 个文件", paths.len()))
+                    ui.label(crate::lformat!("已导出 {} 个文件", paths.len()))
                         .on_hover_text(
                             paths
                                 .iter()
@@ -86,7 +86,7 @@ pub(super) fn show(app: &mut App, ui: &mut Ui) {
             }
         }
     });
-    section(ui, "音轨", |ui| {
+    section(ui, crate::i18n::t("音轨"), |ui| {
         let mut mix = config
             .get("exportMixDown")
             .and_then(serde_json::Value::as_bool)
@@ -98,7 +98,7 @@ pub(super) fn show(app: &mut App, ui: &mut Ui) {
                 ui.set_min_height(190.0);
                 ui.set_width(ui.available_width());
                 ui.spacing_mut().item_spacing.y = 3.0;
-                track_row(ui, &mut mix, "混音导出", TEXT);
+                track_row(ui, &mut mix, crate::i18n::t("混音导出"), TEXT);
                 for (_, name, enabled, color) in &mut tracks {
                     track_row(ui, enabled, name, *color);
                 }
@@ -106,7 +106,7 @@ pub(super) fn show(app: &mut App, ui: &mut Ui) {
         config.insert("exportMixDown".into(), mix.into());
         pair(ui, |ui, width| {
             if ui
-                .add_sized(vec2(width, 28.0), Button::new("全选"))
+                .add_sized(vec2(width, 28.0), Button::new(crate::i18n::t("全选")))
                 .clicked()
             {
                 config.insert("exportMixDown".into(), true.into());
@@ -115,7 +115,7 @@ pub(super) fn show(app: &mut App, ui: &mut Ui) {
                 }
             }
             if ui
-                .add_sized(vec2(width, 28.0), Button::new("取消全选"))
+                .add_sized(vec2(width, 28.0), Button::new(crate::i18n::t("取消全选")))
                 .clicked()
             {
                 config.insert("exportMixDown".into(), false.into());
@@ -125,35 +125,35 @@ pub(super) fn show(app: &mut App, ui: &mut Ui) {
             }
         });
     });
-    section(ui, "格式", |ui| {
+    section(ui, crate::i18n::t("格式"), |ui| {
         numeric(
             ui,
             &mut config,
             "numChannels",
-            "声道",
-            &[(1, "单声道"), (2, "立体声")],
+            crate::i18n::t("声道"),
+            &[(1, crate::i18n::t("单声道")), (2, crate::i18n::t("立体声"))],
         );
-        ui.weak("气声输出");
+        ui.weak(crate::i18n::t("气声输出"));
         let mut aspiration = string(&config, "aspirationFormat");
         combo(
             ui,
             "aspiration-format",
             &mut aspiration,
-            &[("noAspiration".to_owned(), "无")],
+            &[("noAspiration".to_owned(), crate::i18n::t("无"))],
         );
         config.insert("aspirationFormat".into(), aspiration.into());
         numeric(
             ui,
             &mut config,
             "bitDepth",
-            "位深度",
-            &[(16, "16 位"), (24, "24 位"), (32, "32 位浮点")],
+            crate::i18n::t("位深度"),
+            &[(16, crate::i18n::t("16 位")), (24, crate::i18n::t("24 位")), (32, crate::i18n::t("32 位浮点"))],
         );
         numeric(
             ui,
             &mut config,
             "sampleRate",
-            "采样率",
+            crate::i18n::t("采样率"),
             &[
                 (44100, "44100 Hz"),
                 (48000, "48000 Hz"),
@@ -162,7 +162,7 @@ pub(super) fn show(app: &mut App, ui: &mut Ui) {
         );
     });
     if config != app.editor.project.render_config || tracks != original_tracks {
-        app.editor.begin("渲染设置");
+        app.editor.begin(crate::i18n::t("渲染设置"));
         app.editor.project.render_config = config;
         for (id, _, enabled, _) in tracks {
             if let Some(track) = app.editor.project.tracks.iter_mut().find(|t| t.id == id) {
@@ -174,7 +174,7 @@ pub(super) fn show(app: &mut App, ui: &mut Ui) {
     if export_clicked {
         start_export(app);
     }
-    section(ui, "合成状态", |ui| {
+    section(ui, crate::i18n::t("合成状态"), |ui| {
         super::super::synthesis::render_status(app, ui)
     });
 }
@@ -195,8 +195,8 @@ fn start_export(app: &mut App) {
         .collect();
     if !existing.is_empty()
         && rfd::MessageDialog::new()
-            .set_title("覆盖音频文件")
-            .set_description(format!(
+            .set_title(crate::i18n::t("覆盖音频文件"))
+            .set_description(crate::lformat!(
                 "以下文件已存在，是否覆盖？\n{}",
                 existing.join("\n")
             ))
@@ -273,5 +273,5 @@ fn folder_button(ui: &mut Ui) -> Response {
         points.into_iter().map(|(x, y)| c + vec2(x, y)).collect(),
         Stroke::new(1.1, MUTED),
     ));
-    response.on_hover_text("选择目标文件夹")
+    response.on_hover_text(crate::i18n::t("选择目标文件夹"))
 }

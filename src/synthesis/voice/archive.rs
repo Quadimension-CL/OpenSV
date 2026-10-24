@@ -25,7 +25,6 @@ pub(super) struct Resource {
     verified: OnceLock<Result<()>>,
 }
 
-/// Owned immutable file snapshot. Resource state contains offsets, never pointers.
 pub(super) struct Archive {
     bytes: Arc<[u8]>,
     constants: [u8; 16],
@@ -66,7 +65,7 @@ impl Archive {
             return Err(VoiceError::new("DNNI resource count exceeds format limit"));
         }
         let table_range = range(0x148, product(count, 56)?, bytes.len())?;
-        // The index digest ends 0x18 bytes before table_end.
+
         let checked_len = 0x118 + table_range.len();
         let digest_length = u32::try_from(checked_len)
             .map_err(|_| VoiceError::new("DNNI index digest length exceeds u32"))?;
@@ -129,7 +128,6 @@ impl Archive {
         self.indices.get(&id).copied()
     }
 
-    /// Validates every resource; later reads reuse the once result.
     pub fn verify_all(&self) -> Result<()> {
         for index in 0..self.resources.len() {
             self.verify(index)?;
@@ -157,7 +155,6 @@ impl Archive {
         )?))
     }
 
-    /// Inspect structure without allocating or decoding entire weight resources.
     pub fn prefix(&self, index: usize, maximum: usize) -> Result<Cow<'_, [u8]>> {
         let resource = self.verify(index)?;
         let source = &self.bytes

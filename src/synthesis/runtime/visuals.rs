@@ -1,7 +1,7 @@
 use super::Runtime;
 use crate::synthesis::{
     plan::OwnerId,
-    rendered::{PhonemeSnapshot, VisualPatch, VisualSnapshot},
+    rendered::{VisualPatch, VisualSnapshot},
 };
 use std::{collections::BTreeMap, sync::Arc, time::Instant};
 
@@ -10,13 +10,19 @@ impl Runtime {
         let plan = self.planner.plan();
         self.visuals
             .retain(|owner, _| plan.requests.contains_key(owner));
+        self.phonemes.retain(|owner,_|plan.requests.contains_key(owner));
         for (&owner, request) in &plan.requests {
-            // Preserve each old piece's geometry until this revision supplies
-            // replacement data for its interval. Empty/deleted owners retire.
+
             self.visuals
                 .entry(owner)
                 .or_default()
                 .begin(Arc::clone(&request.input));
+        }
+    }
+
+    pub(super) fn prepared_phonemes(&mut self,owner:OwnerId,snapshot:crate::synthesis::rendered::PhonemeSnapshot) {
+        if self.planner.plan().requests.get(&owner).is_some_and(|r|*r.input==*snapshot.input) {
+            self.phonemes.insert(owner,snapshot);
         }
     }
 
@@ -44,15 +50,10 @@ impl Runtime {
                 .get(&owner)
                 .is_some_and(|request| *request.input == *snapshot.input)
             {
-                // Consolidate block views without restarting or erasing the
-                // still-fading outlines of blocks that just became ready.
-                self.phonemes.insert(
-                    owner,
-                    PhonemeSnapshot {
-                        input: Arc::clone(&snapshot.input),
-                        data: snapshot.data.phonemes.clone(),
-                    },
-                );
+
+                self.phonemes.insert(owner,crate::synthesis::rendered::PhonemeSnapshot {
+                    input:Arc::clone(&snapshot.input),phones:snapshot.data.phonemes.clone(),
+                });
                 self.visuals.entry(owner).or_default().complete(snapshot);
             }
         }

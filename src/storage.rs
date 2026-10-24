@@ -2,14 +2,23 @@ use crate::model::*;
 use std::{collections::HashSet, fs, io::Write, path::Path};
 
 mod identity;
+mod audio;
 
 pub fn load(path: &Path) -> Result<Project, String> {
     if fs::metadata(path).map_err(|e| e.to_string())?.len() > 64 * 1024 * 1024 {
         return Err("工程超过 64 MiB 读取上限".into());
     }
     let bytes = fs::read(path).map_err(|e| e.to_string())?;
+    load_bytes(&bytes,path)
+}
+
+pub fn load_bytes(bytes:&[u8],path:&Path)->Result<Project,String> {
+
+    let bytes = bytes.strip_prefix(&[0xef, 0xbb, 0xbf]).unwrap_or(bytes);
+    let bytes = bytes.trim_ascii_end().strip_suffix(&[0]).unwrap_or(bytes).trim_ascii_end();
     let mut project: Project =
-        serde_json::from_slice(&bytes).map_err(|e| format!("SVP 解析失败：{e}"))?;
+        serde_json::from_slice(bytes).map_err(|e| format!("SVP 解析失败：{e}"))?;
+    audio::load(&mut project)?;
     validate(&project)?;
     let base = std::path::absolute(path).map_err(|e| e.to_string())?;
     for track in &mut project.tracks {
@@ -33,6 +42,8 @@ pub fn load(path: &Path) -> Result<Project, String> {
 pub fn save(path: &Path, project: &Project) -> Result<(), String> {
     validate(project)?;
     let mut ordered = project.clone();
+
+    ordered.version = SVP_VERSION;
     let base = std::path::absolute(path).map_err(|e| e.to_string())?;
     for track in &mut ordered.tracks {
         if let Some(clip) = track.instrumental.as_mut().and_then(|t| t.clip.as_mut())
@@ -41,6 +52,7 @@ pub fn save(path: &Path, project: &Project) -> Result<(), String> {
             clip.path = relative.to_owned();
         }
     }
+    audio::save(&mut ordered);
     for group in ordered
         .library
         .iter_mut()
@@ -70,11 +82,11 @@ pub fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), String> {
     result.map_err(|e| format!("写入 {} 失败：{e}", path.display()))
 }
 
-fn validate(p: &Project) -> Result<(), String> {
+pub(crate) fn validate(p: &Project) -> Result<(), String> {
     let bad = |s: &str| Err(format!("工程校验失败：{s}"));
-    if p.version != SVP_VERSION {
+    if !(113..=SVP_VERSION).contains(&p.version) {
         return bad(&format!(
-            "当前支持 SVP version {SVP_VERSION}，文件版本为 {}",
+            "支持 SVP version 113 至 {SVP_VERSION}，文件版本为 {}",
             p.version
         ));
     }
@@ -140,18 +152,12 @@ fn validate(p: &Project) -> Result<(), String> {
         for note in &g.notes {
             NotePerformance::from_note(note)
                 .map_err(|error| format!("工程校验失败：音符 {}：{error}", note.lyrics))?;
-            PhonemeAttributes::read(&note.attributes)
-                .map_err(|error| format!("工程校验失败：音符 {}：{error}", note.lyrics))?;
             TakeSet::from_extra(&note.extra)
                 .map_err(|error| format!("工程校验失败：音符 {}：{error}", note.lyrics))?;
         }
-        for (name, curve) in g.parameters.iter().chain(&g.vocal_modes) {
-            if name.trim().is_empty() {
-                return bad("参数名称不能为空");
-            }
-            curve
-                .validate()
-                .map_err(|error| format!("工程校验失败：参数 {name}：{error}"))?;
+        for (name,curve) in g.parameters.iter().chain(&g.vocal_modes) {
+            if name.trim().is_empty() {return bad("参数名称不能为空");}
+            curve.validate().map_err(|e|format!("工程校验失败：参数 {name}：{e}"))?;
         }
         for control in &g.pitch_controls {
             match control {
@@ -183,7 +189,8 @@ fn validate(p: &Project) -> Result<(), String> {
             let Some(group) = p.group(&r.group_id) else {
                 return bad("存在悬空音符组引用");
             };
-            if r.blick_absolute_begin < 0
+
+            if r.blick_absolute_end < -1
                 || (r.blick_absolute_end != -1 && r.blick_absolute_end < r.blick_absolute_begin)
             {
                 return bad("片段可见范围无效");

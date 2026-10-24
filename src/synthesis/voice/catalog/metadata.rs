@@ -52,13 +52,17 @@ impl MetadataIndex {
     }
 
     pub(super) fn lookup(&self, name: &str, vendor: &str) -> Option<&DisplayMetadata> {
-        let mut matches = self
+        let matches = self
             .entries
             .iter()
             .filter(|entry| entry.name == name && entry.vendor == vendor);
-        let entry = matches.next()?;
-        // Product IDs do not identify bank UUIDs; ambiguous metadata is omitted.
-        matches.next().is_none().then_some(&entry.display)
+
+        let mut illustrated = matches.clone().filter(|entry| entry.display.icon_path.is_some());
+        if let Some(entry) = illustrated.next() {
+            return illustrated.next().is_none().then_some(&entry.display);
+        }
+        matches.max_by_key(|entry| entry.display.genres.len()+entry.display.languages.len()
+            +usize::from(entry.display.pitch_range.is_some())).map(|entry| &entry.display)
     }
 }
 

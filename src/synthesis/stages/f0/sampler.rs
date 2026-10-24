@@ -1,9 +1,3 @@
-//! Two-pass F0 prediction.
-//!
-//! This module is named after its serialized sampler role. Its first
-//! prediction supplies measured slope/offset controls for the second
-//! conditional network; there is no diffusion iteration.
-
 mod inputs;
 
 pub use inputs::{SamplerControls, SamplerInputs};
@@ -27,15 +21,16 @@ pub struct F0Sampler {
 }
 
 pub struct SamplerOutput {
-    /// One normalized pitch value per frame; the F0 root applies its inverse
-    /// normalization, transposition and pitch-range clamp afterwards.
+
     pub normalized_pitch: Vec<f32>,
-    /// Predictions for unspecified note controls. Keeping them separate
-    /// avoids mutating editor state here.
+
     pub predicted_controls: SamplerStatistics,
 }
 
 impl F0Sampler {
+    #[cfg(feature = "acoustic-diagnostic")]
+    pub(super) fn child_slot(&self,index:usize)->Option<usize> {self.children.iter().position(|child|*child==index)}
+
     pub fn prepare(tree: &PreparedTree, index: usize) -> Result<Self> {
         #[cfg(feature = "synth-profile")]
         let _profile = crate::synthesis::profiling::span("f0.sampler.prepare");
@@ -44,8 +39,7 @@ impl F0Sampler {
         if node.type_id != SAMPLER_TYPE_ID || config.len() != 4 {
             return Err(VoiceError::new("Invalid F0 sampler type or configuration"));
         }
-        // Require the 13-child layout, which includes the accent projection.
-        // The older 12-child layout is not supported.
+
         let children: [usize; 13] =
             node.children.as_slice().try_into().map_err(|_| {
                 VoiceError::new("F0 sampler requires the researched 13-child layout")
@@ -70,9 +64,6 @@ impl F0Sampler {
         })
     }
 
-    /// `execute` runs an identified child with frame-major data. A second input
-    /// is supplied only to the two explicit conditional-network children.
-    /// `denormalize` is the F0 frontend's child 3 inverse operation.
     pub fn predict(
         &self,
         input: &SamplerInputs<'_>,
@@ -125,8 +116,7 @@ impl F0Sampler {
             .collect();
         let slope_weights = inferred_weights(input.controls.slope, &statistics.slope, 10.0);
         let offset_weights = inferred_weights(input.controls.offset, &statistics.offset, 5.0);
-        // Preserve accumulation order to keep rounding consistent between
-        // the scalar CPU implementation and the backend.
+
         let projected = execute(self.children[4], &slope, None, frames)?;
         accumulate(&mut embedding, &projected, Some(&slope_weights), width)?;
         let projected = execute(self.children[5], &offset, None, frames)?;

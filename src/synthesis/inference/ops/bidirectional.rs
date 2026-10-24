@@ -1,9 +1,3 @@
-//! Complete-sequence bidirectional GRU.
-//!
-//! Child 0 consumes rows in order; child 1 consumes the same rows in reverse.
-//! Their outputs are concatenated at each input row, without reversing
-//! channels. Immutable GRU clones share weights with their source children.
-
 use crate::synthesis::inference::{
     matrix::{MatrixError, check_length},
     recurrent::{Gru, GruState, RecurrentError},
@@ -48,7 +42,6 @@ impl BidirectionalGru {
         [self.forward.new_state(), self.backward.new_state()]
     }
 
-    /// Execute a full sequence; callers must not publish a prefix before flush.
     pub fn execute_sequence(
         &self,
         input: &[f32],

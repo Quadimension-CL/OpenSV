@@ -18,7 +18,6 @@ pub(super) struct ModuleNode {
     pub children: Vec<NodeId>,
 }
 
-/// Flat postorder containment arena; not a tensor dataflow execution graph.
 pub(super) struct ModuleTree {
     pub nodes: Vec<ModuleNode>,
     pub root: NodeId,
@@ -96,7 +95,7 @@ fn open(
             "Module child count exceeds remaining tree bytes",
         ));
     }
-    // Do not allocate by the untrusted child count before parsing its records.
+
     frames.push(Frame {
         remaining: children,
         children: Vec::new(),

@@ -4,7 +4,6 @@ use crate::synthesis::{
 };
 use serde_json::Value;
 
-/// Validate the selected catalog entry against the effective project selector.
 pub fn validate_voice(
     input: &OwnerInput,
     name: &str,
@@ -16,8 +15,8 @@ pub fn validate_voice(
             "Loaded voice configuration has no name or version",
         ));
     }
-    let database =
-        crate::model::singer_database(&input.voice.track_default_database, &input.voice.database)
+    let selected = crate::model::effective_singer_database(&input.voice.track_default_database, &input.voice.database);
+    let database = selected
             .as_object()
             .ok_or_else(|| VoiceError::new("The selected voice database must be an object"))?;
     if let Some(selected) = selector(database.get("name"), "name")?
@@ -34,14 +33,8 @@ pub fn validate_voice(
             "Selected voice id {id:?} does not match loaded catalog entry {database_id:?}"
         )));
     }
-    if let Some(selected) = selector(database.get("version"), "version")?
-        && selected != "-2"
-        && selected != version
-    {
-        return Err(VoiceError::new(format!(
-            "Selected voice version {selected:?} does not match loaded version {version:?}"
-        )));
-    }
+
+    selector(database.get("version"), "version")?;
     Ok(())
 }
 fn selector<'a>(value: Option<&'a Value>, field: &str) -> Result<Option<&'a str>> {

@@ -1,38 +1,43 @@
 use super::PreparedRenderAcoustics;
-use crate::synthesis::engine::PreparedModelFeatures;
-use crate::synthesis::{
-    stages::{
-        f0::{expression::expression_controls, frontend::frame_count},
-        timbre::records::{AcousticNote, PhoneImpulse},
-    },
-    voice::{Result, VoiceError},
+use crate::synthesis::stages::{
+    timbre::records::{AcousticNote, PhoneImpulse},
 };
 
 impl PreparedRenderAcoustics {
-    pub fn modulation(&self) -> Result<Vec<AcousticNote>> {
-        let note_frames = match &self.prepared.features {
-            PreparedModelFeatures::Sv1Local => {
-                let mut frames = vec![0_usize; self.prepared.phrase.notes.len()];
-                for phone in &self.prepared.phones {
-                    let count = frames.get_mut(phone.note_index).ok_or_else(|| {
-                        VoiceError::new("Acoustic phone is outside its note records")
-                    })?;
-                    *count = count
-                        .checked_add(phone.frames)
-                        .ok_or_else(|| VoiceError::new("Acoustic note frame count overflows"))?;
-                }
-                frames
+    pub(crate) fn acoustic_pitch(&self)->crate::synthesis::voice::Result<Vec<f32>> {
+        if self.family != crate::synthesis::voice::VoiceFamily::Sv1 {
+            crate::synthesis::engine::pitch::assemble_note_curves(&self.prepared.phrase,&self.pitch)
+        } else {Ok(self.pitch.pitch.clone())}
+    }
+    pub fn frame_controls(&self)->Option<Vec<crate::synthesis::stages::timbre::records::FrameControl>> {
+        let phrase=&self.prepared.phrase;
+        let animated=phrase.automation.as_ref().is_some_and(|c|c.has("toneShift"));
+        let mouth=phrase.automation.as_ref().is_some_and(|c|c.has("mouthOpening"));
+        let strength=crate::synthesis::score::phonemes::StrengthEnvelope::new(phrase,&self.duration);
+        if phrase.voice_parameters.tone_shift==0.0 && !animated && !mouth && strength.is_none() {return None;}
+        Some((0..self.pitch.pitch.len()).map(|frame| {
+            let seconds=phrase.start_seconds+frame as f64*self.pitch.frame_seconds;
+            let parameters=crate::synthesis::parameters::frame(phrase,seconds);
+
+            let opening=phrase.automation.as_ref().map_or(0.0,|c|c.value("mouthOpening",seconds,0.0));
+            let opening=if f64::from(opening)>-0.01 && f64::from(opening)<0.01 {0.0}else{opening};
+            crate::synthesis::stages::timbre::records::FrameControl {pitch_ratio:parameters.tone_ratio,scalars:[opening,strength.as_ref().map_or(0.0,|c|c.sample(seconds))]}
+        }).collect())
+    }
+    pub fn modulation(&self) -> Vec<AcousticNote> {
+        let mut note_frames = vec![0_usize; self.prepared.phrase.notes.len()];
+        if self.family == crate::synthesis::voice::VoiceFamily::Sv2Compatible {
+
+            for phone in &self.prepared.phones {
+                note_frames[phone.note_index] += phone.frames;
             }
-            PreparedModelFeatures::Sv2 { .. } => self
-                .prepared
-                .phrase
-                .notes
-                .iter()
-                .map(frame_count)
-                .collect::<Result<Vec<_>>>()?,
-        };
-        Ok(self
-            .prepared
+        } else {
+            for (frames,note) in note_frames.iter_mut().zip(&self.prepared.phrase.notes) {
+                *frames=crate::synthesis::stages::f0::frontend::frame_count(note)
+                    .expect("prepared note has a validated model clock");
+            }
+        }
+        self.prepared
             .phrase
             .notes
             .iter()
@@ -42,18 +47,10 @@ impl PreparedRenderAcoustics {
                 frames,
                 timbre_seed: seeds.map(|seeds| seeds.timbre),
                 kind: note.kind,
-                factor: match &self.prepared.features {
-                    // SV1's native frontend uses its own neutral factor of 1.
-                    PreparedModelFeatures::Sv1Local => None,
-                    PreparedModelFeatures::Sv2 { .. } => expression_controls(
-                        note.kind,
-                        note.performance.expression_x,
-                        note.performance.expression_y,
-                    )
-                    .map(|controls| controls.position_b),
-                },
+
+                factor: None,
             })
-            .collect())
+            .collect()
     }
 
     pub fn impulses(&self) -> Vec<Option<PhoneImpulse>> {
@@ -62,7 +59,15 @@ impl PreparedRenderAcoustics {
             .impulse_values
             .iter()
             .zip(&self.duration.prediction.impulse_positions)
-            .map(|(&value, &position)| {
+            .enumerate()
+            .map(|(index,(&_value, &position))| {
+
+                let phone=&self.duration.durations[index];
+                let phrase=&self.prepared.phrase;
+                let control=phrase.phone_sources[phone.record_index][phone.phone_index]
+                    .and_then(|s|phrase.phoneme_controls.get(&s));
+                let value=crate::synthesis::score::phonemes::activity(phrase,&self.duration,index).unwrap_or(0.0);
+                let position=control.and_then(|c|c.position).unwrap_or(position);
                 (value > 0.0).then_some(PhoneImpulse {
                     value,
                     position: f64::from(position),

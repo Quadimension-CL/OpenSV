@@ -9,7 +9,7 @@ const TOKEN_USER: u32 = 1;
 const TOKEN_SESSION_ID: u32 = 12;
 
 pub(super) fn same_user_and_session(process: &Handle) -> Result<bool> {
-    // SAFETY: The pseudo handle is valid and is borrowed, never closed.
+
     let current = token(unsafe { GetCurrentProcess() })?;
     let target = token(process.0)?;
     if session_id(&current)? != session_id(&target)? {
@@ -17,8 +17,7 @@ pub(super) fn same_user_and_session(process: &Handle) -> Result<bool> {
     }
     let current_user = user(&current)?;
     let target_user = user(&target)?;
-    // SAFETY: TokenUser begins with SID_AND_ATTRIBUTES. Both buffers are
-    // aligned, and remain alive while the operating system compares their SIDs.
+
     let equal = unsafe {
         EqualSid(
             current_user[0] as *const c_void,
@@ -30,7 +29,7 @@ pub(super) fn same_user_and_session(process: &Handle) -> Result<bool> {
 
 fn token(process: *mut c_void) -> Result<Handle> {
     let mut raw = ptr::null_mut();
-    // SAFETY: process is a live handle and raw is a writable output pointer.
+
     if unsafe { OpenProcessToken(process, TOKEN_QUERY, &mut raw) } == 0 {
         return Err(api_error("OpenProcessToken"));
     }
@@ -40,7 +39,7 @@ fn token(process: *mut c_void) -> Result<Handle> {
 fn session_id(token: &Handle) -> Result<u32> {
     let mut session = 0;
     let mut size = 0;
-    // SAFETY: TokenSessionId returns a DWORD to this correctly-sized output.
+
     if unsafe {
         GetTokenInformation(
             token.0,
@@ -61,15 +60,15 @@ fn session_id(token: &Handle) -> Result<u32> {
 
 fn user(token: &Handle) -> Result<Zeroizing<Vec<usize>>> {
     let mut bytes = 0;
-    // SAFETY: A null output with zero length asks for the required buffer size.
+
     unsafe { GetTokenInformation(token.0, TOKEN_USER, ptr::null_mut(), 0, &mut bytes) };
     if !(size_of::<usize>() as u32..=65536).contains(&bytes) {
         return Err(api_error("GetTokenInformation user size"));
     }
-    // usize alignment is required because TOKEN_USER contains a native pointer.
+
     let mut buffer = Zeroizing::new(vec![0usize; (bytes as usize).div_ceil(size_of::<usize>())]);
     let mut written = 0;
-    // SAFETY: The owned output holds at least bytes aligned writable bytes.
+
     if unsafe {
         GetTokenInformation(
             token.0,

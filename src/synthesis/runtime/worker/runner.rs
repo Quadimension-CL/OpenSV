@@ -25,6 +25,7 @@ use std::{
 pub(super) fn run(
     path: PathBuf,
     dictionaries: PathBuf,
+    duration_key_override: Option<u64>,
     commands: Receiver<Command>,
     events: Events,
     alive: Arc<AtomicBool>,
@@ -91,10 +92,12 @@ pub(super) fn run(
     let context = frontend.and_then(|lexicon| {
         loading_checkpoint()?;
         let identity = if voice.family.requires_identity() {
-            Some(
+            Some(match duration_key_override {
+                Some(value) => value,
+                None =>
                 voice::session_identity::saved_identity(&name, voice.family.model_version())
                     .inspect_err(|_| context_required = true)?,
-            )
+            })
         } else {
             None
         };
@@ -209,9 +212,7 @@ fn advance<'network, 'tree>(
                 .as_ref()
                 .is_some_and(|cursor| !cursor.covers_demand(target))
         {
-            // The playhead can reach another gap while a background cursor
-            // is closing an earlier one. Retarget that gap without throwing
-            // away acoustic preparation or already published PCM.
+
             session.cursor = None;
         }
         if session
@@ -232,8 +233,7 @@ fn advance<'network, 'tree>(
             None => Err(VoiceError::new("未完成的音符组没有可执行的音频区间")),
         }
     });
-    // Numerical cancellation can race the last kernel. A superseding plan must
-    // be consumed before a chunk reaches the source for this project revision.
+
     state.drain(commands);
     if session.job.is_cancelled() {
         return;

@@ -1,9 +1,10 @@
-mod phonemes;
 mod publication;
 mod runner;
 mod scheduling;
 mod state;
 mod visuals;
+#[cfg(feature="acoustic-diagnostic")]
+pub use scheduling::diagnostic as scheduling_diagnostic;
 
 use super::{
     VoiceState,
@@ -14,7 +15,7 @@ use crate::synthesis::{
     audio::{LiveAudio, RenderedAudio},
     plan::{OwnerId, RenderPlan},
     render_cache::{CacheStats, PublishedOwner},
-    rendered::{PhonemeSnapshot, VisualPatch, VisualSnapshot},
+    rendered::{VisualPatch, VisualSnapshot},
 };
 use runner::run;
 use std::{
@@ -78,7 +79,8 @@ pub(super) enum Event {
     },
     Phonemes {
         revision: u64,
-        snapshots: BTreeMap<OwnerId, PhonemeSnapshot>,
+        owner: OwnerId,
+        snapshot: crate::synthesis::rendered::PhonemeSnapshot,
     },
     Status {
         revision: u64,
@@ -98,6 +100,7 @@ impl Worker {
     pub fn spawn(
         path: PathBuf,
         dictionaries: PathBuf,
+        duration_key_override: Option<u64>,
         repaint: eframe::egui::Context,
     ) -> Result<Self, String> {
         let (tx, commands) = mpsc::channel();
@@ -113,6 +116,7 @@ impl Worker {
                 run(
                     path,
                     dictionaries,
+                    duration_key_override,
                     commands,
                     Events::new(events, repaint),
                     running,
@@ -136,7 +140,7 @@ impl Worker {
 impl Drop for Worker {
     fn drop(&mut self) {
         self.alive.store(false, Ordering::Release);
-        // Wake the idle receiver without joining a model kernel on the UI thread.
+
         self.send(Command::Reset);
     }
 }

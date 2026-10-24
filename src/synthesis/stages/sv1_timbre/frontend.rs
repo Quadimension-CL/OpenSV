@@ -1,5 +1,3 @@
-//! SV1 acoustic normalization and the explicit `_vqctx1` context program.
-
 mod context;
 mod input;
 
@@ -33,6 +31,7 @@ pub(super) struct PhoneInput {
     pub normalized: Sequence,
     pub language_ids: Vec<usize>,
     pub noise_ids: Vec<i32>,
+    pub silence:Vec<bool>,
 }
 
 impl<'a> Frontend<'a> {
@@ -98,9 +97,7 @@ impl<'a> Frontend<'a> {
                 "SV1 acoustic frontend tables and dimensions disagree",
             ));
         }
-        // Use MIDI bounds 0 and 127. Truncate their f64 Hz values to integers
-        // before taking logs and normalizing the endpoints, then clamp only
-        // the normalized input.
+
         let pitch_bounds = if contract == Contract::Compatible {
             let bounds = [0.0_f64, 127.0].map(|midi| {
                 let hz = (440.0 * ((midi - 69.0) / 12.0).exp2()) as i32;

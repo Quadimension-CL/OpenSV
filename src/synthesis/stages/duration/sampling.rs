@@ -1,5 +1,3 @@
-//! Select the deterministic or noise-conditioned duration head per record.
-
 use super::PhoneFeatures;
 use crate::synthesis::{
     inference::{ModelRuntime, Sequence},
@@ -34,13 +32,15 @@ pub(super) fn predict(
         return Ok(defaults);
     }
 
-    // All phones participate in the sampled context, even when their final
-    // output comes from the default head.
     let noise = Sequence::new(phones.len(), 1, noise::generate(phones, seeds)?)?;
+    #[cfg(feature = "acoustic-diagnostic")]
+    super::diagnostic::capture("sampler_noise", phones.len(), &noise.values)?;
     let context = Sequence::new(phones.len(), width, encoded.to_vec())?;
     let mut runtime = ModelRuntime::new(tree);
     let sampled = runtime.execute_conditioned(children[10], &noise, &context, true)?;
     let mut sampled = runtime.execute(children[9], &sampled, true)?;
+    #[cfg(feature = "acoustic-diagnostic")]
+    super::diagnostic::capture("sampled_scalars", phones.len(), &sampled.values)?;
     if sampled.frames != phones.len() || sampled.channels != 1 {
         return Err(VoiceError::new(
             "Sampled duration prediction is not one scalar per phone",

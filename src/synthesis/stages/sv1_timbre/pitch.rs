@@ -1,24 +1,16 @@
 use super::Contract;
 use crate::synthesis::{
-    stages::{f0::PitchResult, timbre::records::FrameControl},
+    stages::f0::PitchResult,
     voice::{Result, VoiceError},
 };
 
-pub(super) struct PitchFrames {
-    pub raw_log_hz: Vec<f32>,
-    pub conditioning_log_hz: Vec<f32>,
-    pub projection_factors: Option<Vec<f32>>,
-}
-
-/// Interpolate physical pitch in Hz. Acoustic pitch conditioning is separate
-/// from the original pitch later supplied to the vocoder.
-pub(super) fn sample(
+pub(super) fn sample_log_hz(
     pitch: &PitchResult,
+    acoustic_pitch: &[f32],
     frames: usize,
     frame_seconds: f32,
     contract: Contract,
-    controls: Option<&[FrameControl]>,
-) -> Result<PitchFrames> {
+) -> Result<Vec<f32>> {
     if pitch.pitch.is_empty()
         || pitch.pitch.iter().any(|value| !value.is_finite())
         || !pitch.frame_seconds.is_finite()
@@ -26,126 +18,30 @@ pub(super) fn sample(
     {
         return Err(VoiceError::new("Invalid DDS acoustic pitch timeline"));
     }
-    validate_controls(controls, frames, contract)?;
-    let raw_hz = match contract {
+    let output = match contract {
         Contract::Compatible => {
-            // The compatibility path consumes MIDI rows directly, truncating
-            // or holding the final sample to match the acoustic phone timeline.
+            if acoustic_pitch.len() != frames || acoustic_pitch.iter().any(|p| !p.is_finite()) {
+                return Err(VoiceError::new("Compatible acoustic pitch differs from its phone timeline"));
+            }
+
             (0..frames)
                 .map(|frame| {
-                    let midi = pitch.pitch[frame.min(pitch.pitch.len() - 1)];
-                    f64::from(((midi - 69.0) / 12.0).exp2() * 440.0)
+                    let midi = acoustic_pitch[frame];
+                    (((midi - 69.0) / 12.0).exp2() * 440.0).ln()
                 })
                 .collect::<Vec<_>>()
         }
         Contract::Native => native(pitch, frames, f64::from(frame_seconds)),
     };
-    let raw_log_hz: Vec<_> = raw_hz.iter().map(|&hz| (hz as f32).ln()).collect();
-    if raw_log_hz.iter().any(|value| !value.is_finite()) {
+    if output.iter().any(|value| !value.is_finite()) {
         return Err(VoiceError::new(
             "DDS acoustic pitch produced invalid log-Hz",
         ));
     }
-    let conditioning_log_hz = if let Some(controls) = controls {
-        raw_hz
-            .iter()
-            .zip(&raw_log_hz)
-            .zip(controls)
-            .map(|((&hz, &log_hz), control)| {
-                let shifted_log = match contract {
-                    Contract::Compatible => log_hz + control.pitch_ratio.ln(),
-                    Contract::Native => ((hz * f64::from(control.pitch_ratio)) as f32).ln(),
-                };
-                if !shifted_log.is_finite() {
-                    return Err(VoiceError::new(
-                        "DDS acoustic pitch ratio produced invalid conditioning pitch",
-                    ));
-                }
-                Ok(shifted_log)
-            })
-            .collect::<Result<Vec<_>>>()?
-    } else {
-        raw_log_hz.clone()
-    };
-    Ok(PitchFrames {
-        raw_log_hz,
-        conditioning_log_hz,
-        projection_factors: projection_factors(controls)?,
-    })
+    Ok(output)
 }
 
-fn validate_controls(
-    controls: Option<&[FrameControl]>,
-    frames: usize,
-    contract: Contract,
-) -> Result<()> {
-    let Some(controls) = controls else {
-        return Ok(());
-    };
-    if controls.len() != frames {
-        return Err(VoiceError::new(
-            "DDS frame controls do not match the acoustic timeline",
-        ));
-    }
-    for control in controls {
-        if !control.pitch_ratio.is_finite()
-            || control.pitch_ratio <= 0.0
-            || !control.scalars[0].is_finite()
-            || control.scalars[1].is_infinite()
-            || (contract == Contract::Native && control.scalars[1].is_nan())
-        {
-            return Err(VoiceError::new(
-                "DDS frame controls require a finite positive pitch ratio and finite scalars",
-            ));
-        }
-        if control.scalars[0] != 0.0 {
-            return Err(VoiceError::new(
-                "DDS voices do not support mouth opening controls",
-            ));
-        }
-        if contract == Contract::Native && control.scalars[1] != 0.0 {
-            return Err(VoiceError::new(
-                "Native SV1 voices do not support phoneme strength controls",
-            ));
-        }
-    }
-    Ok(())
-}
-
-fn projection_factors(controls: Option<&[FrameControl]>) -> Result<Option<Vec<f32>>> {
-    let Some(controls) = controls.filter(|controls| {
-        controls
-            .iter()
-            .any(|control| !control.scalars[1].is_nan() && control.scalars[1] != 0.0)
-    }) else {
-        return Ok(None);
-    };
-    controls
-        .iter()
-        .map(|control| {
-            let strength = control.scalars[1];
-            let mut factor = if strength.is_nan() {
-                1.0
-            } else {
-                strength * 4.0 + 1.0
-            };
-            if factor > 1.0 {
-                factor = factor * 0.375 + 0.625;
-            } else if factor < 1.0 {
-                factor = factor * 0.625 + 0.375;
-            }
-            if !factor.is_finite() {
-                return Err(VoiceError::new(
-                    "Compatible phoneme strength produced an invalid projection factor",
-                ));
-            }
-            Ok(factor)
-        })
-        .collect::<Result<Vec<_>>>()
-        .map(Some)
-}
-
-fn native(pitch: &PitchResult, frames: usize, frame_seconds: f64) -> Vec<f64> {
+fn native(pitch: &PitchResult, frames: usize, frame_seconds: f64) -> Vec<f32> {
     let hz: Vec<_> = pitch
         .pitch
         .iter()
@@ -154,8 +50,7 @@ fn native(pitch: &PitchResult, frames: usize, frame_seconds: f64) -> Vec<f64> {
     let mut right = 0;
     (0..frames)
         .map(|frame| {
-            // Promote the frontend f32 hop without recomputing it in f64.
-            // Its exact multiples preserve the compensated accumulator's timestamps.
+
             let time = frame as f64 * frame_seconds;
             while right < hz.len() && right as f64 * pitch.frame_seconds < time {
                 right += 1;
@@ -172,9 +67,8 @@ fn native(pitch: &PitchResult, frames: usize, frame_seconds: f64) -> Vec<f64> {
                 let exponential = (20.0 * weight - 10.0).exp();
                 weight = exponential / (1.0 + exponential);
             }
-            // Retain the f64 interpolation for frame conditioning. Both pitch
-            // paths round to f32 before their logarithms.
-            hz[left] * (1.0 - weight) + hz[right] * weight
+
+            ((hz[left] * (1.0 - weight) + hz[right] * weight) as f32).ln()
         })
         .collect()
 }

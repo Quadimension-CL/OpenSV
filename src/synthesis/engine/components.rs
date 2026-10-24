@@ -1,6 +1,3 @@
-//! The two native PCM components are retained independently for phase matching.
-//! Playback sums the primary and secondary components after publication/cropping.
-
 use crate::synthesis::{
     audio::{ChannelLayout, RenderedAudio},
     score::SAMPLE_RATE,

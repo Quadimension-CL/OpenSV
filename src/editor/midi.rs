@@ -9,16 +9,15 @@ use plan::ImportPlan;
 
 #[derive(Clone, Copy, Debug)]
 pub struct ImportSummary {
-    /// Total number of vocal tracks created, including polyphonic lanes.
+
     pub tracks: usize,
     pub notes: usize,
-    /// Additional tracks needed to preserve overlapping notes.
+
     pub split_tracks: usize,
 }
 
 impl Editor {
-    /// Adds the chosen MIDI entries at their original beat positions. The
-    /// current project's tempo and meter are deliberately left unchanged.
+
     pub fn import_midi_tracks(
         &mut self,
         midi: &MidiFile,
@@ -32,8 +31,6 @@ impl Editor {
         Ok(summary)
     }
 
-    /// A full import starts a new unsaved project, including the MIDI time
-    /// map. Undo returns to a valid blank project rather than zero tracks.
     pub fn from_midi(midi: &MidiFile, selected: &[usize]) -> Result<(Self, ImportSummary), String> {
         let mut blank = Project::default();
         blank.tracks.clear();

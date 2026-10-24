@@ -2,14 +2,14 @@ use super::Editor;
 use crate::model::*;
 
 impl Editor {
-    /// Incoming time and pitch are in project coordinates.
+
     pub fn add_note(&mut self, global: i64, duration: i64, pitch: i32) -> Option<EntityId> {
         let global = global.max(0);
         if !self.prepare_note_target(global) {
             return None;
         }
         let reference = self.active_ref()?;
-        // The instance boundary clips the display, not the requested note duration.
+
         let note = Note::new(
             global - reference.blick_offset,
             duration.max(1),
@@ -62,6 +62,7 @@ impl Editor {
     pub fn add_track(&mut self) {
         self.begin("创建音轨");
         let mut t = Track::new(self.project.tracks.len());
+        t.name = format!("{} {}",crate::i18n::t("未命名音轨"),self.project.tracks.len()+1);
         t.disp_color = self.project.next_track_color();
         self.track = t.id;
         self.reference = None;
@@ -85,11 +86,15 @@ impl Editor {
         if let Some(n) = self
             .group_mut()
             .and_then(|g| g.notes.iter_mut().find(|n| n.id == id))
-            && n.lyrics != lyric
         {
             n.lyrics = lyric;
-            n.phonemes.clear();
-            n.attributes.remove("phonemes");
+        }
+        self.finish();
+    }
+    pub fn set_phonemes(&mut self, id: EntityId, phonemes: String) {
+        self.begin("编辑音素");
+        if let Some(note)=self.group_mut().and_then(|g|g.notes.iter_mut().find(|n|n.id==id)) {
+            note.phonemes=phonemes;
         }
         self.finish();
     }

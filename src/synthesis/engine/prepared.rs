@@ -1,6 +1,3 @@
-//! Immutable owner-level conditions retained with a completed render. Dense
-//! note/phone context is prepared once, before either frame-level model runs.
-
 use crate::synthesis::{
     score::PreparedPhrase,
     stages::{
@@ -38,8 +35,6 @@ impl PreparedAcoustics {
     }
 }
 
-/// A complete synthesis baseline. Frame outputs and note/phone encodings all
-/// belong to the same phrase; no partially updated state is published.
 #[derive(Debug)]
 pub struct OwnerSynthesis {
     pub prepared: PreparedAcoustics,
@@ -49,24 +44,20 @@ pub struct OwnerSynthesis {
 }
 
 impl OwnerSynthesis {
-    /// Additional retained allocations, excluding the rendered PCM/visuals and
-    /// shared model weights. Arc-backed feature arrays are counted once here.
+
     pub fn memory_bytes(&self) -> usize {
         let prepared = &self.prepared;
         let phrase = &prepared.phrase;
         let mut bytes = std::mem::size_of_val(self)
+            .saturating_add(phrase.unison.part.capacity())
             .saturating_add(vector_bytes(&phrase.records))
             .saturating_add(vector_bytes(&phrase.notes))
             .saturating_add(vector_bytes(&phrase.source_note_ids))
+            .saturating_add(vector_bytes(&phrase.phone_sources))
+            .saturating_add(phrase.phone_sources.iter().map(|p|vector_bytes(p)).sum::<usize>())
             .saturating_add(vector_bytes(&phrase.retake_seeds))
             .saturating_add(vector_bytes(&prepared.phones));
         if let Some(controls) = &phrase.performance_controls {
-            bytes = bytes.saturating_add(controls.memory_bytes());
-        }
-        if let Some(controls) = &phrase.voice_controls {
-            bytes = bytes.saturating_add(controls.memory_bytes());
-        }
-        if let Some(controls) = &phrase.automations {
             bytes = bytes.saturating_add(controls.memory_bytes());
         }
         for record in &phrase.records {
@@ -103,13 +94,11 @@ impl OwnerSynthesis {
         bytes
             .saturating_add(self.components.memory_bytes())
             .saturating_add(vector_bytes(&self.duration.durations))
-            .saturating_add(vector_bytes(&self.duration.default_durations))
+            .saturating_add(vector_bytes(&self.duration.natural_frames))
             .saturating_add(vector_bytes(&prediction.phones))
             .saturating_add(vector_bytes(&prediction.scalars))
             .saturating_add(vector_bytes(&prediction.impulse_values))
             .saturating_add(vector_bytes(&prediction.impulse_positions))
-            .saturating_add(vector_bytes(&prediction.default_impulse_values))
-            .saturating_add(vector_bytes(&prediction.default_impulse_positions))
             .saturating_add(vector_bytes(&self.pitch.pitch))
             .saturating_add(vector_bytes(&self.pitch.predicted_controls.slope))
             .saturating_add(vector_bytes(&self.pitch.predicted_controls.offset))

@@ -33,6 +33,9 @@ pub struct NotePerformance {
     pub expression_x: f64,
     pub expression_y: f64,
     pub vibrato: f64,
+    pub choir_onset: f32,
+    pub choir_tail: f32,
+    pub choir_pitch: f32,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub r_tone: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -46,6 +49,9 @@ impl Default for NotePerformance {
             expression_x: 0.0,
             expression_y: 0.0,
             vibrato: 1.0,
+            choir_onset: 1.0,
+            choir_tail: 1.0,
+            choir_pitch: 1.0,
             r_tone: None,
             r_intonation: None,
         }
@@ -59,8 +65,9 @@ impl NotePerformance {
     pub const VIBRATO_MAX: f64 = 2.0;
     pub const RAP_TONE_MIN: f32 = -5.0;
     pub const RAP_TONE_MAX: f32 = 1.0;
-    pub const RAP_INTONATION_MIN: f32 = -0.5;
-    pub const RAP_INTONATION_MAX: f32 = 0.5;
+
+    pub const RAP_INTONATION_MIN: f32 = -0.75;
+    pub const RAP_INTONATION_MAX: f32 = 0.75;
 
     pub fn from_note(note: &Note) -> Result<Self, String> {
         Self::read_accent(&note.extra)?;
@@ -86,6 +93,9 @@ impl NotePerformance {
             expression_x: read_number(attributes, "expValueX", 0.0)?,
             expression_y: read_number(attributes, "expValueY", 0.0)?,
             vibrato: read_number(attributes, "dF0VbrMod", 1.0)?,
+            choir_onset: read_number(attributes, "cTimeDispersion", 1.0)? as f32,
+            choir_tail: read_number(attributes, "cPhraseTailDispersion", 1.0)? as f32,
+            choir_pitch: read_number(attributes, "cPitchDispersion", 1.0)? as f32,
             r_tone: read_optional(attributes, "rTone")?,
             r_intonation: read_optional(attributes, "rIntonation")?,
         };
@@ -104,7 +114,10 @@ impl NotePerformance {
             return Err("说唱音调必须为 -5 到 1 之间的有限数值".into());
         }
         if !Self::valid_rap_intonation(self.r_intonation) {
-            return Err("说唱语调必须为 -0.5 到 0.5 之间的有限数值".into());
+            return Err("说唱语调必须为 -0.75 到 0.75 之间的有限数值".into());
+        }
+        if ![self.choir_onset, self.choir_tail, self.choir_pitch].into_iter().all(|v| (0.0..=2.0).contains(&v)) {
+            return Err("合唱扩散必须为 0 到 2 之间的有限数值".into());
         }
         Ok(())
     }
@@ -136,6 +149,11 @@ impl NotePerformance {
 
     pub fn write_vibrato(note: &mut Note, value: f64) {
         write_number(&mut note.attributes, "dF0VbrMod", value, 1.0);
+    }
+
+    pub fn write_choir_spread(note: &mut Note, key: &str, value: f32) {
+        debug_assert!(matches!(key, "cTimeDispersion" | "cPhraseTailDispersion" | "cPitchDispersion"));
+        write_number(&mut note.attributes, key, f64::from(value), 1.0);
     }
 
     pub fn write_rap_tone(note: &mut Note, value: Option<f32>) {

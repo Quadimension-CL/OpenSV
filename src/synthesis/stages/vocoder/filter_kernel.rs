@@ -1,15 +1,6 @@
-//! Stateful CPU spectral filter.
-//!
-//! The network predicts liftered real cepstra, not FFT magnitudes. Each frame
-//! becomes a complex exponential response applied to a centered Hann window.
-//! Window history, the overlap buffer and partial output frames survive calls.
-
 use std::{collections::VecDeque, f32::consts::TAU};
 
-use super::{
-    fourier::{fft, multiply},
-    voice_control::{Component, SpectralControl, SpectralControlFilter},
-};
+use super::fourier::{fft, multiply};
 use crate::synthesis::{
     execution::checkpoint,
     inference::Sequence,
@@ -29,23 +20,18 @@ pub struct DynamicFilter {
     overlap: Vec<f32>,
     excitation: VecDeque<Vec<f32>>,
     parameters: VecDeque<Vec<f32>>,
-    controls: VecDeque<SpectralControl>,
-    control_filter: SpectralControlFilter,
+    effects:VecDeque<Option<super::effects::FrameEffect>>,
+    noise:bool,
     output_partial: Vec<f32>,
     output_position: i64,
     accepted_frames: usize,
+    accepted_excitation_frames:usize,
     emitted_frames: usize,
     finished: bool,
 }
 
 impl DynamicFilter {
-    pub(crate) fn new(
-        frame_samples: usize,
-        window_samples: usize,
-        fft_size: usize,
-        sample_rate: u32,
-        component: Component,
-    ) -> Result<Self> {
+    pub fn new(frame_samples: usize, window_samples: usize, fft_size: usize) -> Result<Self> {
         if frame_samples == 0
             || frame_samples
                 .checked_mul(2)
@@ -90,38 +76,44 @@ impl DynamicFilter {
                 .map(|_| vec![0.0; frame_samples])
                 .collect(),
             parameters: VecDeque::new(),
-            controls: VecDeque::new(),
-            control_filter: SpectralControlFilter::new(component, sample_rate, fft_size),
+            effects:VecDeque::new(),
+            noise:false,
             output_partial: Vec::with_capacity(frame_samples),
             output_position: -(fft_size as i64 / 2),
             accepted_frames: 0,
+            accepted_excitation_frames:0,
             emitted_frames: 0,
             finished: false,
         })
     }
+    pub(super) fn set_noise(&mut self) {self.noise=true;}
+    pub(super) fn push_effects(&mut self,frames:&[Option<super::effects::FrameEffect>]) {
+        self.effects.extend(frames.iter().copied());
+    }
 
-    /// Input parameters and excitation must have the same frame count. The
-    /// final call flushes precisely the accepted sample count, never a tail.
-    pub(crate) fn process(
+    pub fn process(
         &mut self,
         parameters: &Sequence,
         excitation: &Sequence,
-        controls: &[SpectralControl],
         final_batch: bool,
     ) -> Result<Sequence> {
+        if parameters.frames!=excitation.frames {return Err(VoiceError::new("Vocoder filter input frame dimensions differ"));}
+        self.process_independent(parameters,excitation,final_batch)
+    }
+
+    pub(super) fn process_independent(&mut self,parameters:&Sequence,excitation:&Sequence,final_batch:bool)->Result<Sequence> {
         self.validate(parameters, excitation)?;
-        if controls.len() != parameters.frames {
-            return Err(VoiceError::new(
-                "Vocoder filter voice controls do not align",
-            ));
-        }
-        self.controls.extend(controls.iter().copied());
         let accepted_frames = self
             .accepted_frames
             .checked_add(parameters.frames)
             .ok_or_else(|| VoiceError::new("Vocoder filter frame count overflows"))?;
         self.parameter_channels = Some(parameters.channels);
         self.accepted_frames = accepted_frames;
+        self.accepted_excitation_frames=self.accepted_excitation_frames.checked_add(excitation.frames)
+            .ok_or_else(||VoiceError::new("Vocoder excitation frame count overflows"))?;
+        if final_batch&&self.accepted_excitation_frames!=self.accepted_frames {
+            return Err(VoiceError::new("Vocoder filter parameter and excitation tails differ"));
+        }
         self.parameters.extend(
             parameters
                 .values
@@ -159,7 +151,7 @@ impl DynamicFilter {
                 "Vocoder filter received input after its final batch",
             ));
         }
-        if parameters.frames != excitation.frames || excitation.channels != self.frame_samples {
+        if excitation.channels != self.frame_samples {
             return Err(VoiceError::new(
                 "Vocoder filter input frame dimensions differ",
             ));
@@ -207,9 +199,7 @@ impl DynamicFilter {
             let (sin, cos) = value[1].sin_cos();
             *value = [amplitude * cos, amplitude * sin];
         }
-        if let Some(control) = self.controls.pop_front() {
-            self.control_filter.apply(&mut self.response, control)?;
-        }
+        if let Some(Some(effect))=self.effects.pop_front() {effect.apply(&mut self.response,self.noise)?;}
         for bin in 1..self.fft_size / 2 {
             let [real, imaginary] = self.response[bin];
             self.response[self.fft_size - bin] = [real, -imaginary];

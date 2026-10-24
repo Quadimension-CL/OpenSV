@@ -35,6 +35,7 @@ impl RecordLayout {
         let mut groups = Vec::with_capacity(sources.len());
         let mut seen = BTreeSet::new();
         for source in sources {
+            while ids.get(cursor)==Some(&None) {cursor+=1;}
             if !seen.insert(source.id) || ids.get(cursor) != Some(&Some(source.id)) {
                 return Err(invalid());
             }
@@ -69,13 +70,11 @@ impl RecordLayout {
         })
     }
 
-    /// Include generated onset/tail records when the source region touches an
-    /// edge: their phones and inherited pitch can also change after an edit.
     pub fn records(&self, sources: Range<usize>) -> Range<usize> {
         let first = if sources.start == 0 {
             0
         } else {
-            self.sources[sources.start].start
+            self.sources[sources.start-1].end
         };
         let end = if sources.end == self.sources.len() {
             self.boundaries.len() - 1

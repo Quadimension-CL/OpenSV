@@ -1,40 +1,44 @@
-//! Family-specific record-level onset placement.
-//!
-//! The original note retains its phonemes. Only the derived frontend records
-//! move leading consonants into the preceding record before duration inference.
-
 use crate::synthesis::{
     stages::{duration::DurationRecord, f0::frontend::FrontendNote},
     voice::{PreparedTree, Result, VoiceError, VoiceFamily},
 };
 
+pub(super) fn link_sustains(records: &mut [DurationRecord], notes: &[FrontendNote]) -> Result<()> {
+    let mut previous: Option<usize> = None;
+    for (index, note) in notes.iter().enumerate() {
+        if note.kind == 2 {
+            let previous = previous.ok_or_else(|| VoiceError::new("延音前缺少音符记录"))?;
+            let seconds = crate::synthesis::stages::f0::frontend::frame_count(note)? as f64 * note.frame_seconds;
+            records[previous].linked_durations_seconds.push(seconds);
+        } else if !records[index].phones.is_empty() { previous=Some(index); }
+    }
+    Ok(())
+}
+
 pub(super) fn redistribute_onsets(
     tree: &PreparedTree,
     records: &mut [DurationRecord],
     notes: &mut [FrontendNote],
+    phone_sources:&mut [Vec<Option<super::PhoneSource>>],
     family: VoiceFamily,
 ) -> Result<()> {
-    if records.len() != notes.len() {
+    if records.len() != notes.len() || records.len()!=phone_sources.len() {
         return Err(VoiceError::new(
             "Onset redistribution requires matching frontend records",
         ));
     }
 
-    // Resolve every source class before mutating either array. The selected
-    // language table matters: classifying the unified symbol is not equivalent.
     let mut prefixes = Vec::with_capacity(records.len());
     for record in records.iter() {
         let mut first_core = None;
         for (index, phone) in record.phones.iter().enumerate() {
             let resolved = tree.resolve_phone(&phone.language, &phone.token)?;
             let core = match family {
-                // SV1 transfers every leading non-vowel, including
-                // semivowels; silence and breath are not nuclei.
+
                 VoiceFamily::Sv1 => {
                     matches!(resolved.source_class, Some("vowel" | "diphthong"))
                 }
-                // SV2 treats sil/pau and language-local silence/breath
-                // classes as nuclei in addition to vowels and diphthongs.
+
                 VoiceFamily::Sv2Compatible | VoiceFamily::Sv2 => {
                     matches!(phone.token.as_str(), "sil" | "pau")
                         || matches!(
@@ -52,8 +56,7 @@ pub(super) fn redistribute_onsets(
 
     let mut previous: Option<usize> = None;
     for (index, &prefix) in prefixes.iter().enumerate() {
-        // Tied records do not become the preceding record; linked-note
-        // merging is separate from onset redistribution.
+
         if notes[index].kind == 2 {
             continue;
         }
@@ -64,6 +67,8 @@ pub(super) fn redistribute_onsets(
             earlier[previous]
                 .phones
                 .extend(current[0].phones.drain(..prefix));
+            let (earlier,current)=phone_sources.split_at_mut(index);
+            earlier[previous].extend(current[0].drain(..prefix));
         }
         previous = Some(index);
     }

@@ -29,6 +29,5 @@ fn main() {
         String::from_utf8_lossy(&output.stderr),
     );
 
-    // Link the resource only into the editor, not the synthesis command-line tool.
     println!("cargo::rustc-link-arg-bin=rynthv={}", resource.display());
 }

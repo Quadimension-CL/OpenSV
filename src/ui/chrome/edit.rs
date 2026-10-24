@@ -1,4 +1,3 @@
-//! Edit menu commands follow the active piano tool's selection domain.
 use crate::{
     app::App,
     ui::{lanes, phonemes, piano},
@@ -106,7 +105,7 @@ pub(crate) fn paste(app: &mut App, ctx: &Context) {
     } else if anchors(app) {
         piano::anchor_paste(app);
     } else if can_paste(app) {
-        // Menus and the platform shortcut read the same system clipboard.
+
         ctx.send_viewport_cmd(ViewportCommand::RequestPaste);
     }
 }
@@ -115,7 +114,7 @@ fn copy_notes(app: &mut App, ctx: &Context) -> bool {
     match app.editor.copy() {
         Ok(Some(text)) => {
             ctx.copy_text(text);
-            app.status = "已复制音符".into();
+            app.status = crate::i18n::t("已复制音符").into();
             true
         }
         Ok(None) => false,
@@ -126,8 +125,6 @@ fn copy_notes(app: &mut App, ctx: &Context) -> bool {
     }
 }
 
-/// Clipboard commands arrive as platform events, without C/X/V key events.
-/// The caller leaves these events to text editors and dialogs while focused.
 pub(super) fn clipboard_events(app: &mut App, ctx: &Context) -> bool {
     if anchors(app) && !lanes::parameter_active(app) && !phonemes::phoneme_active(app) {
         return false;
@@ -182,7 +179,7 @@ pub(super) fn duplicate(app: &mut App) {
 fn report_paste(app: &mut App, result: Result<usize, String>) {
     match result {
         Ok(0) => {}
-        Ok(count) => app.status = format!("已粘贴 {count} 个音符"),
+        Ok(count) => app.status = crate::lformat!("已粘贴 {count} 个音符"),
         Err(error) => app.status = error,
     }
 }

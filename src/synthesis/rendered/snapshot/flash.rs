@@ -1,6 +1,5 @@
 use std::{ops::Range, time::Instant};
 
-/// A newly published interval's transient waveform-edge highlight.
 #[derive(Clone, Debug)]
 pub struct VisualFlash {
     pub range: Range<i64>,

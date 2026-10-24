@@ -1,6 +1,3 @@
-//! Native SVP pitch controls in group-local blicks and absolute MIDI pitch.
-//! Hand-drawn curve samples are relative to their anchor's time and pitch.
-
 mod edit;
 mod point;
 mod serialization;
@@ -16,7 +13,7 @@ use serde_json::Value;
 pub enum PitchControl {
     Point(PitchPoint),
     Curve(PitchCurve),
-    /// Control types that the editor does not implement are preserved.
+
     Unsupported(Value),
 }
 
@@ -57,7 +54,6 @@ impl PitchCurve {
             .filter_map(|(time, pitch)| Some((self.pos.checked_add(*time)?, self.pitch + pitch)))
     }
 
-    /// Samples a local absolute MIDI pitch only inside this curve's range.
     pub fn sample(&self, position: f64) -> Option<f64> {
         if !position.is_finite() {
             return None;

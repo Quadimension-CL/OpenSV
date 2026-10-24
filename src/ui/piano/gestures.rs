@@ -35,7 +35,7 @@ pub(super) fn start_gesture(
         } else {
             NoteDrag::Move
         };
-        app.editor.begin("拖动音符");
+        app.editor.begin(crate::i18n::t("拖动音符"));
         let mut selected: Vec<_> = app
             .editor
             .notes()
@@ -64,7 +64,7 @@ pub(super) fn start_gesture(
             },
         });
     } else if app.piano_tool == super::Tool::NoteDraw || modifiers.ctrl {
-        app.editor.begin("创建音符");
+        app.editor.begin(crate::i18n::t("创建音符"));
         let beat = beat_at(rect, &app.view.piano, origin.x);
         let at = ticks(if app.view.snap && !(modifiers.ctrl && modifiers.alt) {
             app.view.snap_beat(beat)
@@ -136,8 +136,7 @@ pub(super) fn update_gesture(app: &mut App, ui: &Ui, rect: Rect) {
             let max_pitch = notes.iter().map(|n| n.pitch).max().unwrap_or(127);
             pitch = pitch.clamp(-min_pitch, 127 - max_pitch);
             let min_onset = notes.iter().map(|n| n.onset).min().unwrap_or(0);
-            // Limit the shared resize delta by the shortest selected note. Notes
-            // already shorter than this grid may grow, but cannot shrink further.
+
             let shortest = notes.iter().map(|n| n.duration).min().unwrap_or(minimum);
             let max_shrink = (shortest - minimum).max(0);
             delta = match kind {
@@ -206,7 +205,7 @@ pub(super) fn update_gesture(app: &mut App, ui: &Ui, rect: Rect) {
             }
             app.editor.selected = selected;
         }
-        Gesture::Parameter(_) | Gesture::Pitch(_) | Gesture::Anchor(_) => {}
+        Gesture::Parameter { .. } | Gesture::Phoneme(_) | Gesture::Curve(_) | Gesture::Pitch(_) | Gesture::Anchor(_) | Gesture::Rap(_) => {}
     }
     app.gesture = Some(gesture);
 }

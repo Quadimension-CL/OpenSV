@@ -1,7 +1,3 @@
-//! Validated rendered PCM, lossless float WAV export and device playback.
-//!
-//! Sparse preview blocks are published by the synthesis engine. Export keeps
-//! using complete immutable PCM, while the device consumes one live revision.
 pub(crate) mod conversion;
 pub mod live;
 pub mod metronome;
@@ -34,10 +30,6 @@ impl ChannelLayout {
     }
 }
 
-/// Immutable interleaved IEEE float PCM at its native rendering sample rate.
-///
-/// `start_seconds` is the project time of frame zero, not silence to prepend to
-/// exported files. Amplitudes are preserved; export does not normalize or clip.
 #[derive(Debug, Clone)]
 pub struct RenderedAudio {
     sample_rate: u32,

@@ -1,5 +1,3 @@
-//! Persistent programs for composite operators with independently ready branches.
-
 mod conditional;
 mod gated;
 mod queue;
@@ -77,8 +75,7 @@ impl ModelRuntime<'_> {
         }
         let tree = self.tree;
         let node = tree.node(index)?;
-        // Taking the parent state out permits recursive child execution while all
-        // child queues remain resident in this same runtime.
+
         let mut state = match self.composites.remove(&index) {
             Some(state) => state,
             None => {

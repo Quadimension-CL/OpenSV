@@ -12,9 +12,6 @@ const HELD: u64 = 0x80;
 const SERIAL_MASK: u64 = !0xff;
 const VOICES: usize = 4;
 
-/// Piano audition belongs to the output device, independently of project PCM
-/// and transport controls. Releasing retains the last strike, so even a click
-/// shorter than a device callback produces an audible attack.
 #[derive(Clone, Default)]
 pub struct PianoControl {
     state: Arc<ControlState>,
@@ -57,12 +54,10 @@ pub(super) struct PianoSynth {
 }
 
 impl PianoSynth {
-    /// Build every pitch's oscillators on the control thread. The callback only
-    /// copies fixed-size state, advances oscillators and reads one atomic word.
+
     pub fn new(sample_rate: u32, control: PianoControl) -> Self {
         let sample_rate = f64::from(sample_rate);
-        // A device rebuild must not replay a released, previously heard click.
-        // Unconsumed strikes still survive slow first-time device creation.
+
         let serial = control.state.consumed.load(Ordering::Acquire);
         Self {
             control,
@@ -94,7 +89,7 @@ impl PianoSynth {
                 .iter()
                 .position(|voice| !voice.active())
                 .unwrap_or_else(|| {
-                    // Fast glissandi steal the oldest already damped tail.
+
                     self.voices
                         .iter()
                         .enumerate()

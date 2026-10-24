@@ -14,10 +14,6 @@ use eframe::egui::*;
 
 pub fn show(app: &mut App, ui: &mut Ui, column: Column) {
     let rect = ui.max_rect();
-    if ui.rect_contains_pointer(rect) && ui.input(|input| input.pointer.any_pressed()) {
-        super::lanes::parameter_deactivate(app);
-        super::phonemes::phoneme_deactivate(app);
-    }
     ui.painter().rect_filled(rect, 4, PANEL);
     let header = Rect::from_min_size(rect.min, vec2(rect.width(), 42.0));
     let mut header_ui = child(
@@ -35,6 +31,8 @@ pub fn show(app: &mut App, ui: &mut Ui, column: Column) {
         );
         super::section_title(ui, column.label(), DragPayload::Column(column));
     });
+    ui.interact(header,Id::new(("panel-header-drag",column)),Sense::drag())
+        .dnd_set_drag_payload(DragPayload::Column(column));
     ui.painter()
         .hline(header.x_range(), header.bottom(), Stroke::new(1.0, EDGE));
     let mut content = child(
@@ -53,7 +51,7 @@ pub fn show(app: &mut App, ui: &mut Ui, column: Column) {
                 && matches!(column, Column::Note | Column::Voice | Column::Dictionary)
             {
                 controls::padded(ui, |ui| {
-                    ui.weak("当前选择的是伴奏轨，请选择歌声音轨以编辑此项。");
+                    ui.weak(crate::i18n::t("当前选择的是伴奏轨，请选择歌声音轨以编辑此项。"));
                 });
                 return;
             }
@@ -63,7 +61,7 @@ pub fn show(app: &mut App, ui: &mut Ui, column: Column) {
                 Column::Render => render::show(app, ui),
                 Column::Dictionary => dictionary::show(app, ui, rect.height() - header.height()),
                 Column::Script => controls::padded(ui, |ui| {
-                    ui.weak("脚本运行环境尚未接入");
+                    ui.weak(crate::i18n::t("脚本运行环境尚未接入"));
                 }),
                 Column::Editor => {}
             }

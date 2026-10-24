@@ -1,5 +1,3 @@
-//! Duration input concatenation with scalar sinusoidal features.
-
 use crate::synthesis::voice::{
     DurationConfiguration, PreparedTree, Result, TensorStorage, VoiceError,
 };
@@ -11,11 +9,8 @@ pub(super) fn encode(
     children: &[usize],
     configuration: DurationConfiguration,
     phones: &[PhoneFeatures],
+    constant: &[f32],
 ) -> Result<Vec<f32>> {
-    let constant = tree
-        .tensor(children[1])?
-        .vector()
-        .ok_or_else(|| VoiceError::new("Duration constant conditioning is not a vector"))?;
     let width = configuration.feature_width(constant.len())?;
     let capacity = width
         .checked_mul(phones.len())
@@ -80,6 +75,7 @@ pub(crate) fn embedding(
         rows,
         columns,
         values,
+        ..
     } = tree.tensor(*matrix)?
     else {
         return Err(VoiceError::new("Duration embedding is not a float matrix"));
@@ -89,7 +85,7 @@ pub(crate) fn embedding(
             "Duration embedding dimensions do not match root configuration",
         ));
     }
-    // Stored matrix is row-major; prepare transposes its columns into entries.
+
     let index = index.min(columns - 1);
     output.extend((0..width).map(|row| values[row * columns + index]));
     Ok(())
@@ -103,7 +99,7 @@ pub(crate) fn sinusoidal(value: f32, width: usize, output: &mut Vec<f32>) -> Res
     output.resize(start + width, 0.0);
     let half = width / 2;
     for index in 0..half {
-        // Store all sine values before all cosine values, using f32 frequencies.
+
         let divisor = 10000.0_f32.powf((2 * index) as f32 / width as f32);
         let (sin, cos) = (value / divisor).sin_cos();
         output[start + index] = sin;

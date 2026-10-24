@@ -21,7 +21,7 @@ impl KeyboardDecoration {
                 pos2(key.rect.right() - MARKER_WIDTH, key.rect.top()),
                 key.rect.max,
             );
-            // Reuse the key outline so the marker follows its rounded edge.
+
             key_painter
                 .with_clip_rect(marker.intersect(key_painter.clip_rect()))
                 .rect_filled(key.rect, rounding, self.accent);

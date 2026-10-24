@@ -3,7 +3,6 @@ use super::{
     frontend::ContextInput,
     pitch,
     records::{self, Records},
-    styles,
 };
 use crate::synthesis::{
     inference::Sequence,
@@ -11,14 +10,13 @@ use crate::synthesis::{
     voice::{Result, VoiceError},
 };
 
-/// Owner-wide conditioning shared by all preview cursors. Temporal phone
-/// projection retains the complete owner context before any seek is applied.
 pub struct PreparedSv1TimbreFrames {
     pub(super) contract: Contract,
     pub(super) expanded: Sequence,
     pub(super) records: Records,
     pub(super) phone_frames: Vec<usize>,
     pub(super) noise_ids: Vec<i32>,
+    pub(super) spectral_silence:Option<Vec<bool>>,
 }
 
 impl PreparedSv1TimbreFrames {
@@ -32,29 +30,43 @@ impl PreparedSv1TimbreFrames {
             .iter()
             .try_fold(0_usize, |total, &count| total.checked_add(count))
             .ok_or_else(|| VoiceError::new("DDS acoustic phone timeline overflows"))?;
-        let frame_styles = styles::prepare(&network.styles, request, frames)?;
-        let sampled_pitch = pitch::sample(
+        let log_hz = pitch::sample_log_hz(
             pitch,
+            request.midi_pitch,
             frames,
             network.frontend.frame_seconds,
             network.contract,
-            request.frame_controls,
         )?;
-        let records = records::prepare(request, network.contract, sampled_pitch.raw_log_hz)?;
+        let records = records::prepare(request, network.contract, log_hz)?;
         let linguistic = network.frontend.linguistic(request.phones)?;
-        let normalized_pitch = network
-            .frontend
-            .normalize_pitch(&sampled_pitch.conditioning_log_hz)?;
+        let normalized_pitch = network.frontend.normalize_pitch(&records.log_hz)?;
+        let style_rows=if let Some(modes)=request.mode_coefficients.filter(|_|network.contract==Contract::Compatible) {
+            let names=crate::synthesis::vocal_modes::ordered_style_names(network.tree,network.style_node,network.styles.variants.len())?;
+            let constant=(!modes.animated()).then(||network.styles.blend(&modes.weights(&names,false))).transpose()?;
+            let mut values=Vec::with_capacity(frames*network.styles.neutral.len());
+            for frame in 0..frames {
+                if let Some(row)=&constant {values.extend_from_slice(row);}
+                else {values.extend(network.styles.blend(&modes.weights_at(&names,false,frame))?);}
+            }
+            Some(Sequence::from_values(network.styles.neutral.len(),values)?)
+        }else{None};
         let expanded = network.context.prepare_frames(&ContextInput {
             phones: request.phones,
             linguistic: &linguistic,
             normalized_pitch: &normalized_pitch,
             bank: &network.bank,
             style: &network.styles.neutral,
-            frame_styles: frame_styles.as_ref(),
-            frame_factors: sampled_pitch.projection_factors.as_deref(),
+            style_rows:style_rows.as_ref(),
+            phone_factors: None,
         })?;
+        let spectral_silence=if network.contract==Contract::Compatible {
+            Some(super::silence::flags(&linguistic.silence,&phone_frames)?)
+        }else{None};
         expanded.validate()?;
+        #[cfg(feature="acoustic-diagnostic")]
+        for (label,value) in [("compatible_acoustic_linguistic",&linguistic.normalized),("compatible_acoustic_expanded",&expanded)] {
+            crate::synthesis::stages::f0::diagnostic::capture(label.into(),value)?;
+        }
         if expanded.frames != frames
             || records.log_hz.len() != frames
             || linguistic.noise_ids.len() != phone_frames.len()
@@ -69,6 +81,7 @@ impl PreparedSv1TimbreFrames {
             records,
             phone_frames,
             noise_ids: linguistic.noise_ids,
+            spectral_silence,
         })
     }
 
@@ -80,11 +93,6 @@ impl PreparedSv1TimbreFrames {
         self.expanded.frames == 0
     }
 
-    /// Start at a phone boundary with 512 warmup frames for both SV1 and
-    /// SV2-compatible models.
-    /// An exact boundary retains the preceding phone, including its full state
-    /// preparation. Noise is restarted from this phone's seed queue; it is not
-    /// a slice of a previously generated owner-wide noise sequence.
     pub(super) fn first_phone(&self, requested_frame: usize) -> Result<(usize, usize)> {
         if requested_frame > self.len() {
             return Err(VoiceError::new(

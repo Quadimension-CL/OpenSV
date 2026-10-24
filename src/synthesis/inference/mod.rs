@@ -1,6 +1,5 @@
-//! Numerical operators and stateful execution for prepared synthesis models.
-
 pub mod activation;
+pub(crate) mod legacy_activation;
 pub mod affine;
 pub mod convolution;
 pub mod extent;
@@ -17,7 +16,6 @@ pub use sequence::Sequence;
 
 use std::fmt;
 
-/// ReLU module type prefix in file byte order.
 pub const RELU_TYPE_ID: [u8; 16] = [
     0x32, 0xe6, 0xe0, 0x5d, 0x60, 0x89, 0x2a, 0xf6, 0xc9, 0xf1, 0x12, 0x3a, 0xa6, 0x8e, 0xaf, 0x35,
 ];
@@ -26,8 +24,6 @@ pub const IDENTITY_TYPE_ID: [u8; 16] = [
     0x31, 0x67, 0xa3, 0x24, 0xe2, 0x56, 0xce, 0x2f, 0x32, 0x8e, 0xb4, 0x45, 0x2d, 0xc7, 0x24, 0x71,
 ];
 
-/// Uses platform tanh rather than a rational approximation.
-/// Cross-platform libm last bits can differ.
 pub const TANH_TYPE_ID: [u8; 16] = [
     0x7a, 0x2a, 0x9b, 0xcf, 0xa7, 0xeb, 0x1b, 0x04, 0x6b, 0x35, 0xfe, 0x05, 0x57, 0x27, 0x18, 0xb7,
 ];
@@ -79,7 +75,6 @@ impl UnaryOperator {
         }
     }
 
-    /// Writes every output element, or rejects the lengths before writing any.
     pub fn execute(self, input: &[f32], output: &mut [f32]) -> Result<(), InferenceError> {
         if input.len() != output.len() {
             return Err(InferenceError::LengthMismatch {
@@ -111,7 +106,7 @@ impl UnaryOperator {
             }
             Self::Relu => {
                 for (&value, target) in input.iter().zip(output.iter_mut()) {
-                    // NaN and either signed zero become +0.
+
                     *target = if value > 0.0 { value } else { 0.0 };
                 }
             }

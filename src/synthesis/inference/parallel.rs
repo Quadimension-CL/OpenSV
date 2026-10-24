@@ -1,5 +1,3 @@
-//! The bounded, persistent operator pool shared by independent-frame kernels.
-
 use rayon::{ThreadPool, ThreadPoolBuilder};
 use std::sync::OnceLock;
 

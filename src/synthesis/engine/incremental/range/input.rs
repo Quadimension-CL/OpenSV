@@ -1,10 +1,6 @@
 use crate::synthesis::plan::OwnerInput;
 use std::ops::Range;
 
-/// Pitch, lyric and explicit phoneme edits share the same local pipeline. All
-/// other dependencies remain exact; a new layout is classified before inference.
-/// In particular, changed/erased manual curves require a fresh F0 prediction:
-/// the retained pitch already contains the preceding manual overrides.
 pub(super) fn changed_notes(old: &OwnerInput, new: &OwnerInput) -> Option<Range<usize>> {
     if old.notes.len() != new.notes.len() || new.notes.is_empty() {
         return None;
@@ -13,9 +9,14 @@ pub(super) fn changed_notes(old: &OwnerInput, new: &OwnerInput) -> Option<Range<
     let mut first = None;
     let mut end = 0;
     for (index, (previous, current)) in equivalent.notes.iter_mut().zip(&new.notes).enumerate() {
+        let mut attributes=previous.attributes.clone();
+        if let Some(phones)=current.attributes.get("phonemes") {attributes.insert("phonemes".into(),phones.clone());}
+        else {attributes.remove("phonemes");}
+        let phone_edit=attributes==current.attributes && previous.attributes!=current.attributes;
         if previous.pitch != current.pitch
             || previous.lyrics != current.lyrics
             || previous.phonemes != current.phonemes
+            || phone_edit
         {
             first.get_or_insert(index);
             end = index + 1;
@@ -23,6 +24,7 @@ pub(super) fn changed_notes(old: &OwnerInput, new: &OwnerInput) -> Option<Range<
         previous.pitch = current.pitch;
         previous.lyrics.clone_from(&current.lyrics);
         previous.phonemes.clone_from(&current.phonemes);
+        if phone_edit {previous.attributes=attributes;}
     }
     if equivalent != *new
         || new.content_offset.0 < 0
@@ -38,7 +40,7 @@ pub(super) fn changed_notes(old: &OwnerInput, new: &OwnerInput) -> Option<Range<
         || new
             .notes
             .windows(2)
-            .any(|pair| pair[0].onset.0.saturating_add(pair[0].duration) != pair[1].onset.0)
+            .any(|pair| pair[0].onset.0.saturating_add(pair[0].duration) > pair[1].onset.0)
     {
         return None;
     }

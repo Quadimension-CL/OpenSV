@@ -65,7 +65,7 @@ impl Pinyin {
                 continue;
             }
             let limit = key.len().min(start + self.max_key_bytes);
-            // Prefer a complete syllable, but only when its suffix can also be read.
+
             for end in ((start + 1)..=limit).rev() {
                 if !self.entries.contains_key(&key[start..end]) {
                     continue;
@@ -95,7 +95,6 @@ impl Pinyin {
     }
 }
 
-/// Tone spelling does not change the toneless phoneme inventory; the score supplies pitch.
 fn normalize(text: &str) -> Option<String> {
     let value = text.to_lowercase().replace("u:", "v");
     let mut key = String::with_capacity(value.len());

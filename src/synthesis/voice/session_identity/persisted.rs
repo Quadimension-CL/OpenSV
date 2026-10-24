@@ -1,6 +1,7 @@
-//! Read only an explicitly selected session file; never persist its contents.
-
+mod evaluation;
 mod smbios;
+#[cfg(test)]
+mod session_retry_tests;
 
 use blowfish::{
     BlowfishLE,
@@ -9,8 +10,8 @@ use blowfish::{
 use std::{fs::File, io::Read, path::Path};
 
 use super::super::{Result, VoiceError};
+use super::session::{SessionCondition, SessionProtection};
 
-// All error paths drop these buffers, including malformed session/firmware data.
 struct PrivateBytes(Vec<u8>);
 
 impl Drop for PrivateBytes {
@@ -19,7 +20,12 @@ impl Drop for PrivateBytes {
     }
 }
 
-pub(super) fn read_session_field(path: &Path) -> Result<Option<Vec<u8>>> {
+pub(super) fn read_session_identity(
+    path: &Path,
+    voice_name: &str,
+    model_version: u8,
+    manual_key: Option<u64>,
+) -> Result<SessionCondition> {
     const MAX_SESSION_BYTES: u64 = 1024 * 1024;
     let file = File::open(path)
         .map_err(|error| VoiceError::new(format!("无法打开所选会话文件：{error}")))?;
@@ -34,61 +40,78 @@ pub(super) fn read_session_field(path: &Path) -> Result<Option<Vec<u8>>> {
     if bytes.0.len() as u64 > MAX_SESSION_BYTES {
         return Err(VoiceError::new("所选会话文件超过 1 MiB。"));
     }
-    if bytes.0.is_empty() || !bytes.0.len().is_multiple_of(8) {
+    if bytes.0.is_empty() {
         return Err(VoiceError::new("所选会话文件的长度无效。"));
     }
-    let mut key = smbios::session_key()?;
-    let cipher =
-        BlowfishLE::new_from_slice(&key).expect("the session cipher uses an eight-byte key");
-    key.zeroize();
+
+    if evaluation::is_plaintext(&bytes.0) {
+        return evaluation::identity(&bytes.0, voice_name, model_version)
+            .map(|identity| SessionCondition { identity, protection: SessionProtection::Plaintext });
+    }
+    if !bytes.0.len().is_multiple_of(8) {
+        return Err(VoiceError::new("所选会话文件的长度无效。"));
+    }
+    if let Ok(payload) = decode(&bytes.0, &[0; 8]) {
+        if evaluation::is_session(&payload.0) || evaluation::is_plaintext(&payload.0) {
+            return evaluation::identity(&payload.0, voice_name, model_version)
+                .map(|identity| SessionCondition { identity, protection: SessionProtection::ZeroKey });
+        }
+    }
+    if let Ok(mut key) = smbios::session_key() {
+        let result = decode(&bytes.0, &key);
+        let zero_key = key == [0; 8];
+        key.zeroize();
+        if let Ok(payload) = result {
+            if evaluation::is_session(&payload.0) || evaluation::is_plaintext(&payload.0) {
+                let identity = if zero_key {
+                    evaluation::identity(&payload.0, voice_name, model_version)?
+                } else {
+                    super::derive_local_identity(evaluation::descriptor(&payload.0, voice_name)?, voice_name, model_version)?
+                };
+                return Ok(SessionCondition { identity, protection: if zero_key {SessionProtection::ZeroKey} else {SessionProtection::MachineKey} });
+            }
+        }
+    }
+    if let Some(key) = manual_key {
+        let mut key_bytes = key.to_le_bytes();
+        let result = decode(&bytes.0, &key_bytes);
+        key_bytes.zeroize();
+        if let Ok(payload) = result
+            && (evaluation::is_session(&payload.0) || evaluation::is_plaintext(&payload.0))
+        {
+            let identity = if key == 0 {
+                evaluation::identity(&payload.0, voice_name, model_version)?
+            } else {
+                super::derive_local_identity(evaluation::descriptor(&payload.0, voice_name)?, voice_name, model_version)?
+            };
+            return Ok(SessionCondition { identity, protection: if key == 0 {SessionProtection::ZeroKey} else {SessionProtection::ManualKey} });
+        }
+    }
+    Err(VoiceError::decryption_exhausted())
+}
+
+fn decode(input: &[u8], key: &[u8; 8]) -> Result<PrivateBytes> {
+    let mut bytes = PrivateBytes(input.to_vec());
+    let cipher = BlowfishLE::new_from_slice(key)
+        .map_err(|_| VoiceError::new("Unable to load session."))?;
     for chunk in bytes.0.as_chunks_mut::<8>().0 {
         let block: &mut Block<BlowfishLE> = chunk.into();
         cipher.decrypt_block(block);
     }
-    // Padding length is stored in the final byte; other padding bytes are ignored.
-    let padding = usize::from(*bytes.0.last().expect("nonempty buffer"));
-    if !(1..=8).contains(&padding) || padding > bytes.0.len() {
-        return Err(VoiceError::new(
-            "无法解码所选会话文件，请选择本机 Synthesizer V Studio 2 保存的 session 文件。",
-        ));
-    }
-    let payload = &bytes.0[..bytes.0.len() - padding];
-    if std::str::from_utf8(payload).is_err() {
-        return Err(VoiceError::new("所选会话文件包含无效的 UTF-8 数据。"));
-    }
-    let payload = &payload[..payload
-        .iter()
-        .position(|byte| *byte == 0)
-        .unwrap_or(payload.len())];
-    let mut field_index = 0;
-    let mut start = 0;
-    let mut cursor = 0;
-    while cursor <= payload.len() {
-        if cursor == payload.len() || matches!(payload[cursor], b'\r' | b'\n') {
-            let field = &payload[start..cursor];
-            if field_index == 5 {
-                if field.is_empty() {
-                    return Err(VoiceError::new("所选会话文件的模型上下文字段为空。"));
-                }
-                if std::str::from_utf8(field).is_err() {
-                    return Err(VoiceError::new(
-                        "所选会话文件的模型上下文字段包含无效的 UTF-8 数据。",
-                    ));
-                }
-                return Ok(Some(field.to_vec()));
-            }
-            field_index += 1;
-            if payload.get(cursor) == Some(&b'\r') && payload.get(cursor + 1) == Some(&b'\n') {
-                cursor += 1;
-            }
-            start = cursor + 1;
+    let padding = if matches!(bytes.0.last(), Some(b'\n' | 0)) { 0 } else {
+        let padding = usize::from(*bytes.0.last().ok_or_else(|| VoiceError::new("Unable to load session."))?);
+        if !(1..=8).contains(&padding) || padding > bytes.0.len()
+            || !bytes.0[bytes.0.len()-padding..].iter().all(|&v| usize::from(v) == padding) {
+            return Err(VoiceError::new("Unable to load session."));
         }
-        cursor += 1;
+        padding
+    };
+    let end = bytes.0.len()-padding;
+    bytes.0[end..].zeroize();
+    bytes.0.truncate(end);
+    if let Some(end) = bytes.0.iter().position(|&v| v == 0) {
+        bytes.0[end..].zeroize();
+        bytes.0.truncate(end);
     }
-    if field_index == 5 {
-        // Online sessions omit the sixth field by design; this is not damage.
-        Ok(None)
-    } else {
-        Err(VoiceError::new("所选会话文件缺少必需字段。"))
-    }
+    Ok(bytes)
 }

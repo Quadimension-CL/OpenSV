@@ -1,32 +1,25 @@
-//! Explicit, validated score conditioning for each supported voice family.
-//!
-//! Neural frames use the voice's native 48 kHz / 240-sample grid; native SV1
-//! retains continuous score seconds until its stage-specific quantizers.
-//! Export rate and track mixing belong to the output layer. An owner remains
-//! one context across rests; its visible bounds only restrict publication.
-
-mod automation;
 mod context;
+mod automation;
 mod lyrics;
 mod options;
 mod owner;
+mod model_phones;
 mod performance;
 mod pitch;
 mod pronunciation;
 mod records;
+pub mod phonemes;
 mod retakes;
 mod types;
 mod voice_binding;
-mod voice_controls;
 
-pub use automation::PreparedAutomations;
 pub use lyrics::LyricFrontend;
 pub use owner::prepare_owner;
 pub use performance::PreparedPerformanceControls;
 pub use pitch::PreparedPitchControls;
-pub use types::{ExplicitScore, PreparedPhrase, ScoreNote, ScorePhone};
+pub use automation::PreparedAutomation;
+pub use types::{ExplicitScore, PreparedPhrase, ScoreNote, ScorePhone,PhoneSource};
 pub use voice_binding::validate_voice;
-pub use voice_controls::PreparedVoiceControls;
 
 pub const SAMPLE_RATE: u32 = 48_000;
 pub const HOP_SAMPLES: usize = 240;

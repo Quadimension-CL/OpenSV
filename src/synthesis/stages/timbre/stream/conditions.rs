@@ -1,12 +1,9 @@
-//! Frame-local condition assembly for the acoustic streaming heads.
-
 use super::super::sampling::AcousticSampler;
 use crate::synthesis::{
     inference::Sequence,
     voice::{Result, VoiceError},
 };
 
-/// `controls` has already passed through the PPG control downsamplers.
 pub(super) fn ppg(
     sampler: &AcousticSampler,
     prior: &Sequence,
@@ -42,14 +39,14 @@ pub(super) fn timbre(
     prior: &Sequence,
     noise: &Sequence,
     ppg_hidden: &Sequence,
-    shape: &[f32],
+    intensity: &[f32],
 ) -> Result<(Sequence, Sequence)> {
     let c = sampler.config;
     let frames = prior.frames;
     check(prior, frames, c.timbre_prior, "Timbre prior")?;
     check(noise, frames, c.timbre_noise, "Timbre noise")?;
     check(ppg_hidden, frames, c.ppg_hidden, "Timbre PPG state")?;
-    check_scalar(shape, frames, "Timbre shape")?;
+    check_scalar(intensity, frames, "Timbre intensity")?;
     let input_width = c.timbre_noise + c.ppg_hidden;
     let condition_width = c.timbre_prior + c.embedding + c.timbre_noise;
     let mut data = Sequence::zeros(frames, input_width)?;
@@ -66,7 +63,7 @@ pub(super) fn timbre(
         offset = 0;
         copy_frame(condition_frame, &mut offset, prior, index);
         c.embedding(
-            shape[index],
+            intensity[index],
             &mut condition_frame[offset..offset + c.embedding],
         );
         offset += c.embedding;

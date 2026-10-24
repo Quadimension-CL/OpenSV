@@ -84,7 +84,7 @@ impl TimeEvents {
                 continue;
             }
             if let Some((previous_numerator, previous_power)) = previous_value {
-                // Check the original rational MIDI clock, before rounding to RV ticks.
+
                 let elapsed = u128::from(tick - previous_tick) << previous_power;
                 let bar_length = u128::from(ppqn) * 4 * u128::from(previous_numerator);
                 if !elapsed.is_multiple_of(bar_length) {

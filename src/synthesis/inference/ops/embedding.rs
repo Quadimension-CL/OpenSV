@@ -1,8 +1,3 @@
-//! Float-index embedding lookup.
-//!
-//! Serialized matrices have features as rows and vocabulary entries as columns.
-//! Preparation transposes those columns into contiguous feature vectors once.
-
 use std::{fmt, sync::Arc};
 
 use crate::synthesis::inference::matrix::DenseMatrix;
@@ -70,9 +65,6 @@ impl Embedding {
         self.entries
     }
 
-    /// Produces one contiguous feature vector per scalar index. Indices are
-    /// rounded halfway away from zero, then clamped to the vocabulary.
-    /// Non-finite model inputs are rejected before writing output.
     pub fn execute(&self, indices: &[f32], output: &mut [f32]) -> Result<(), EmbeddingError> {
         let expected = indices
             .len()

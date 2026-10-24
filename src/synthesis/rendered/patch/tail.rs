@@ -3,15 +3,6 @@ use super::{
     validate_block_size, validate_components,
 };
 
-/// Finish a replacement using anchor search, phase matching, smooth
-/// time warp and new-to-old fade. `old` starts at the cache block after any
-/// pending partial block has been completed; `fresh` must have that exact same
-/// origin and already include the head seam's carried displacement.
-///
-/// `old` contains complete cache blocks. `minimum_hz` comes from phase records
-/// and is zero when no such records are available. It is independent of the
-/// vocoder's per-frame metadata and must not be replaced with predicted F0.
-/// Only the returned prefix needs to replace old PCM; the rest remains intact.
 pub fn splice_tail(
     old: [&[f32]; 2],
     fresh: [&[f32]; 2],
@@ -135,9 +126,7 @@ fn choose_shift(
     left: usize,
     right: usize,
 ) -> i32 {
-    // The extra rightmost zero is intentional: the inclusive vector receives
-    // scores over a half-open displacement range before the search selects
-    // strict interior local minima. An ordinary global argmin is different.
+
     let mut scores = vec![0.0_f32; left + right + 1];
     for candidate in -(left as i32)..right as i32 {
         let old_start = (anchor as i64 + i64::from(candidate)) as usize;

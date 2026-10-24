@@ -20,8 +20,6 @@ impl Peak {
     }
 }
 
-/// Multiresolution extrema of the final, cropped PCM. All public coordinates
-/// are project seconds. The retained audio shares its immutable sample Arc.
 #[derive(Debug)]
 pub struct Waveform {
     audio: RenderedAudio,
@@ -73,9 +71,6 @@ impl Waveform {
         self.audio.end_seconds()
     }
 
-    /// Exact sample extrema intersecting a half-open display interval. Whole
-    /// blocks use the pyramid; fewer than 128 boundary frames are read directly.
-    /// Query work is O(log(block count)), independent of the displayed duration.
     pub fn peak_range(&self, start_seconds: f64, end_seconds: f64) -> Option<(f32, f32)> {
         if !start_seconds.is_finite() || !end_seconds.is_finite() || end_seconds <= start_seconds {
             return None;
@@ -121,7 +116,6 @@ impl Waveform {
         Some((peak.min, peak.max))
     }
 
-    /// Only the peak index is new storage; PCM is owned and counted by the clip.
     pub fn memory_bytes(&self) -> usize {
         self.levels
             .iter()

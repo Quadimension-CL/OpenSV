@@ -1,5 +1,3 @@
-//! Seven-child DDS feature program.
-
 use super::frontend::Encoded;
 use crate::synthesis::{
     inference::{ModelRuntime, Sequence},
@@ -35,6 +33,12 @@ pub(super) fn execute(
     let children = &node.children;
     let mut runtime = ModelRuntime::new(tree);
     let notes = runtime.execute(children[2], &input.notes, true)?;
+    #[cfg(feature="acoustic-diagnostic")]
+    {
+        crate::synthesis::stages::f0::diagnostic::capture("compatible_feature_input_notes".into(), &input.notes)?;
+        crate::synthesis::stages::f0::diagnostic::capture("compatible_feature_notes".into(), &notes)?;
+        crate::synthesis::stages::f0::diagnostic::capture("compatible_feature_style".into(), &Sequence::new(1,style.len(),style.to_vec())?)?;
+    }
     let phone_ids = Sequence::from_values(1, input.phone_ids.clone())?;
     let embedded_phones = runtime.execute(children[0], &phone_ids, true)?;
     let phones = runtime.execute(children[3], &embedded_phones, true)?;
@@ -99,8 +103,18 @@ pub(super) fn execute(
         row[style_offset..language_offset].copy_from_slice(style);
     }
     let shared = runtime.execute(children[4], &expanded, true)?;
+    #[cfg(feature="acoustic-diagnostic")]
+    {
+        crate::synthesis::stages::f0::diagnostic::capture("compatible_feature_expanded".into(), &expanded)?;
+        crate::synthesis::stages::f0::diagnostic::capture("compatible_feature_shared".into(), &shared)?;
+    }
     let source = runtime.execute(children[5], &shared, true)?;
     let context = runtime.execute(children[6], &shared, true)?;
+    #[cfg(feature="acoustic-diagnostic")]
+    {
+        crate::synthesis::stages::f0::diagnostic::capture("compatible_feature_source".into(), &source)?;
+        crate::synthesis::stages::f0::diagnostic::capture("compatible_feature_context".into(), &context)?;
+    }
     if source.frames != frames || context.frames != frames {
         return Err(VoiceError::new(
             "Compatible F0 feature branches changed frame counts",

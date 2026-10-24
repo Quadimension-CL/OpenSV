@@ -1,61 +1,38 @@
+mod geometry;
 mod clipboard;
 mod commands;
-mod geometry;
+mod selection;
+mod point_drag;
+pub use commands::*;
+pub use selection::ParameterSelection;
+use selection::{active_lane, editable_bounds, reconcile, editable};
 mod gesture;
 mod header;
-mod paint;
-mod session;
-
-pub use commands::{
-    parameter_active, parameter_can_paste, parameter_clear, parameter_copy, parameter_cut,
-    parameter_deactivate, parameter_delete, parameter_duplicate, parameter_has_selection,
-    parameter_paste, parameter_paste_text, parameter_select_all,
-};
-pub use gesture::ParameterGesture;
-use session::{Owner, active_lane, editable, editable_bounds, focus, reconcile};
-pub use session::{ParameterSelection, parameter_keyboard};
-
-use super::{
-    child,
-    piano::Gesture,
-    state::{Lane, ParameterTool},
-    theme::*,
-    timeline::*,
-};
+mod rap;
+use super::{child, label, state::CurveTool, theme::*, timeline::*};
 use crate::{app::App, model::*};
 use eframe::egui::*;
-use geometry::Mapping;
-use std::collections::BTreeSet;
+pub use gesture::CurveGesture;
+pub use rap::RapGesture;
+pub fn end_frame(app: &mut App, ctx: &Context) {
+    gesture::end_frame(app,ctx);
+    rap::end_frame(app,ctx);
+    selection::end_frame(app,ctx);
+}
 
 pub fn show(app: &mut App, ui: &mut Ui, id: u64) {
-    let Some(index) = app.view.lanes.iter().position(|lane| lane.id == id) else {
+    let Some(index) = app.view.lanes.iter().position(|l| l.id == id) else {
         return;
     };
     let mut lane = app.view.lanes[index].clone();
-    let previous = lane.foreground.clone();
     let rect = ui.max_rect();
     ui.painter().rect_filled(rect, 0, PANEL);
-    let header = Rect::from_min_size(rect.min, vec2(rect.width(), 32.0));
-    header::show(app, &mut child(ui, header, ("lane-header", id)), &mut lane);
-    if previous != lane.foreground {
-        gesture::finish(app, ui.ctx(), false);
-        if app
-            .parameter_lane
-            .owner
-            .as_ref()
-            .is_some_and(|owner| owner.lane == id)
-        {
-            app.parameter_lane.owner = None;
-            parameter_clear(app);
-        }
-    }
+    let header = Rect::from_min_size(rect.min, vec2(rect.width(), 30.0));
+    let mut header_ui = child(ui, header, ("lane-header", id));
+    header::show(app, &mut header_ui, &mut lane);
     app.view.lanes[index] = lane.clone();
-    reconcile(app);
-    let canvas = Rect::from_min_max(
-        pos2(rect.left() + GUTTER, header.bottom()),
-        pos2(rect.right() - 42.0, rect.bottom()),
-    );
-    if canvas.height() < 5.0 || canvas.width() < 5.0 {
+    let canvas = Rect::from_min_max(pos2(rect.left() + GUTTER, header.bottom()), rect.max);
+    if canvas.height() < 5.0 {
         return;
     }
     ui.painter().rect_filled(canvas, 0, CANVAS);
@@ -64,20 +41,10 @@ pub fn show(app: &mut App, ui: &mut Ui, id: u64) {
         Id::new(("parameter-canvas", id)),
         Sense::click_and_drag(),
     );
-    if !matches!(app.gesture, Some(Gesture::Parameter(_)))
-        && !super::phonemes::phoneme_dragging(app)
-    {
-        scroll(ui, &response, canvas, &mut app.view.piano);
-        let pan = app.view_pan.drag(
-            ui,
-            super::view_pan::Target::Parameter(id),
-            canvas,
-            app.gesture.is_none() && app.group_gesture.is_none(),
-        );
-        app.view.piano.start = (app.view.piano.start
-            - f64::from(pan.x) / f64::from(app.view.piano.beat_width))
-        .max(0.0);
-    }
+    scroll(ui, &response, canvas, &mut app.view.piano,10.0..=500.0);
+    let pan=app.view_pan.drag(ui,super::view_pan::Target::Parameter(id),canvas,
+        app.gesture.is_none() && app.group_gesture.is_none());
+    app.view.piano.start=(app.view.piano.start-f64::from(pan.x)/f64::from(app.view.piano.beat_width)).max(0.0);
     grid(
         ui,
         canvas,
@@ -85,132 +52,211 @@ pub fn show(app: &mut App, ui: &mut Ui, id: u64) {
         &app.editor.project.time,
         app.view.step(),
     );
+    let (min, max) = geometry::lane_range(&lane);
+    let y_for =
+        |value: f64| canvas.bottom() - ((value - min) / (max - min)) as f32 * canvas.height();
+    let (low_label, high_label) = geometry::labels(&lane.foreground, min, max);
+    for (value, text) in [(min, low_label), (max, high_label)] {
+        let y = y_for(value).clamp(canvas.top() + 10.0, canvas.bottom() - 10.0);
+        label(ui, pos2(rect.left() + 4.0, y), text, MUTED);
+    }
+    if lane.foreground != Parameter::Rap {ui.painter().hline(
+        canvas.x_range(),
+        y_for(lane.foreground.default_value()),
+        Stroke::new(0.5, GRID),
+    );}
     let Some(reference) = app.editor.active_ref().cloned() else {
         return;
     };
-    if reference.visible_end() <= reference.blick_absolute_begin {
+    if matches!(lane.foreground, Parameter::VocalMode(_))
+        && app
+            .editor
+            .group()
+            .is_some_and(|g| g.automation(&lane.foreground).is_none())
+    {
+        ui.painter().text(
+            canvas.center(),
+            Align2::CENTER_CENTER,
+            crate::lformat!(
+                "尚未为 \"{}\" 设置参数编辑。\n点击开始编辑此唱法。",
+                crate::ui::parameter_label(&lane.foreground)
+            ),
+            FontId::proportional(12.0),
+            MUTED,
+        );
+        if response.clicked() {
+            app.editor.begin(crate::i18n::t("开始编辑唱法曲线"));
+            app.editor
+                .group_mut()
+                .unwrap()
+                .automation_mut(&lane.foreground);
+            app.editor.finish();
+        }
         return;
     }
-    let mapping = Mapping {
-        canvas,
-        reference,
-        viewport: app.view.piano.clone(),
-        target: lane.foreground.clone(),
-        zoom: lane.zoom,
-    };
-    for target in [&lane.foreground, &lane.background] {
-        if let Some(curve) = app.editor.automation(target)
-            && let Err(error) = curve.validate()
-        {
-            app.error = Some(error);
-            return;
-        }
-    }
-    gesture::interaction(app, ui, &response, &lane, &mapping);
-    let selected = if app
-        .parameter_lane
-        .owner
-        .as_ref()
-        .is_some_and(|owner| owner.lane == id && owner.target == lane.foreground)
-    {
-        app.parameter_lane.selected.clone()
-    } else {
-        BTreeSet::new()
-    };
-    paint::show(app, ui, &lane, &mapping, &selected);
-    gesture::selection_overlay(app, ui, id, &mapping);
-    playhead_line(ui, canvas, &app.view.piano, app.editor.transport.position);
-    if response.secondary_clicked() && app.gesture.is_none() {
-        super::phonemes::phoneme_deactivate(app);
-        app.commit_lyric();
+    reconcile(app);
+    if response.clicked() || response.drag_started() || response.secondary_clicked() {
+        selection::activate(app, &lane);
         ui.ctx().memory_mut(|memory| {
-            if let Some(id) = memory.focused() {
-                memory.surrender_focus(id);
-            }
+            if let Some(id)=memory.focused() {memory.surrender_focus(id);}
         });
-        focus(app, &lane);
     }
-    response.context_menu(|ui| {
-        focus(app, &lane);
-        let selected = parameter_has_selection(app);
-        if ui
-            .add_enabled(selected, Button::new("复制控制点"))
-            .clicked()
-        {
-            parameter_copy(app, ui.ctx());
-            ui.close();
-        }
-        if ui
-            .add_enabled(selected, Button::new("剪切控制点"))
-            .clicked()
-        {
-            parameter_cut(app, ui.ctx());
-            ui.close();
-        }
-        if ui
-            .add_enabled(parameter_can_paste(app), Button::new("粘贴控制点"))
-            .clicked()
-        {
-            parameter_paste(app, ui.ctx());
-            ui.close();
-        }
-        if ui
-            .add_enabled(selected, Button::new("删除控制点"))
-            .clicked()
-        {
-            parameter_delete(app);
-            ui.close();
-        }
-        if ui.button("选择全部控制点").clicked() {
-            parameter_select_all(app);
-            ui.close();
-        }
-        ui.separator();
-        if ui
-            .add_enabled(!app.editor.is_editing(), Button::new("清空此参数的控制点"))
-            .clicked()
-        {
-            app.editor.begin("清空参数控制点");
-            match app
-                .editor
-                .replace_automation_points(&lane.foreground, Vec::new())
-            {
-                Ok(_) => app.editor.finish(),
-                Err(error) => {
-                    app.editor.cancel();
-                    app.error = Some(error);
+    let offset = reference.blick_offset;
+    let group_clip = super::group_geometry::clip_rect(&reference, canvas, &app.view.piano);
+    if lane.background == Parameter::Rap {rap::show(app,ui,&response,canvas,false);}
+    for (parameter, color, editable) in [
+        (&lane.background, MUTED.gamma_multiply(0.5), false),
+        (&lane.foreground, GREEN, true),
+    ] {
+        if *parameter == Parameter::Rap {continue;}
+        let Some(curve) = app.editor.group().unwrap().automation(parameter) else {
+            continue;
+        };
+        let (low, high) = geometry::range(parameter, lane.zoom);
+        let map = |(t, v): (i64, f64)| {
+            pos2(
+                x_at(canvas, &app.view.piano, beats(t + offset)),
+                canvas.bottom() - ((v - low) / (high - low)) as f32 * canvas.height(),
+            )
+        };
+        let painter = ui
+            .painter()
+            .with_clip_rect(group_clip.intersect(ui.clip_rect()));
+        if curve.points.is_empty() {
+            let y = map((0, parameter.default_value())).y;
+            painter.hline(canvas.x_range(), y, Stroke::new(1.0, color));
+        } else {
+            let first = map(curve.points[0]);
+            let last = map(*curve.points.last().unwrap());
+            painter.hline(
+                canvas.left()..=first.x.max(canvas.left()).min(canvas.right()),
+                first.y,
+                Stroke::new(1.0, color),
+            );
+            painter.hline(
+                last.x.min(canvas.right()).max(canvas.left())..=canvas.right(),
+                last.y,
+                Stroke::new(1.0, color),
+            );
+            for pair in curve.points.windows(2) {
+                let a = map(pair[0]);
+                let b = map(pair[1]);
+                if curve.mode == "cosine" {
+                    let points: Vec<_> = (0..=24)
+                        .map(|i| {
+                            let t = i as f32 / 24.0;
+                            pos2(
+                                a.x + (b.x - a.x) * t,
+                                a.y + (b.y - a.y) * (1.0 - (t * std::f32::consts::PI).cos()) * 0.5,
+                            )
+                        })
+                        .collect();
+                    painter.add(Shape::line(points, Stroke::new(1.2, color)));
+                } else if curve.mode == "cubic" {
+                    let steps = ((b.x - a.x).abs().ceil() as usize).clamp(2, 1024);
+                    let points =
+                        (0..=steps)
+                            .map(|i| {
+                                let time = pair[0].0 as f64
+                                    + (pair[1].0 - pair[0].0) as f64 * i as f64 / steps as f64;
+                                map((
+                                    time.round() as i64,
+                                    f64::from(curve.sample(
+                                        time.round() as i64,
+                                        parameter.default_value() as f32,
+                                    )),
+                                ))
+                            })
+                            .collect();
+                    painter.add(Shape::line(points, Stroke::new(1.2, color)));
+                } else {
+                    painter.line_segment([a, b], Stroke::new(1.2, color));
                 }
             }
-            parameter_clear(app);
+            if editable && lane.tool == CurveTool::Point {
+                for &point in &curve.points {
+                    painter.circle_filled(map(point), if selection::contains(app,id,point.0) {4.0} else {2.0}, GREEN);
+                }
+            }
+        }
+    }
+    if lane.foreground == Parameter::Rap {
+        let y=canvas.center().y+1.0;
+        ui.painter().extend(Shape::dotted_line(&[pos2(canvas.left(),y),pos2(canvas.right(),y)], MUTED, 2.5, 0.5));
+        rap::show(app,ui,&response,canvas,true);
+        playhead_line(ui,canvas,&app.view.piano,app.editor.transport.position);
+        return;
+    }
+    let point_from = |p: Pos2, app: &App| {
+        let time = ticks(beat_at(canvas, &app.view.piano, p.x))
+            .clamp(reference.blick_absolute_begin, reference.visible_end() - 1)
+            - offset;
+        let value = (min + (canvas.bottom() - p.y) as f64 / canvas.height() as f64 * (max - min))
+            .clamp(min, max);
+        (time, value as f32 as f64)
+    };
+    let nearest = |p: Pos2, app: &App| {
+        app.editor
+            .group()
+            .unwrap()
+            .automation(&lane.foreground)
+            .and_then(|curve| {
+                curve
+                    .points
+                    .iter()
+                    .find(|(t, v)| {
+                        reference.contains(*t + offset)
+                            && pos2(x_at(canvas, &app.view.piano, beats(*t + offset)), y_for(*v))
+                                .distance(p)
+                                < 8.0
+                    })
+                    .map(|p| p.0)
+            })
+    };
+    gesture::interaction(app, ui, &response, canvas, &lane, group_clip);
+    if lane.tool == CurveTool::Point
+        && response.double_clicked()
+        && let Some(p) = response.interact_pointer_pos()
+        && group_clip.contains(p)
+    {
+        let (t, v) = point_from(p, app);
+        app.editor.begin(crate::i18n::t("添加参数控制点"));
+        app.editor
+            .group_mut()
+            .unwrap()
+            .automation_mut(&lane.foreground)
+            .insert(t, v);
+        app.editor.finish();
+    }
+    if lane.tool == CurveTool::Point && response.clicked()
+        && let Some(p)=response.interact_pointer_pos() {
+        selection::select(app, nearest(p,app), ui.input(|i|i.modifiers.shift));
+    }
+    if lane.tool == CurveTool::Point && response.drag_started_by(PointerButton::Primary)
+        && let Some(p)=ui.input(|i|i.pointer.press_origin())
+        && group_clip.contains(p) && let Some(time)=nearest(p,app) {
+        point_drag::begin(app,id,time);
+    }
+    if lane.tool == CurveTool::Point && response.dragged_by(PointerButton::Primary)
+        && let Some(p)=response.interact_pointer_pos() {
+        let point=point_from(p,app);point_drag::update(app,id,point);
+    }
+    if lane.tool == CurveTool::Point && response.drag_stopped_by(PointerButton::Primary) {
+        selection::finish_drag(app,true);
+    }
+    response.context_menu(|ui| {
+        selection::menu(app,ui);
+        if ui.button(crate::i18n::t("清空此参数的控制点")).clicked() {
+            app.editor.begin(crate::i18n::t("清空参数"));
+            app.editor
+                .group_mut()
+                .unwrap()
+                .automation_mut(&lane.foreground)
+                .points
+                .clear();
+            app.editor.finish();
             ui.close();
         }
     });
-    if response.hovered() {
-        app.status = match lane.tool {
-            ParameterTool::ControlPoints => {
-                "双击添加控制点 · 拖动移动 / 框选 · Ctrl+点击切换选择 · Shift+拖动选择时间范围"
-            }
-            ParameterTool::Freehand => {
-                "左键拖动手绘曲线 · 右键拖动擦除控制点 · Esc 取消 · Ctrl+Z 撤销"
-            }
-            ParameterTool::Line => "左键拖动绘制直线 · 右键拖动擦除控制点 · Esc 取消 · Ctrl+Z 撤销",
-        }
-        .into();
-        if !editable(app, &lane.foreground) {
-            app.status = "当前声库不支持口型参数；已导入的曲线仍可查看与清空".into();
-        }
-    }
-}
-
-pub fn parameter_cancel(app: &mut App, ctx: &Context) {
-    gesture::finish(app, ctx, true);
-}
-
-pub fn finish_parameter(app: &mut App, ctx: &Context) {
-    gesture::finish(app, ctx, false);
-}
-
-pub fn end_parameter_frame(app: &mut App, ctx: &Context) {
-    gesture::end_frame(app, ctx);
-    reconcile(app);
+    playhead_line(ui, canvas, &app.view.piano, app.editor.transport.position);
 }

@@ -3,7 +3,6 @@ use crate::synthesis::{
     voice::{Result, VoiceError},
 };
 
-/// Same-rate branch rows waiting for the corresponding temporal position.
 pub(super) struct Rows {
     channels: usize,
     values: Vec<f32>,

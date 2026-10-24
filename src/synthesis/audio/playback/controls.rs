@@ -6,10 +6,7 @@ pub(super) struct Controls {
     pub playing: AtomicBool,
     pub buffering: AtomicBool,
     pub gain: AtomicU32,
-    /// One atomic word contains a seek serial and absolute device-frame cursor.
-    /// The serial makes even seek(current_position) defeat an old callback's
-    /// compare_exchange. 20 serial bits cannot wrap within one device callback
-    /// under UI input; 44 frame bits hold years of project audio.
+
     pub position: AtomicU64,
     pub device_frames: u64,
     pub looping: LoopControl,

@@ -27,8 +27,14 @@ pub(super) fn prepare(
         .iter()
         .map(|seeds| seeds.unwrap_or_default().duration)
         .collect();
-    let mut current = DurationStage::prepare(voice.model("duration")?, identity)?
-        .predict_explicit_seeded(&phrase.records, &seeds, phrase.start_seconds)?;
+    let mut current = DurationStage::prepare(voice.model("duration")?, identity, voice.speaker)?
+        .predict_explicit_seeded(&phrase.records, &seeds)?;
+    if phrase.voice_parameters.consonant_duration!=0.0 {
+        current.durations=crate::synthesis::stages::duration::frontend::postprocess_controlled(
+            voice.model("duration")?,&phrase.records,&current.prediction,
+            phrase.voice_parameters.consonant_duration)?;
+    }
+    crate::synthesis::score::phonemes::apply(phrase,&mut current)?;
     let old = &base.duration;
     validate_arrays(&current)?;
     validate_arrays(old)?;
@@ -68,20 +74,13 @@ pub(super) fn prepare(
                 "Saved duration phone correspondence is invalid",
             ));
         }
-        // Keep all current schema indexes, including PhoneFeatures' record,
-        // left and right indexes. Only model values and allocations are reused.
+
         now.frames = previous.frames;
         now.duration_seconds = previous.duration_seconds;
-        current.default_durations[index].frames = old.default_durations[old_index].frames;
-        current.default_durations[index].duration_seconds =
-            old.default_durations[old_index].duration_seconds;
+        current.natural_frames[index]=old.natural_frames[old_index];
         current.prediction.scalars[index] = old.prediction.scalars[old_index];
         current.prediction.impulse_values[index] = old.prediction.impulse_values[old_index];
         current.prediction.impulse_positions[index] = old.prediction.impulse_positions[old_index];
-        current.prediction.default_impulse_values[index] =
-            old.prediction.default_impulse_values[old_index];
-        current.prediction.default_impulse_positions[index] =
-            old.prediction.default_impulse_positions[old_index];
         phone_rows.push(Some(old_index));
     }
     let phones = timed_phones(phrase, &current, mapping)?;
@@ -95,13 +94,11 @@ pub(super) fn prepare(
 fn validate_arrays(value: &DurationResult) -> Result<()> {
     let count = value.durations.len();
     if [
-        value.default_durations.len(),
+        value.natural_frames.len(),
         value.prediction.phones.len(),
         value.prediction.scalars.len(),
         value.prediction.impulse_values.len(),
         value.prediction.impulse_positions.len(),
-        value.prediction.default_impulse_values.len(),
-        value.prediction.default_impulse_positions.len(),
     ]
     .iter()
     .any(|&length| length != count)
@@ -137,7 +134,7 @@ fn timed_phones(
     duration: &DurationResult,
     mapping: &Mapping,
 ) -> Result<Vec<TimedPhone>> {
-    let mut totals = vec![0_usize; phrase.notes.len()];
+    let mut total=0_usize;
     let mut phones = Vec::with_capacity(duration.durations.len());
     for allocation in &duration.durations {
         let record = phrase
@@ -148,7 +145,7 @@ fn timed_phones(
             .phones
             .get(allocation.phone_index)
             .ok_or_else(|| VoiceError::new("Duration phone index is outside its record"))?;
-        totals[allocation.record_index] = totals[allocation.record_index]
+        total = total
             .checked_add(allocation.frames)
             .ok_or_else(|| VoiceError::new("Duration record frame count overflow"))?;
         phones.push(TimedPhone {
@@ -158,13 +155,9 @@ fn timed_phones(
             frames: allocation.frames,
         });
     }
-    if totals
-        .iter()
-        .zip(mapping.record_frames.windows(2))
-        .any(|(&total, bounds)| total != bounds[1] - bounds[0])
-    {
+    if total!=*mapping.record_frames.last().expect("validated note clock") {
         return Err(VoiceError::new(
-            "Local duration allocation changed a prepared record's frame count",
+            "Local phone clock does not cover the complete note clock",
         ));
     }
     Ok(phones)

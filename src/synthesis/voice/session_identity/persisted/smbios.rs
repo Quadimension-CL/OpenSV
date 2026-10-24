@@ -1,6 +1,3 @@
-//! Windows JUCE unique-device source used to derive the session file key.
-//! This is separate from the SID/CPUID input used by the duration identity hash.
-
 use super::{PrivateBytes, Result, VoiceError};
 
 pub(super) fn session_key() -> Result<[u8; 8]> {
@@ -46,7 +43,7 @@ pub(super) fn session_key() -> Result<[u8; 8]> {
             1 => {
                 append_line(&mut hash, field(4));
                 append_line(&mut hash, field(5));
-                // Iterate the stored 16 bytes, not GUID field order.
+
                 if remaining.len() > 0x18 {
                     const HEX: &[u8; 16] = b"0123456789ABCDEF";
                     for byte in &remaining[8..24] {
@@ -74,7 +71,7 @@ pub(super) fn session_key() -> Result<[u8; 8]> {
         }
         remaining = &remaining[cursor..];
     }
-    // Format the wrapped value as signed decimal, without padding.
+
     let decimal = PrivateBytes((hash as i64).to_string().into_bytes());
     Ok(hash_utf8(0, &decimal.0).to_le_bytes())
 }
@@ -83,8 +80,6 @@ fn append_line(hash: &mut u64, bytes: &[u8]) {
     *hash = hash_utf8(*hash, bytes).wrapping_mul(101).wrapping_add(10);
 }
 
-// Matches JUCE's UTF-8 codepoint walk, including its treatment of a malformed
-// continuation sequence. Device strings are not trimmed or case-normalized.
 fn hash_utf8(mut hash: u64, bytes: &[u8]) -> u64 {
     let mut cursor = 0;
     while let Some(&first) = bytes.get(cursor).filter(|byte| **byte != 0) {
@@ -131,13 +126,13 @@ fn firmware_table() -> Result<PrivateBytes> {
 
     const PROVIDER: u32 = 0x52534d42;
     const TABLE: u32 = 0x52534454;
-    // SAFETY: A null buffer requests only the size of the read-only firmware table.
+
     let size = unsafe { GetSystemFirmwareTable(PROVIDER, TABLE, ptr::null_mut(), 0) };
     if !(8..=16 * 1024 * 1024).contains(&size) {
         return Err(invalid_firmware());
     }
     let mut data = PrivateBytes(vec![0; size as usize]);
-    // SAFETY: data owns exactly size writable bytes. No firmware is modified.
+
     let written =
         unsafe { GetSystemFirmwareTable(PROVIDER, TABLE, data.0.as_mut_ptr().cast(), size) };
     if written != size {

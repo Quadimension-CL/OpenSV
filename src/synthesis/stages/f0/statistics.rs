@@ -1,13 +1,10 @@
-//! Vowel-restricted pitch statistics and control weights.
-
 use crate::synthesis::voice::{Result, VoiceError};
 
-/// Frame-aligned syllable bounds produced by the duration front end.
 #[derive(Clone, Copy, Debug)]
 pub struct SyllableRange {
     pub start: usize,
     pub end: usize,
-    /// Note pitch plus the syllable's pitch offset, in the prediction's units.
+
     pub baseline: f32,
 }
 
@@ -18,8 +15,7 @@ pub struct SamplerStatistics {
 }
 
 impl SamplerStatistics {
-    /// Estimates one value per syllable and broadcasts it across that syllable.
-    /// Vowels and diphthongs contribute; all other phone categories are masked.
+
     pub fn estimate(
         pitch: &[f32],
         vowel_mask: &[bool],
@@ -58,8 +54,7 @@ impl SamplerStatistics {
             levels.clear();
             for frame in syllable.start..syllable.end {
                 if vowel_mask[frame] {
-                    // The derivative crosses syllable boundaries; only the
-                    // first frame of the entire prediction has derivative 0.
+
                     differences.push(if frame == 0 {
                         0.0
                     } else {
@@ -72,8 +67,7 @@ impl SamplerStatistics {
                 continue;
             }
             let vowel_frames = levels.len() as f32;
-            // Preserve multiplication order and select the lower order statistic;
-            // do not average the two middle values for even counts.
+
             let slope = vowel_frames * (percentile(&mut differences, 0.5) * 0.05);
             let offset = percentile(&mut levels, 0.8) - syllable.baseline;
             result.slope[syllable.start..syllable.end].fill(slope);
@@ -88,10 +82,6 @@ fn percentile(values: &mut [f32], quantile: f32) -> f32 {
     *values.select_nth_unstable_by(index, f32::total_cmp).1
 }
 
-/// Per-frame coefficient used when accumulating a projected control embedding.
-/// Positive scales use a rational approximation to
-/// `2 * sigmoid(abs(delta * scale)) - 1`; nonpositive scales preserve `delta`.
-/// The sampler uses scales 10 for slope, 5 for offset, and 0 for raw controls.
 pub fn control_weight(delta: f32, scale: f32) -> f32 {
     if scale <= 0.0 {
         return delta;

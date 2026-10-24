@@ -1,10 +1,3 @@
-//! Phase-aligned seams for replacing published PCM blocks.
-//!
-//! Callers provide old and newly rendered samples on the same absolute clock;
-//! this module does not choose model context or invalidation ranges. Matching
-//! uses the first internal vocoder component and applies the same displacement
-//! and time warp to both components, before they are mixed to playback mono.
-
 mod head;
 mod interpolate;
 mod tail;
@@ -14,28 +7,25 @@ use crate::synthesis::voice::{Result, VoiceError};
 pub use head::splice_head;
 pub use tail::splice_tail;
 
-/// Live preview's sample rate and publication block size.
 pub const PREVIEW_SAMPLE_RATE: u32 = 48_000;
 pub const PREVIEW_BLOCK_SAMPLES: usize = 24_000;
 const MAX_FADE_SAMPLES: usize = 1_024;
 
 #[derive(Debug)]
 pub struct HeadSplice {
-    /// Starts at the same absolute sample as `fresh`, including the old block
-    /// preceding the replacement. Samples before its fade retain old PCM.
+
     pub samples: [Vec<f32>; 2],
-    /// `output[t]` reads `fresh[t + shift_samples]` after the head fade.
+
     pub shift_samples: i32,
 }
 
 #[derive(Debug)]
 pub struct TailSplice {
-    /// Starts at the shared old/new origin and covers complete output blocks.
-    /// The last block's samples beyond the fade retain the old PCM.
+
     pub samples: [Vec<f32>; 2],
-    /// The selected comparison anchor in the unwarped new PCM.
+
     pub anchor: usize,
-    /// The final fade starts at `anchor + shift_samples`.
+
     pub shift_samples: i32,
     pub fade_samples: usize,
 }

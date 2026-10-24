@@ -24,11 +24,11 @@ pub(super) fn draw(
     let tempo = &snapshot.input.tempo;
     let active = app.editor.reference == Some(group.reference.id);
     let color = Color32::from_rgba_unmultiplied(213, 210, 213, if active { 150 } else { 78 });
+    super::pitch_band::draw(app,painter,canvas,pitch,tempo,active);
     curve(app, painter, canvas, pitch, tempo, Stroke::new(1.0, color));
     if active && !app.piano_tool.is_pitch() {
         let selected_ink = foreground(TrackColors::new(app.editor.current_track()).accent);
-        // Current note rectangles affect only contrast over the selection;
-        // the curve's geometry always uses its completed render's tempo map.
+
         for note in group
             .notes
             .iter()
@@ -117,8 +117,6 @@ fn curve(
     }
 }
 
-// Keep extrema in temporal order when zoomed out, so downsampling cannot erase
-// vibrato peaks. At most four points are emitted for one physical pixel.
 struct PixelBucket {
     pixel: i64,
     first: (usize, Pos2),

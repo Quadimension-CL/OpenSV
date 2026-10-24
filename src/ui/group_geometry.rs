@@ -33,7 +33,7 @@ pub fn visible_note_rect(
     .intersect(canvas);
     (rect.is_positive()).then_some(rect)
 }
-/// A label follows the visible beginning, but never escapes its group's right edge.
+
 pub fn label_rect(group: Rect, canvas: Rect, width: f32) -> Option<Rect> {
     let left = group.left().max(canvas.left());
     let right = group.right().min(canvas.right());

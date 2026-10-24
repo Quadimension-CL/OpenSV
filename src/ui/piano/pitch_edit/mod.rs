@@ -1,4 +1,3 @@
-//! A captured freehand stroke edits one group and one undo transaction.
 mod draw;
 
 pub(super) use draw::draw;
@@ -109,12 +108,12 @@ fn start(app: &mut App, ctx: &Context, canvas: Rect, pos: Pos2, button: PointerB
         return false;
     }
     let Some(reference) = app.editor.active_ref().cloned() else {
-        app.status = "请先点击音符组标题，再绘制音高曲线".into();
+        app.status = crate::i18n::t("请先点击音符组标题，再绘制音高曲线").into();
         return false;
     };
     let global = ticks(beat_at(canvas, &app.view.piano, pos.x));
     if !reference.contains(global) {
-        app.status = "请在当前音符组范围内绘制音高，点击标题可切换音符组".into();
+        app.status = crate::i18n::t("请在当前音符组范围内绘制音高，点击标题可切换音符组").into();
         return false;
     }
     let Some(group) = app.editor.group() else {
@@ -135,9 +134,9 @@ fn start(app: &mut App, ctx: &Context, canvas: Rect, pos: Pos2, button: PointerB
         return false;
     }
     app.editor.begin(if button == PointerButton::Primary {
-        "手绘音高"
+        crate::i18n::t("手绘音高")
     } else {
-        "擦除手绘音高"
+        crate::i18n::t("擦除手绘音高")
     });
     app.gesture = Some(Gesture::Pitch(Box::new(PitchGesture {
         track: app.editor.track,
@@ -260,7 +259,6 @@ fn finish(app: &mut App, ctx: &Context, cancel: bool) {
     ctx.request_repaint();
 }
 
-/// Close the transaction even if the canvas disappeared or the pointer left the app.
 pub fn end_pitch_frame(app: &mut App, ctx: &Context) {
     let Some(Gesture::Pitch(gesture)) = &app.gesture else {
         return;

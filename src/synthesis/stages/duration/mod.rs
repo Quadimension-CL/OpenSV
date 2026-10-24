@@ -1,15 +1,11 @@
-//! Explicit-phone duration prediction and seeded duration sampling.
-//!
-//! A zero seed uses the deterministic scalar head. Other records use the
-//! noise-conditioned head while retaining the same context and timing rules.
-
 mod attention;
 pub(crate) mod context;
-mod controls;
 pub(crate) mod encoding;
 pub mod frontend;
 mod heads;
 mod sampling;
+#[cfg(feature = "acoustic-diagnostic")]
+pub mod diagnostic;
 
 use crate::synthesis::voice::{
     DURATION_ROOT_TYPE_ID, DurationConfiguration, PreparedModule, PreparedTree, Result, VoiceError,
@@ -24,54 +20,30 @@ pub struct DurationStage<'a> {
     children: [usize; 14],
     configuration: DurationConfiguration,
     identity_bias: Vec<f32>,
+    speaker: Option<usize>,
 }
 
-/// Model outputs before the frontend redistributes frames within each record.
 #[derive(Debug, Serialize)]
 pub struct DurationPrediction {
     pub phones: Vec<PhoneFeatures>,
     pub scalars: Vec<f32>,
-    /// Discrete head index / (bins - 1). The timbre
-    /// record consumer uses this as an impulse value; zero suppresses writeback.
+
     pub impulse_values: Vec<f64>,
-    /// Softmax-weighted index / (bins - 1), used by timbre
-    /// to place that impulse within the phoneme's frames.
+
     pub impulse_positions: Vec<f32>,
-    pub default_impulse_values: Vec<f64>,
-    pub default_impulse_positions: Vec<f32>,
 }
 
 #[derive(Debug, Serialize)]
 pub struct DurationResult {
     pub durations: Vec<PhoneDuration>,
-    pub default_durations: Vec<PhoneDuration>,
-    pub supports_timing: bool,
-    pub supports_strength: bool,
+
+    pub natural_frames: Vec<usize>,
     pub prediction: DurationPrediction,
 }
 
-impl DurationResult {
-    pub(crate) fn new(
-        records: &[DurationRecord],
-        mut prediction: DurationPrediction,
-        default_durations: Vec<PhoneDuration>,
-        durations: Vec<PhoneDuration>,
-    ) -> Result<Self> {
-        controls::apply_impulses(records, &mut prediction)?;
-        Ok(Self {
-            durations,
-            default_durations,
-            supports_timing: true,
-            supports_strength: true,
-            prediction,
-        })
-    }
-}
-
 impl<'a> DurationStage<'a> {
-    /// `identity` is the 64-bit bank/session model condition, not a random
-    /// synthesis seed.
-    pub fn prepare(tree: &'a PreparedTree, identity: u64) -> Result<Self> {
+
+    pub fn prepare(tree: &'a PreparedTree, identity: u64, speaker: Option<usize>) -> Result<Self> {
         #[cfg(feature = "synth-profile")]
         let _profile = crate::synthesis::profiling::span("duration.prepare");
         let root = tree.node(tree.root_index())?;
@@ -87,17 +59,14 @@ impl<'a> DurationStage<'a> {
         let PreparedModule::Affine(input) = &tree.node(children[5])?.module else {
             return Err(VoiceError::new("Duration input projection is not prepared"));
         };
-        let constant_width = tree
-            .tensor(children[1])?
-            .vector()
-            .ok_or_else(|| VoiceError::new("Duration fixed conditioning is not a float vector"))?
-            .len();
+        let constant_width =
+            crate::synthesis::voice::speakers::vector(tree, children[1], speaker)?.len();
         configuration.validate_input_projection(
             input.output_features,
             input.input_features,
             constant_width,
         )?;
-        // Expand the identity from most significant to least significant bit.
+
         let identity_bits: Vec<f32> = (0..64)
             .map(|index| ((identity >> (63 - index)) & 1) as f32)
             .collect();
@@ -112,37 +81,25 @@ impl<'a> DurationStage<'a> {
             children,
             configuration,
             identity_bias,
+            speaker,
         })
     }
 
-    pub fn predict_explicit(
-        &self,
-        records: &[DurationRecord],
-        phrase_start_seconds: f64,
-    ) -> Result<DurationResult> {
+    pub fn predict_explicit(&self, records: &[DurationRecord]) -> Result<DurationResult> {
         let phones = frontend::prepare_explicit(self.tree, records)?;
         let prediction = self.predict(phones)?;
-        let allocation = frontend::postprocess(
-            self.tree,
-            records,
-            &prediction.scalars,
-            phrase_start_seconds,
-        )?;
-        DurationResult::new(
-            records,
+        let durations = frontend::postprocess(self.tree, records, &prediction.scalars)?;
+        Ok(DurationResult {
+            natural_frames: durations.iter().map(|phone|phone.frames).collect(),
+            durations,
             prediction,
-            allocation.default_durations,
-            allocation.durations,
-        )
+        })
     }
 
-    /// Each record has an independent duration seed; zero selects its default
-    /// prediction. Seeds remain attached to records with no phonemes as well.
     pub fn predict_explicit_seeded(
         &self,
         records: &[DurationRecord],
         seeds: &[u32],
-        phrase_start_seconds: f64,
     ) -> Result<DurationResult> {
         if records.len() != seeds.len() {
             return Err(VoiceError::new(
@@ -151,21 +108,14 @@ impl<'a> DurationStage<'a> {
         }
         let phones = frontend::prepare_explicit(self.tree, records)?;
         let prediction = self.predict_with_seeds(phones, Some(seeds))?;
-        let allocation = frontend::postprocess(
-            self.tree,
-            records,
-            &prediction.scalars,
-            phrase_start_seconds,
-        )?;
-        DurationResult::new(
-            records,
+        let durations = frontend::postprocess(self.tree, records, &prediction.scalars)?;
+        Ok(DurationResult {
+            natural_frames: durations.iter().map(|phone|phone.frames).collect(),
+            durations,
             prediction,
-            allocation.default_durations,
-            allocation.durations,
-        )
+        })
     }
 
-    /// Execute real explicit-phone conditions on the default, non-retake path.
     pub fn predict(&self, phones: Vec<PhoneFeatures>) -> Result<DurationPrediction> {
         self.predict_with_seeds(phones, None)
     }
@@ -181,13 +131,23 @@ impl<'a> DurationStage<'a> {
                 scalars: Vec::new(),
                 impulse_values: Vec::new(),
                 impulse_positions: Vec::new(),
-                default_impulse_values: Vec::new(),
-                default_impulse_positions: Vec::new(),
             });
         }
-        let features = encoding::encode(self.tree, &self.children, self.configuration, &phones)?;
+        let constant =
+            crate::synthesis::voice::speakers::vector(self.tree, self.children[1], self.speaker)?;
+        let features = encoding::encode(
+            self.tree,
+            &self.children,
+            self.configuration,
+            &phones,
+            constant,
+        )?;
         let width = self.identity_bias.len();
+        #[cfg(feature = "acoustic-diagnostic")]
+        diagnostic::capture("input_features", phones.len(), &features)?;
         let mut encoded = self.tree.execute_node(self.children[5], &features)?;
+        #[cfg(feature = "acoustic-diagnostic")]
+        diagnostic::capture("input_projection", phones.len(), &encoded)?;
         if encoded.len() != phones.len() * width {
             return Err(VoiceError::new("Duration projection frame count changed"));
         }
@@ -196,9 +156,15 @@ impl<'a> DurationStage<'a> {
                 *value += bias;
             }
         }
+        #[cfg(feature = "acoustic-diagnostic")]
+        diagnostic::capture("conditioned_projection", phones.len(), &encoded)?;
         for node in &self.tree.node(self.children[7])?.children {
             encoded = context::encode(self.tree, *node, &encoded, width)?;
+            #[cfg(feature = "acoustic-diagnostic")]
+            diagnostic::capture(&format!("context_node_{node}"), phones.len(), &encoded)?;
         }
+        #[cfg(feature = "acoustic-diagnostic")]
+        diagnostic::capture("context_to_scalar_head", phones.len(), &encoded)?;
         let scalars =
             sampling::predict(self.tree, &self.children, &encoded, width, &phones, seeds)?;
         if scalars.len() != phones.len() || scalars.iter().any(|v| !v.is_finite()) {
@@ -206,7 +172,7 @@ impl<'a> DurationStage<'a> {
                 "Duration prediction is not one finite scalar per phone",
             ));
         }
-        // Project the scalar back into context space before both heads.
+
         let mut head_input = self.tree.execute_node(self.children[11], &scalars)?;
         if head_input.len() != encoded.len() {
             return Err(VoiceError::new(
@@ -231,8 +197,6 @@ impl<'a> DurationStage<'a> {
         Ok(DurationPrediction {
             phones,
             scalars,
-            default_impulse_values: impulse_values.clone(),
-            default_impulse_positions: impulse_positions.clone(),
             impulse_values,
             impulse_positions,
         })

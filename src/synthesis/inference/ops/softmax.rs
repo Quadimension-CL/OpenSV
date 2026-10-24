@@ -1,8 +1,3 @@
-//! CPU attention normalization.
-//!
-//! Uses a log normalizer and a second exponential pass; replacing
-//! that pass with division by the exponential sum changes its f32 results.
-
 use std::fmt;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -24,9 +19,6 @@ impl fmt::Display for SoftmaxError {
 
 impl std::error::Error for SoftmaxError {}
 
-/// Normalizes one attention row in place. Scores already include attention
-/// scaling, relative-position terms, and the finite masking value.
-/// Validation finishes before modifying the buffer.
 pub fn execute(values: &mut [f32]) -> Result<(), SoftmaxError> {
     let count = u32::try_from(values.len()).map_err(|_| SoftmaxError::TooManyValues)?;
     if let Some(position) = values.iter().position(|value| !value.is_finite()) {
@@ -49,8 +41,7 @@ pub fn execute(values: &mut [f32]) -> Result<(), SoftmaxError> {
             *sum += (value - maximum).exp();
         }
     }
-    // Merge the two groups of four accumulation lanes, then reduce
-    // (lane 3 + lane 1) + (lane 2 + lane 0), before the scalar remainder.
+
     let merged = std::array::from_fn::<_, 4, _>(|lane| lanes[lane + 4] + lanes[lane]);
     let mut sum = (merged[3] + merged[1]) + (merged[2] + merged[0]);
     for &value in remainder {

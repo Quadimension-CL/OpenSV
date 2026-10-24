@@ -1,8 +1,3 @@
-//! Six-child duration program for SV1 NOFS models.
-//!
-//! Its conditioning is a stored model vector. It has neither a session identity
-//! projection nor the impulse heads of the newer duration programs.
-
 mod configuration;
 mod encoding;
 mod frontend;
@@ -21,8 +16,7 @@ pub struct Sv1DurationStage<'a> {
 
 pub struct Sv1DurationResult {
     pub result: DurationResult,
-    /// Derived record targets after stop/semivowel time borrowing. The F0
-    /// note clock consumes these values rather than the original score times.
+
     pub record_seconds: Vec<f64>,
 }
 
@@ -53,23 +47,17 @@ impl<'a> Sv1DurationStage<'a> {
         };
         let (durations, record_seconds) =
             postprocess::execute(self.tree, self.children[0], records, &scalars)?;
-        let mut result = DurationResult::new(
-            records,
-            DurationPrediction {
-                phones,
-                scalars,
-                impulse_values: Vec::new(),
-                impulse_positions: Vec::new(),
-                default_impulse_values: Vec::new(),
-                default_impulse_positions: Vec::new(),
-            },
-            durations.clone(),
-            durations,
-        )?;
-        result.supports_timing = false;
-        result.supports_strength = false;
         Ok(Sv1DurationResult {
-            result,
+            result: DurationResult {
+                natural_frames: durations.iter().map(|phone|phone.frames).collect(),
+                durations,
+                prediction: DurationPrediction {
+                    phones,
+                    scalars,
+                    impulse_values: Vec::new(),
+                    impulse_positions: Vec::new(),
+                },
+            },
             record_seconds,
         })
     }

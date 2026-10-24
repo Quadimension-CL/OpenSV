@@ -44,7 +44,7 @@ pub fn grid(ui: &Ui, rect: Rect, view: &Viewport, time: &TimeAxis, step: f64) {
 
 pub fn draw_ruler(ui: &Ui, rect: Rect, view: &Viewport, time: &TimeAxis, step: f64) {
     let painter = ui.painter().with_clip_rect(rect.intersect(ui.clip_rect()));
-    // Anchor the ticks to the baseline, independently of the surrounding header height.
+
     let baseline = rect.bottom();
     for beat in visible_steps(rect, view, step) {
         painter.vline(
@@ -74,14 +74,18 @@ pub fn playhead_line(ui: &Ui, rect: Rect, view: &Viewport, position: i64) {
 }
 
 pub fn playhead(ui: &Ui, rect: Rect, baseline: f32, view: &Viewport, position: i64) {
-    playhead_line(
-        ui,
-        Rect::from_min_max(pos2(rect.left(), baseline), rect.max),
-        view,
-        position,
-    );
+    playhead_color(ui,rect,baseline,view,position,TEXT);
+}
+
+pub fn hover_playhead(ui: &Ui, rect: Rect, baseline: f32, view: &Viewport, position: i64) {
+    playhead_color(ui,rect,baseline,view,position,
+        Color32::from_rgba_unmultiplied(TEXT.r(),TEXT.g(),TEXT.b(),128));
+}
+
+fn playhead_color(ui: &Ui, rect: Rect, baseline: f32, view: &Viewport, position: i64, color: Color32) {
     let x = x_at(rect, view, beats(position));
     let painter = ui.painter().with_clip_rect(rect.intersect(ui.clip_rect()));
+    painter.vline(x,baseline..=rect.bottom(),Stroke::new(1.0,color));
     let top = baseline - 14.0;
     painter.rect_filled(
         Rect::from_min_size(pos2(x - 4.0, top), vec2(8.0, 9.0)),
@@ -91,7 +95,7 @@ pub fn playhead(ui: &Ui, rect: Rect, baseline: f32, view: &Viewport, position: i
             sw: 0,
             se: 0,
         },
-        TEXT,
+        color,
     );
     painter.add(Shape::convex_polygon(
         vec![
@@ -101,7 +105,7 @@ pub fn playhead(ui: &Ui, rect: Rect, baseline: f32, view: &Viewport, position: i
             pos2(x, baseline),
             pos2(x - 4.0, top + 9.0),
         ],
-        TEXT,
+        color,
         Stroke::NONE,
     ));
 }

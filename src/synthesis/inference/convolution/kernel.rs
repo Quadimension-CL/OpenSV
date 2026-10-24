@@ -1,6 +1,3 @@
-//! Four independent frames by eight independent output channels. The reduction
-//! dimension always traverses taps, then inputs; no horizontal sum or FMA.
-
 mod parallel;
 mod sse2;
 
@@ -46,6 +43,22 @@ impl PackedWeights {
         let inputs = self.input_channels();
         let outputs = self.output_channels();
         let frames = output.len() / outputs;
+        if let Some(taps)=&self.integer_taps {
+            for (frame,target) in output.chunks_exact_mut(outputs).enumerate() {
+                check_cancelled(cancellation)?;target.fill(0.0);
+                for (tap,matrix) in taps.iter().enumerate() {
+                    if let Some(source)=source_row(pending,first_frame+frame,tap,inputs,config) {
+                        if !matrix.integer_frame(source,target,true) {
+                            for (channel,value) in target.iter_mut().enumerate() {
+                                for (&weight,&input) in matrix.row(channel).iter().zip(source) {*value+=weight*input;}
+                            }
+                        }
+                    }
+                }
+                if let Some(bias)=bias {for (value,bias) in target.iter_mut().zip(bias) {*value+=bias;}}
+            }
+            return Ok(());
+        }
         for (block, weights) in self.blocks().enumerate() {
             check_cancelled(cancellation)?;
             let channel = block * OUTPUT_BLOCK;
@@ -64,9 +77,7 @@ impl PackedWeights {
                     if let [Some(a), Some(b), Some(c), Some(d)] = rows {
                         accumulate_four(weights, [a, b, c, d], &mut sums);
                     } else {
-                        // Missing right-padding rows contribute nothing.
-                        // Actual left-padding zero rows still pass through
-                        // the multiply/add loop.
+
                         for (sum, row) in sums.iter_mut().zip(rows) {
                             if let Some(row) = row {
                                 accumulate_one(weights, row, sum);
@@ -101,9 +112,15 @@ impl PackedWeights {
         check_cancelled(cancellation)
     }
 
-    /// Transpose overlap-add calls this in chronological frame/tap order, with
-    /// each destination already containing its bias and earlier contributions.
     pub(super) fn accumulate(&self, tap: usize, source: &[f32], target: &mut [f32]) {
+        if let Some(taps)=&self.integer_taps {
+            let matrix=&taps[tap];
+            if matrix.integer_frame(source,target,true) {return;}
+            for (channel,value) in target.iter_mut().enumerate() {
+                for (&weight,&input) in matrix.row(channel).iter().zip(source) {*value+=weight*input;}
+            }
+            return;
+        }
         let tap_start = tap * self.input_channels() * OUTPUT_BLOCK;
         let tap_end = tap_start + self.input_channels() * OUTPUT_BLOCK;
         for (weights, target) in self.blocks().zip(target.chunks_mut(OUTPUT_BLOCK)) {
@@ -131,7 +148,7 @@ fn source_row(
     inputs: usize,
     config: ConvolutionConfig,
 ) -> Option<&[f32]> {
-    // execute_pending checks the largest frame/tap address before calling us.
+
     let start = (frame * config.stride + tap * config.dilation) * inputs;
     pending.get(start..start + inputs)
 }

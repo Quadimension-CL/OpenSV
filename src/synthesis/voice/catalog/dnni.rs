@@ -1,7 +1,7 @@
 use super::{
     VoiceAvailability, VoiceCatalog, VoiceCatalogEntry, metadata::MetadataIndex, resource,
 };
-use crate::synthesis::voice::{Result, VoiceFamily, format::FormatContext};
+use crate::synthesis::voice::{Result, VoiceFamily, VoiceRevision, format::FormatContext};
 use std::{fs, path::Path};
 
 pub(super) fn scan(
@@ -25,10 +25,15 @@ pub(super) fn scan(
         if !revision.file_type()?.is_dir() {
             continue;
         }
-        let Ok(version) = revision.file_name().to_string_lossy().parse::<u32>() else {
+        let Ok(version) = revision
+            .file_name()
+            .to_string_lossy()
+            .parse::<VoiceRevision>()
+        else {
             continue;
         };
         let mut entry = VoiceCatalogEntry {
+            configuration: None,
             database_id: database_id.to_string(),
             revision: version,
             model_version: None,
@@ -39,11 +44,13 @@ pub(super) fn scan(
             genres: Vec::new(),
             pitch_range: None,
             languages: Vec::new(),
-            icon_path: None,
+            icon: None,
+            portrait: None,
             availability: VoiceAvailability::Loadable,
         };
         match resource::configuration(&entry.directory, &context) {
             Ok(configuration) => {
+                entry.configuration = Some(configuration.metadata.clone());
                 entry.model_version = Some(configuration.model_version);
                 let family = if configuration.model_version == 1 {
                     VoiceFamily::Sv2Compatible
@@ -64,15 +71,18 @@ pub(super) fn scan(
                 entry.display_name = configuration.name;
                 entry.vendor = configuration.vendor;
                 entry.languages = configuration.languages;
+                entry.icon = configuration.icon;
+                entry.portrait = configuration.portrait;
                 if let Some(display) = metadata.lookup(&entry.display_name, &entry.vendor) {
                     entry.genres.clone_from(&display.genres);
                     entry.pitch_range.clone_from(&display.pitch_range);
-                    // Product metadata names the voice's native languages, not every
-                    // language the inference model can synthesize.
+
                     if !display.languages.is_empty() {
                         entry.languages.clone_from(&display.languages);
                     }
-                    entry.icon_path.clone_from(&display.icon_path);
+                    if entry.icon.is_none() {
+                        entry.icon = display.icon_path.clone().map(|path| super::VoiceArtwork::File {path});
+                    }
                 }
             }
             Err(error) => {

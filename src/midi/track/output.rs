@@ -11,7 +11,7 @@ impl Track {
         ppqn: u16,
         warnings: &mut Vec<String>,
     ) -> Result<Vec<MidiTrack>, String> {
-        // Notes without note-offs close at the track's explicit/logical end.
+
         for note in &mut self.notes {
             if note.end.is_none() {
                 note.end = Some(end);
@@ -24,8 +24,7 @@ impl Track {
                 onsets.entry(note.onset).or_default().push(index);
             }
         }
-        // Lyrics carry an explicit MIDI timestamp. Match that onset exactly;
-        // do not silently shift unmatched lyrics to unrelated later notes.
+
         for (onset, lyrics) in std::mem::take(&mut self.lyrics) {
             let candidates = onsets.get(&onset).map(Vec::as_slice).unwrap_or_default();
             self.diagnostics.unmatched_lyrics += lyrics.len().saturating_sub(candidates.len());

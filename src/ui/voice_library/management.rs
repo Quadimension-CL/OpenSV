@@ -29,10 +29,10 @@ enum Sort {
 impl Sort {
     fn label(self) -> &'static str {
         match self {
-            Self::Default => "默认",
-            Self::Name => "名称 A–Z",
-            Self::NameReverse => "名称 Z–A",
-            Self::Version => "版本最新",
+            Self::Default => crate::i18n::t("默认"),
+            Self::Name => crate::i18n::t("名称 A–Z"),
+            Self::NameReverse => crate::i18n::t("名称 Z–A"),
+            Self::Version => crate::i18n::t("版本最新"),
         }
     }
 }
@@ -42,7 +42,7 @@ struct State {
     sort: Sort,
     language: String,
     vendor: String,
-    versions: BTreeMap<String, u32>,
+    versions: BTreeMap<String, crate::synthesis::voice::VoiceRevision>,
     expanded: Option<String>,
     root: Option<PathBuf>,
     sv1_root: Option<PathBuf>,
@@ -69,6 +69,7 @@ pub fn dialogs(app: &mut App, ctx: &Context) {
         ctx.data_mut(|data| data.remove::<State>(id));
     }
     context::dialog(app, ctx);
+    super::style_presets::dialog(app, ctx);
 }
 
 fn show(app: &mut App, ctx: &Context, state: &mut State) {
@@ -110,14 +111,14 @@ fn show(app: &mut App, ctx: &Context, state: &mut State) {
                     if app.synthesis.library.is_scanning() {
                         ui.horizontal(|ui| {
                             ui.spinner();
-                            text(ui, "正在扫描歌声…");
+                            text(ui, crate::i18n::t("正在扫描歌声…"));
                         });
                         return;
                     }
                     if let Some(error) = app.synthesis.library.settings_error() {
-                        error_label(ui, "无法读取声库列表");
-                        ui.collapsing("查看原因", |ui| error_label(ui, error));
-                        ui.menu_button("选择声库目录…", |ui| {
+                        error_label(ui, crate::i18n::t("无法读取声库列表"));
+                        ui.collapsing(crate::i18n::t("查看原因"), |ui| error_label(ui, error));
+                        ui.menu_button(crate::i18n::t("选择声库目录…"), |ui| {
                             paths::directory_menu(app, ui)
                         });
                         return;
@@ -131,13 +132,13 @@ fn show(app: &mut App, ctx: &Context, state: &mut State) {
                                 .catalog()
                                 .is_some_and(|catalog| !catalog.entries.is_empty())
                             {
-                                "部分声库目录无法读取"
+                                crate::i18n::t("部分声库目录无法读取")
                             } else {
-                                "无法读取声库目录"
+                                crate::i18n::t("无法读取声库目录")
                             },
                         );
-                        ui.collapsing("查看原因", |ui| error_label(ui, error));
-                        ui.menu_button("选择声库目录…", |ui| {
+                        ui.collapsing(crate::i18n::t("查看原因"), |ui| error_label(ui, error));
+                        ui.menu_button(crate::i18n::t("选择声库目录…"), |ui| {
                             paths::directory_menu(app, ui)
                         });
                         ui.add_space(12.0);
@@ -168,12 +169,12 @@ fn empty(app: &mut App, ui: &mut Ui, state: &mut State) {
             if !state.query.is_empty() || !state.language.is_empty() || !state.vendor.is_empty() {
                 text(
                     ui,
-                    RichText::new("没有匹配的歌声")
+                    RichText::new(crate::i18n::t("没有匹配的歌声"))
                         .font(section_title_font())
                         .size(16.0),
                 );
-                weak(ui, "换一个关键词，或清除筛选条件。");
-                if ui.button("清除搜索与筛选").clicked() {
+                weak(ui, crate::i18n::t("换一个关键词，或清除筛选条件。"));
+                if ui.button(crate::i18n::t("清除搜索与筛选")).clicked() {
                     state.query.clear();
                     state.language.clear();
                     state.vendor.clear();
@@ -181,12 +182,12 @@ fn empty(app: &mut App, ui: &mut Ui, state: &mut State) {
             } else {
                 text(
                     ui,
-                    RichText::new("没有可显示的声库")
+                    RichText::new(crate::i18n::t("没有可显示的声库"))
                         .font(section_title_font())
                         .size(16.0),
                 );
-                weak(ui, "选择本机 databases 目录，扫描已安装的歌声。");
-                ui.menu_button("选择声库目录…", |ui| paths::directory_menu(app, ui));
+                weak(ui, crate::i18n::t("选择本机 databases 目录，扫描已安装的歌声。"));
+                ui.menu_button(crate::i18n::t("选择声库目录…"), |ui| paths::directory_menu(app, ui));
             }
         });
 }

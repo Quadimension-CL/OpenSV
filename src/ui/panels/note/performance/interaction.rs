@@ -56,7 +56,6 @@ pub(super) fn apply(
     }
 }
 
-/// A hidden panel or a lost pointer must not leave a project transaction open.
 pub(crate) fn end_frame(app: &mut App, ctx: &Context) {
     let gesture = ctx.data_mut(|data| data.get_temp::<Gesture>(gesture_id()));
     let Some(gesture) = gesture else {

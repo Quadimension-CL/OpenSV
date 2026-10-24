@@ -19,6 +19,14 @@ impl Runtime {
             return;
         }
         let source = dialog.source;
+        let session_key = if source == ContextImportSource::SessionFile && dialog.session_key_required {
+            match session_identity::parse_session_key(&dialog.session_key) {
+                Ok(key) => Some(Zeroizing::new(key)),
+                Err(error) => { dialog.error = Some(error.to_string()); return; }
+            }
+        } else { None };
+        use zeroize::Zeroize;
+        dialog.session_key.zeroize();
         let session_path = dialog.session_path.clone();
         let path = dialog.file_path.clone();
         let identity = Zeroizing::new(dialog.manual_identity.clone());
@@ -30,11 +38,13 @@ impl Runtime {
         self.context_import.feedback = None;
         self.start_context_task("model-context-import", move || {
             let result = match source {
-                ContextImportSource::SessionFile => session_identity::import_session_context(
-                    &voice_name,
-                    model_version,
-                    &session_path.expect("validated session path"),
-                ),
+                ContextImportSource::SessionFile => {
+                    let path = session_path.expect("validated session path");
+                    match session_key {
+                        Some(key) => session_identity::import_session_context_with_key(&voice_name, model_version, &path, *key),
+                        None => session_identity::import_session_context(&voice_name, model_version, &path),
+                    }
+                },
                 ContextImportSource::File => session_identity::import_context_file(
                     &voice_name,
                     model_version,
@@ -50,7 +60,7 @@ impl Runtime {
                     process_id.expect("validated context process"),
                 ),
             };
-            ContextEvent::Imported(result.map_err(|error| error.to_string()))
+            ContextEvent::Imported(result)
         });
     }
 
@@ -106,15 +116,22 @@ impl Runtime {
                 dialog.sources = sources;
                 dialog.phase = ContextImportPhase::Ready;
             }
-            ContextEvent::Sources(Err(error)) | ContextEvent::Imported(Err(error)) => {
+            ContextEvent::Sources(Err(error)) => {
                 self.context_import_failed(error);
+            }
+            ContextEvent::Imported(Err(error)) => {
+                let retry = error.is_session_decryption_exhausted();
+                self.context_import_failed(error.to_string());
+                if let Some(dialog) = &mut self.context_import.dialog {
+                    dialog.session_key_required = retry && dialog.source == ContextImportSource::SessionFile;
+                }
             }
             ContextEvent::Imported(Ok(_)) => {
                 let voice_name = dialog.voice_name.clone();
                 let model_version = dialog.model_version;
                 let selection = dialog.selection.clone();
                 self.context_import.dialog = None;
-                // Revisions of the same singer share one saved model context.
+
                 let mut reload: BTreeSet<_> = self
                     .voices
                     .keys()

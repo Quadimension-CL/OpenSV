@@ -1,6 +1,3 @@
-//! Exact installed dictionary lookups. This does not implement the editor's
-//! statistical pronunciation models or choose between ambiguous word readings.
-
 use crate::{
     model::Language,
     synthesis::voice::{Result, VoiceError},
@@ -11,8 +8,14 @@ pub(super) type Phones = Vec<String>;
 
 #[derive(Default)]
 pub(super) struct PhoneTable {
-    entries: HashMap<String, Vec<Phones>>,
+    entries: HashMap<String, Readings>,
     max_key_bytes: usize,
+}
+
+#[derive(Default)]
+struct Readings {
+    alternatives:Vec<Phones>,
+    last:usize,
 }
 
 impl PhoneTable {
@@ -36,7 +39,10 @@ impl PhoneTable {
             let phones: Phones = fields
                 .map(|phone| {
                     if english {
-                        phone.trim_end_matches(['0', '1', '2']).to_lowercase()
+
+                        let phone = phone.to_lowercase();
+                        if phone == "ah0" {"ax".into()}
+                        else {phone.trim_end_matches(['0', '1', '2']).to_owned()}
                     } else {
                         phone.to_owned()
                     }
@@ -44,10 +50,12 @@ impl PhoneTable {
                 .collect();
             let key = key.to_lowercase();
             table.max_key_bytes = table.max_key_bytes.max(key.len());
-            let alternatives = table.entries.entry(key).or_default();
-            if !alternatives.contains(&phones) {
-                alternatives.push(phones);
-            }
+            let readings = table.entries.entry(key).or_default();
+
+            readings.last=match readings.alternatives.iter().position(|v|*v==phones) {
+                Some(index)=>index,
+                None=>{let index=readings.alternatives.len();readings.alternatives.push(phones);index},
+            };
         }
         if table.entries.is_empty() {
             return Err(VoiceError::new(format!("词典为空：{}", path.display())));
@@ -64,11 +72,11 @@ impl PhoneTable {
         self.max_key_bytes = self.max_key_bytes.max(key.len());
         self.entries
             .entry(key)
-            .or_insert_with(|| vec![vec![phone.to_owned()]]);
+            .or_insert_with(|| Readings {alternatives:vec![vec![phone.to_owned()]],last:0});
     }
 
     pub(super) fn get(&self, key: &str) -> Result<Phones> {
-        let alternatives = self.entries.get(key).ok_or_else(|| unknown(key))?;
+        let alternatives = &self.entries.get(key).ok_or_else(|| unknown(key))?.alternatives;
         if alternatives.len() != 1 {
             return Err(VoiceError::new(format!(
                 "{key:?} 有多个词典读音，请填写显式音素"
@@ -77,8 +85,17 @@ impl PhoneTable {
         Ok(alternatives[0].clone())
     }
 
-    /// Longest literal key matching, used by the supplied romanized syllable
-    /// tables. Unknown spans are errors, never replaced with guessed phones.
+    fn first(&self, key: &str) -> Result<Phones> {
+
+        self.entries.get(key).and_then(|readings| readings.alternatives.first()).cloned()
+            .ok_or_else(|| unknown(key))
+    }
+
+    pub(super) fn last(&self,key:&str)->Result<Phones> {
+        self.entries.get(key).and_then(|readings|readings.alternatives.get(readings.last)).cloned()
+            .ok_or_else(||unknown(key))
+    }
+
     pub(super) fn segment(&self, token: &str) -> Result<Vec<Phones>> {
         let mut rest = token;
         let mut output = Vec::new();
@@ -105,7 +122,7 @@ pub(super) struct Dictionary {
     language: Language,
     phones: PhoneTable,
     words: WordReadings,
-    nuclei: Vec<String>,
+    classes: HashMap<String,String>,
 }
 
 impl Dictionary {
@@ -122,19 +139,19 @@ impl Dictionary {
         } else {
             WordReadings::default()
         };
-        let nuclei = read(&directory.join(format!("{}-phones.txt", language.phone_set())))?
+        let classes = read(&directory.join(format!("{}-phones.txt", language.phone_set())))?
             .lines()
             .filter_map(|line| {
                 let mut fields = line.split_whitespace();
                 let phone = fields.next()?;
-                matches!(fields.next()?, "vowel" | "diphthong").then(|| phone.to_owned())
+                Some((phone.to_owned(),fields.next()?.to_owned()))
             })
             .collect();
         Ok(Self {
             language,
             phones,
             words,
-            nuclei,
+            classes,
         })
     }
 
@@ -156,27 +173,30 @@ impl Dictionary {
     }
 
     fn romanized(&self, token: &str) -> Result<Vec<Phones>> {
-        let token = token.to_lowercase();
+        let mut token = token.to_lowercase();
+
+        if self.language == Language::English && token.len()>3 && token.ends_with("in'") {
+            token.pop(); token.push('g');
+        }
         match self.language {
-            Language::English => Ok(split_nuclei(self.phones.get(&token)?, &self.nuclei)),
+            Language::English => {
+                let phones=self.phones.first(&token)?;
+                let classes:Vec<_>=phones.iter().map(|p|self.classes.get(p).map(String::as_str)).collect();
+                Ok(super::english::split(phones,&classes))
+            },
             Language::Cantonese => {
                 Ok(vec![self.phones.get(
                     token.trim_end_matches(['1', '2', '3', '4', '5', '6']),
                 )?])
             }
-            // Korean dictionary entries are romanized syllables. The installed
-            // korean-dict.txt contains placeholder readings, not usable G2P.
+
             Language::Korean => Ok(vec![self.phones.get(&token)?]),
-            Language::Spanish => {
-                let phones = self.phones.segment(&token)?.into_iter().flatten().collect();
-                Ok(split_nuclei(phones, &self.nuclei))
-            }
             _ => unreachable!("dedicated language adapters"),
         }
     }
 }
 
-fn split_nuclei(phones: Phones, nuclei: &[String]) -> Vec<Phones> {
+pub(super) fn split_nuclei(phones: Phones, nuclei: &[String]) -> Vec<Phones> {
     let positions: Vec<_> = phones
         .iter()
         .enumerate()
@@ -220,7 +240,7 @@ impl WordReadings {
                 })?;
             for key in keys.split_whitespace() {
                 let values = result.entries.entry(key.to_owned()).or_default();
-                // Ignore Cantonese tone-only alternatives in a sung score.
+
                 let reading = reading
                     .split_whitespace()
                     .map(|s| s.trim_end_matches(['1', '2', '3', '4', '5', '6']))

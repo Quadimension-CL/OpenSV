@@ -1,7 +1,5 @@
 use crate::synthesis::voice::{Result, VoiceError};
 
-/// Encode the normalized MIDI value with a periodic cosine bank.
-/// Channel i has phase (i - 1) / channels; this is not a positional transformer embedding.
 pub fn pitch_embedding(normalized_pitch: &[f32], channels: usize) -> Result<Vec<f32>> {
     if channels == 0 || normalized_pitch.iter().any(|x| !x.is_finite()) {
         return Err(VoiceError::new(
@@ -22,9 +20,6 @@ pub fn pitch_embedding(normalized_pitch: &[f32], channels: usize) -> Result<Vec<
     Ok(output)
 }
 
-/// Arrange two auxiliary channels before the 64 spectral channels, followed
-/// by five more auxiliary channels. The 71-channel normalizer consumes
-/// exactly this arrangement.
 pub fn assemble_normalized_acoustics(spectral: &[f32], auxiliary: &[f32]) -> Result<Vec<f32>> {
     if !spectral.len().is_multiple_of(64) || auxiliary.len() != spectral.len() / 64 * 7 {
         return Err(VoiceError::new(
@@ -46,8 +41,6 @@ pub fn assemble_normalized_acoustics(spectral: &[f32], auxiliary: &[f32]) -> Res
     Ok(output)
 }
 
-/// The 72-channel vocoder input inserts the unnormalized F0 in Hz after the
-/// first denormalized acoustic channel.
 pub fn insert_vocoder_pitch(acoustics: &[f32], pitch_hz: &[f32]) -> Result<Vec<f32>> {
     if !acoustics.len().is_multiple_of(71) || acoustics.len() / 71 != pitch_hz.len() {
         return Err(VoiceError::new(

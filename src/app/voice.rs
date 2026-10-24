@@ -48,11 +48,12 @@ impl App {
         if !entry.availability.is_loadable() {
             return;
         }
+        let Some(family) = entry.family else { return; };
         let name = entry.display_name.clone();
         self.commit_lyric();
         if let Err(error) =
             self.editor
-                .set_track_voice(Some((&selection.database_id, &name, selection.revision)))
+                .set_track_voice(Some((&selection.database_id, &name, selection.revision, family)))
         {
             self.error = Some(error);
             return;

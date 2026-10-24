@@ -1,6 +1,5 @@
-//! Lightweight discovery of installed voice revisions, without loading model weights.
-
 mod dnni;
+mod artwork;
 mod metadata;
 mod nofs;
 mod resource;
@@ -12,12 +11,13 @@ use std::{
 
 use serde::Serialize;
 
-use super::{Result, VoiceFamily};
+use super::{Result, VoiceFamily, VoiceRevision};
 use metadata::MetadataIndex;
+pub use artwork::VoiceArtwork;
 
 #[derive(Clone, Debug, Serialize)]
 pub enum VoiceAvailability {
-    /// The revision uses a supported format; full model validation happens on load.
+
     Loadable,
     Unsupported(String),
 }
@@ -30,8 +30,9 @@ impl VoiceAvailability {
 
 #[derive(Clone, Debug, Serialize)]
 pub struct VoiceCatalogEntry {
+    pub configuration: Option<super::config::VoiceConfiguration>,
     pub database_id: String,
-    pub revision: u32,
+    pub revision: VoiceRevision,
     pub model_version: Option<u8>,
     pub family: Option<VoiceFamily>,
     pub directory: PathBuf,
@@ -40,7 +41,8 @@ pub struct VoiceCatalogEntry {
     pub genres: Vec<String>,
     pub pitch_range: Option<String>,
     pub languages: Vec<String>,
-    pub icon_path: Option<PathBuf>,
+    pub icon: Option<VoiceArtwork>,
+    pub portrait: Option<VoiceArtwork>,
     pub availability: VoiceAvailability,
 }
 
@@ -51,8 +53,7 @@ pub struct VoiceCatalog {
 }
 
 impl VoiceCatalog {
-    /// Discover supported DNNI revisions and original SV1 AI NOFS files without
-    /// reading weights. A root can also be one SV1 voice folder or NOFS file.
+
     pub fn scan(root: &Path) -> Result<Self> {
         let mut catalog = Self::default();
         if super::nofs::is_file(root) {
@@ -98,8 +99,9 @@ impl VoiceCatalog {
             }
         }
         catalog.entries.sort_by(|left, right| {
-            left.display_name
-                .cmp(&right.display_name)
+            left.display_name.to_lowercase()
+                .cmp(&right.display_name.to_lowercase())
+                .then_with(||left.display_name.cmp(&right.display_name))
                 .then_with(|| left.database_id.cmp(&right.database_id))
                 .then_with(|| right.revision.cmp(&left.revision))
         });

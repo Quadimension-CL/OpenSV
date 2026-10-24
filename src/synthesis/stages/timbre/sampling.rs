@@ -1,12 +1,10 @@
-//! Two noise-conditioned acoustic heads in the `d84bf44a` module.
-//!
-//! Evaluate each head once. Gaussian samples and the two distribution controls
-//! are explicit inputs; this program has no diffusion-step loop.
-
-use crate::synthesis::voice::{PreparedTree, Result, VoiceError};
+use crate::synthesis::voice::{PreparedModule, PreparedTree, Result, VoiceError};
 
 const TYPE_ID: [u8; 16] = [
     0xd8, 0x4b, 0xf4, 0x4a, 0xd0, 0x47, 0xa3, 0xb2, 0x81, 0x0a, 0x61, 0xcc, 0x45, 0x1e, 0x08, 0x9b,
+];
+const SIXTEEN_TYPE_ID: [u8; 16] = [
+    0x93, 0x6a, 0x61, 0x42, 0x05, 0x6f, 0x2d, 0x72, 0x0b, 0xd3, 0x18, 0xe8, 0x65, 0x67, 0x8c, 0xa9,
 ];
 
 #[derive(Clone, Copy, Debug)]
@@ -23,7 +21,7 @@ pub struct SamplerConfig {
 }
 
 impl SamplerConfig {
-    /// Payload only, excluding the 16-byte module type prefix.
+
     pub fn parse(payload: &[u8]) -> Result<Self> {
         if payload.len() != 20 {
             return Err(VoiceError::new(
@@ -77,7 +75,13 @@ impl SamplerConfig {
 
 pub(super) struct AcousticSampler {
     pub config: SamplerConfig,
-    pub(super) children: [usize; 6],
+    pub(super) children: SamplerChildren,
+    pub(super) ppg_mean: Option<usize>,
+}
+
+pub(super) enum SamplerChildren {
+    Sixteen([usize; 7]),
+    Nineteen([usize; 6]),
 }
 
 impl AcousticSampler {
@@ -85,17 +89,44 @@ impl AcousticSampler {
         #[cfg(feature = "synth-profile")]
         let _profile = crate::synthesis::profiling::span("timbre.sampler.prepare");
         let source = tree.node(node)?;
-        if source.type_id != TYPE_ID {
-            return Err(VoiceError::new(
-                "The supplied node is not the two-head acoustic sampler",
-            ));
-        }
-        let children = source
-            .children
-            .as_slice()
-            .try_into()
-            .map_err(|_| VoiceError::new("Acoustic sampler requires six model children"))?;
+        let children = match source.type_id {
+            TYPE_ID => {
+                SamplerChildren::Nineteen(source.children.as_slice().try_into().map_err(|_| {
+                    VoiceError::new("19-child acoustic sampler requires six children")
+                })?)
+            }
+            SIXTEEN_TYPE_ID => {
+                SamplerChildren::Sixteen(source.children.as_slice().try_into().map_err(|_| {
+                    VoiceError::new("16-child acoustic sampler requires seven children")
+                })?)
+            }
+            _ => {
+                return Err(VoiceError::new(
+                    "Unsupported two-head acoustic sampler type",
+                ));
+            }
+        };
         let config = SamplerConfig::parse(&tree.payload(node)?)?;
-        Ok(Self { config, children })
+        let ppg_mean = match &children {
+            SamplerChildren::Sixteen(children) => {
+                let mean = tree.node(children[0])?;
+                if mean.type_id == crate::synthesis::stages::f0::features::EMPTY_SLOT_TYPE_ID
+                    && mean.children.is_empty()
+                    && mean.payload_bytes == 0
+                {
+                    None
+                } else if matches!(mean.module, PreparedModule::Affine(_)) {
+                    Some(children[0])
+                } else {
+                    return Err(VoiceError::new("Unsupported 16-child PPG mean projection"));
+                }
+            }
+            SamplerChildren::Nineteen(_) => None,
+        };
+        Ok(Self {
+            config,
+            children,
+            ppg_mean,
+        })
     }
 }

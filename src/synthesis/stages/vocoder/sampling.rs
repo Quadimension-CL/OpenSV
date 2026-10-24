@@ -1,8 +1,3 @@
-//! Vocoder's spectral-position conditioning, not an audio sampling loop.
-//!
-//! Select spectral input, project it, append positional sin/cos,
-//! then execute the recurrent child. Positions are explicit upstream values.
-
 use std::sync::Arc;
 
 use crate::synthesis::{
@@ -25,8 +20,6 @@ const INPUT_CHANNELS: usize = 72;
 const SPECTRAL_CHANNELS: usize = 64;
 const SPECTRAL_START: usize = 3;
 
-/// Mode-0 positional condition module used by Mo Xu 201's vocoder.
-/// A model can be shared across render streams; every stream owns a GruState.
 #[derive(Clone)]
 pub struct PositionalGru {
     projection: Affine,
@@ -47,9 +40,7 @@ impl PositionalGru {
             ));
         }
         let payload = tree.payload(index)?;
-        // The 12-byte payload stores two u16 values, mode u32, width u32.
-        // This program consumes the mode-0 / 72-channel branch. It must
-        // not silently interpret unimplemented alternate modes the same way.
+
         if payload.len() != 12
             || u32::from_le_bytes(payload[4..8].try_into().unwrap()) != 0
             || u32::from_le_bytes(payload[8..12].try_into().unwrap()) != INPUT_CHANNELS as u32
@@ -94,8 +85,7 @@ impl PositionalGru {
                 "Vocoder spectral projection matrix dimensions do not match",
             ));
         }
-        // Apply only the first matrix. The separately prepared second matrix
-        // is not consumed on this forward path.
+
         let projection =
             Affine::new(matrix, None).map_err(|error| VoiceError::new(error.to_string()))?;
         let recurrent = match &tree.node(node.children[2])?.module {
@@ -133,9 +123,6 @@ impl PositionalGru {
         self.recurrent.new_state()
     }
 
-    /// Normalized 72-channel acoustic frames and corresponding unsigned source
-    /// positions. This method does not infer positions from chunk boundaries.
-    /// State remains resumable; reset it explicitly for an independent stream.
     pub fn execute(
         &self,
         input: &Sequence,
@@ -175,8 +162,7 @@ impl PositionalGru {
                 .map_err(|error| VoiceError::new(error.to_string()))?;
             features[..self.retained_channels]
                 .copy_from_slice(&projected[..self.retained_channels]);
-            // Compute theta and sin/cos in f64, narrowing each result to f32.
-            // The layout is all sin, then all cos.
+
             let phase = (position as f64 * std::f64::consts::TAU) / self.phase_divisor as f64;
             for (frequency_index, &frequency) in self.frequencies.iter().enumerate() {
                 let angle = phase * frequency as f64;

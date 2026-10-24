@@ -9,7 +9,7 @@ pub enum GroupEdit {
 }
 
 impl Editor {
-    /// Creates a finite instance. Caller owns the undo transaction.
+
     pub fn insert_group(&mut self, track_id: EntityId, start: i64, duration: i64) -> EntityId {
         let track = self
             .project
@@ -69,7 +69,7 @@ impl Editor {
                     .map(|r| r.id)
             })
     }
-    /// Only an actually empty track gains an automatic group on note creation.
+
     pub fn prepare_note_target(&mut self, global: i64) -> bool {
         if self.current_track().is_instrumental() {
             return false;
@@ -93,7 +93,7 @@ impl Editor {
         self.insert_group(self.track, start, 32 * QUARTER);
         true
     }
-    /// Move translates the instance; resizing only changes its visible interval.
+
     pub fn edit_group(
         &mut self,
         original: &GroupRef,

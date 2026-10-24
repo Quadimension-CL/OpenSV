@@ -1,5 +1,3 @@
-//! Ten-channel DDS frontend and the SV2 compatibility record clock.
-
 use super::{Contract, timing};
 
 use crate::synthesis::{
@@ -86,9 +84,13 @@ impl<'a> Frontend<'a> {
                 Contract::Native { .. } => timing::duration_seconds(note)?,
             };
             let pitch = note.pitch + note.pitch_offset + transpose;
-            if !pitch.is_finite() || note.kind > 1 {
+            let maximum_kind = match contract {
+                Contract::Compatible => 2,
+                Contract::Native { .. } => 1,
+            };
+            if !pitch.is_finite() || note.kind > maximum_kind {
                 return Err(VoiceError::new(
-                    "Compatible F0 currently accepts ordinary singing and rest records",
+                    "Invalid DDS F0 note kind or pitch",
                 ));
             }
             if matches!(contract, Contract::Native { .. })
@@ -101,26 +103,23 @@ impl<'a> Frontend<'a> {
             let row = &mut rows.values[index * 10..(index + 1) * 10];
             let breath = note.phones.first().is_some_and(|phone| phone == "br")
                 && match contract {
-                    // SV2 checks the first phone even when the record contains
-                    // redistributed onsets. NOFS requires the complete phone
-                    // string to match the exact two bytes "br".
+
                     Contract::Compatible => true,
                     Contract::Native { .. } => note.phones.len() == 1,
                 };
             row[0] = f32::from(note.kind == 1 || breath);
+
+            row[1] = f32::from(note.kind == 2);
             row[2] = pitch;
             row[3] = (duration + 0.001).min(5.0).ln() as f32;
             let tones_enabled = match contract {
                 Contract::Compatible => {
-                    // SV2 uses the source note flag directly and enables tone
-                    // tags independently of the source language.
+
                     row[4] = f32::from(note.flag);
                     true
                 }
                 Contract::Native { .. } => {
-                    // NOFS has a special-mode flag separate from FrontendNote.flag.
-                    // It is false for supported ordinary/rest notes; only special
-                    // mode supplies tone tags, so these inputs have no tone slots.
+
                     false
                 }
             };
@@ -184,8 +183,6 @@ fn phone_set(tree: &PreparedTree, index: usize) -> Result<&PhoneSet> {
     }
 }
 
-/// Partition on the source note grid, then round cumulative f64 seconds
-/// using the DDS frontend's stored f32 frame interval.
 pub(super) fn note_frame_counts(notes: &[FrontendNote], step: f32) -> Result<Vec<usize>> {
     let mut elapsed = 0.0_f64;
     let step = f64::from(step);

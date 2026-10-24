@@ -1,15 +1,12 @@
-//! Output-channel blocks shared by ordinary and transposed temporal convolution.
-
 use std::sync::Arc;
 
 use super::{DenseMatrix, MatrixError};
 
 pub(super) const OUTPUT_BLOCK: usize = 8;
 
-/// [output block][tap][input channel][8 output lanes]. The final output block
-/// is zero-padded; those lanes are never exposed as real output channels.
 #[derive(Clone)]
 pub(super) struct PackedWeights {
+    pub(super) integer_taps: Option<Arc<[DenseMatrix]>>,
     input_channels: usize,
     output_channels: usize,
     block_length: usize,
@@ -17,7 +14,7 @@ pub(super) struct PackedWeights {
 }
 
 impl PackedWeights {
-    /// The caller has validated that every tap has the same nonempty shape.
+
     pub(super) fn new(taps: &[DenseMatrix]) -> Result<Self, MatrixError> {
         let input_channels = taps[0].columns();
         let output_channels = taps[0].rows();
@@ -30,7 +27,8 @@ impl PackedWeights {
             .div_ceil(OUTPUT_BLOCK)
             .checked_mul(block_length)
             .ok_or(MatrixError::InvalidShape)?;
-        let mut values = vec![0.0; length];
+        let integer_taps=taps.iter().any(DenseMatrix::has_integer_execution).then(||Arc::from(taps));
+        let mut values = if integer_taps.is_some() {Vec::new()} else {vec![0.0; length]};
         for (block, target) in values.chunks_exact_mut(block_length).enumerate() {
             let first_output = block * OUTPUT_BLOCK;
             let channels = (output_channels - first_output).min(OUTPUT_BLOCK);
@@ -44,6 +42,7 @@ impl PackedWeights {
             }
         }
         Ok(Self {
+            integer_taps,
             input_channels,
             output_channels,
             block_length,

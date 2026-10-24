@@ -8,7 +8,6 @@ pub struct WaveFormat {
     pub bit_depth: u16,
 }
 
-/// Native float output used by the synthesis CLI, without normalization.
 pub fn save_wav(path: &Path, audio: &RenderedAudio) -> Result<(), AudioError> {
     encode(path, audio, 32)
 }

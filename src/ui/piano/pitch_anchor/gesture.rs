@@ -96,9 +96,9 @@ pub(super) fn start(app: &mut App, ui: &Ui, canvas: Rect) {
             return;
         }
         app.editor.begin(if handle.is_some() {
-            "缩放音高控制点"
+            crate::i18n::t("缩放音高控制点")
         } else {
-            "移动音高控制点"
+            crate::i18n::t("移动音高控制点")
         });
         Kind::Transform {
             original,

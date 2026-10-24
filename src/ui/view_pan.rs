@@ -27,7 +27,6 @@ impl ViewPan {
         self.capture.is_some()
     }
 
-    /// Capture middle-button motion independently of notes, groups and ruler widgets.
     pub fn drag(&mut self, ui: &Ui, target: Target, rect: Rect, enabled: bool) -> Vec2 {
         let (pressed, held, other_button, focused, pointer) = ui.input(|i| {
             (
@@ -64,7 +63,7 @@ impl ViewPan {
         let delta = pointer - capture.pointer;
         capture.pointer = pointer;
         if held {
-            // Claim the gesture before child widgets query their drag responses.
+
             ui.ctx().set_dragged_id(target.id());
         }
         delta

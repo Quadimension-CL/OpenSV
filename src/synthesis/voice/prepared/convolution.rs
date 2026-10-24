@@ -7,8 +7,6 @@ use crate::synthesis::inference::{
 
 use super::{PreparedModule, PreparedNode, Result, TensorStorage, VoiceError};
 
-/// Collects exactly K same-shape matrix children and at most
-/// one vector child. A vector does not alter the relative order of matrix taps.
 pub struct PreparedConvolution {
     pub weights: Vec<Arc<TensorStorage>>,
     pub bias: Option<Arc<TensorStorage>>,
@@ -44,22 +42,25 @@ impl PreparedConvolution {
                     rows,
                     columns,
                     values,
+                    ..
                 } => DenseMatrix::from_float(*rows, *columns, Arc::clone(values))
                     .map_err(voice_error)?,
                 TensorStorage::QuantizedMatrix {
+                    legacy_integer_execution,
                     rows,
                     columns,
                     bits,
                     input_exponent,
                     scales,
                     values,
-                } => DenseMatrix::from_quantized(
+                } => DenseMatrix::from_quantized_execution(
                     *rows,
                     *columns,
                     *bits,
                     *input_exponent,
                     scales,
                     values,
+                    *legacy_integer_execution,
                 )
                 .map_err(voice_error)?,
                 TensorStorage::FloatVector { values } => {

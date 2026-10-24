@@ -1,7 +1,3 @@
-//! Shape-dependent complex excitation spectrum.
-//!
-//! This is the source excitation supplied to the learned vocoder, not PCM.
-
 use crate::synthesis::voice::{Result, VoiceError};
 
 #[path = "excitation_spectrum_data.rs"]
@@ -9,12 +5,6 @@ mod data;
 
 const PERIOD: f32 = 0.005;
 
-/// Evaluate the amplitude/phase envelope at the supplied frequencies.
-///
-/// The caller passes 100 Hz reference and a `100, 200, ...` frequency table.
-/// Amplitudes are divided by the magnitude evaluated at 200 Hz; phases retain
-/// their absolute values. Phase alignment and harmonic-count gain follow in
-/// the streaming excitation generator.
 pub fn spectrum(
     shape: f32,
     reference_hz: f32,
@@ -88,8 +78,7 @@ impl Pulse {
             wp_cos_te_wp: (te * wp).cos() * wp,
             e0: -1.0 / ((te * alpha).exp() * sin_te_wp),
             ta_epsilon,
-            // This expression alone is evaluated in double precision after
-            // the float32 Ta * epsilon product.
+
             return_coefficient: ((1.0 - f64::from(ta_epsilon)) * f64::from(epsilon)) as f32,
         }
     }
@@ -164,8 +153,7 @@ impl Complex {
     }
 
     fn div(self, other: Self) -> Self {
-        // Complex division rescales the denominator by its
-        // binary exponent, then uses float32 products/division and scalbn.
+
         let maximum = other.re.abs().max(other.im.abs());
         let exponent = binary_exponent(maximum);
         let scale = 2.0_f64.powi(-exponent);

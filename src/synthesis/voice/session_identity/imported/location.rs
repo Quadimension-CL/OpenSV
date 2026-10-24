@@ -1,5 +1,3 @@
-//! Prevent explicit imports from being saved to a packaged host's private copy.
-
 use std::{
     fs::{File, OpenOptions},
     io,
@@ -30,8 +28,6 @@ fn options() -> OpenOptions {
     {
         use std::os::unix::fs::OpenOptionsExt;
 
-        // Linux O_NOFOLLOW rejects a symlink in the final path component;
-        // newly created context and lock files are private to their user.
         const O_NOFOLLOW: i32 = 0x20000;
         let mut options = OpenOptions::new();
         options.custom_flags(O_NOFOLLOW).mode(0o600);
@@ -57,7 +53,7 @@ pub(super) fn verify(file: &File, expected: &Path) -> Result<()> {
         ) -> u32;
     }
     let mut buffer = vec![0u16; 32768];
-    // SAFETY: file holds a live handle and buffer has length writable UTF-16 units.
+
     let length = unsafe {
         GetFinalPathNameByHandleW(
             file.as_raw_handle(),
@@ -106,8 +102,7 @@ pub(super) fn verify(file: &File, expected: &Path) -> Result<()> {
     let filename = expected
         .file_name()
         .ok_or_else(|| VoiceError::new("模型上下文路径缺少文件名。"))?;
-    // Resolve only the parent: normal XDG directories may be symlinked, while
-    // open_read/open_lock/create_temporary reject links to the file itself.
+
     let expected = parent.canonicalize()?.join(filename);
     let actual = std::fs::read_link(format!("/proc/self/fd/{}", file.as_raw_fd()))?;
     if actual != expected {

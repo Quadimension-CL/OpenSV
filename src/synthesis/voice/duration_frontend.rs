@@ -1,5 +1,3 @@
-//! Duration-root dimensions and input feature widths.
-
 use serde::Serialize;
 
 use super::{Result, VoiceError, array, product, sum};
@@ -15,12 +13,12 @@ pub struct DurationConfiguration {
     pub position_embedding_width: u16,
     pub duration_encoding_width: u16,
     pub pitch_encoding_width: u16,
-    /// Additional configuration fields without assigned numerical roles.
+
     pub unassigned_words: [u16; 3],
 }
 
 impl DurationConfiguration {
-    /// Parses exactly eight little-endian u16 configuration fields.
+
     pub fn parse(bytes: &[u8]) -> Result<Self> {
         if bytes.len() != 32 || array::<16>(bytes, 0)? != DURATION_ROOT_TYPE_ID {
             return Err(VoiceError::new(
@@ -46,8 +44,6 @@ impl DurationConfiguration {
         })
     }
 
-    /// Width of the concatenated blocks before the first projection.
-    /// The constant width comes from root child 1's vector.
     pub fn feature_width(self, constant_width: usize) -> Result<usize> {
         let widths = [
             self.phone_embedding_width as usize,

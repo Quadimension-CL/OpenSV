@@ -2,21 +2,17 @@ use super::{PitchControl, PitchCurve, fresh_id};
 use crate::model::Extra;
 use std::collections::BTreeMap;
 
-/// Replaces existing hand-drawn data in the stroke's horizontal range. Input
-/// points use group-local blicks and absolute MIDI pitch, without instance offsets.
 pub fn replace_curve(controls: &mut Vec<PitchControl>, points: &[(i64, f64)]) -> bool {
     let Some(curve) = from_absolute(points) else {
         return false;
     };
     let (start, end) = curve.range().unwrap();
     erase_curves(controls, start, end);
-    // The new curve wins at shared endpoints when curves are sampled in reverse.
+
     controls.push(PitchControl::Curve(curve));
     true
 }
 
-/// Erases the interval's interior while retaining interpolated boundaries on
-/// separate curves. Unsupported native controls are never altered.
 pub fn erase_curves(controls: &mut Vec<PitchControl>, start: i64, end: i64) -> bool {
     let (start, end) = (start.min(end), start.max(end));
     if start == end {
@@ -57,7 +53,7 @@ fn from_absolute(points: &[(i64, f64)]) -> Option<PitchCurve> {
     if points.iter().any(|p| !p.1.is_finite()) {
         return None;
     }
-    // Repeated positions keep the most recent value, including vertical strokes.
+
     let ordered: BTreeMap<i64, f64> = points.iter().copied().collect();
     let (&pos, &pitch) = ordered.first_key_value()?;
     let points = ordered

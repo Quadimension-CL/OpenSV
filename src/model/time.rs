@@ -34,6 +34,7 @@ impl Meter {
 pub struct TimeAxis {
     pub meter: Vec<Meter>,
     pub tempo: Vec<Tempo>,
+    #[serde(default)]
     pub start_time_seconds: f64,
     #[serde(flatten)]
     pub extra: Extra,
@@ -78,7 +79,7 @@ impl TimeAxis {
         }
         position
     }
-    /// Returns the containing bar's index and absolute start in blicks.
+
     pub fn bar_at(&self, position: i64) -> (i32, i64) {
         let position = position.max(0);
         let mut start = 0_i64;
@@ -102,9 +103,14 @@ impl TimeAxis {
             .iter()
             .rev()
             .find(|t| t.position <= position)
-            .map_or(120.0, |t| t.bpm)
+            .map_or(self.tempo[0].bpm, |t| t.bpm)
     }
     pub fn seconds_at(&self, position: i64) -> f64 {
+
+        if position < 0 {
+            return position as f64 * 60.0 / self.tempo[0].bpm / QUARTER as f64
+                + self.start_time_seconds;
+        }
         let mut seconds = self.start_time_seconds;
         for (i, tempo) in self.tempo.iter().enumerate() {
             let end = self
@@ -119,7 +125,11 @@ impl TimeAxis {
         seconds
     }
     pub fn position_at(&self, seconds: f64) -> i64 {
-        let mut left = (seconds - self.start_time_seconds).max(0.0);
+
+        if seconds < self.start_time_seconds {
+            return ((seconds - self.start_time_seconds) * QUARTER as f64 * self.tempo[0].bpm / 60.0) as i64;
+        }
+        let mut left = seconds - self.start_time_seconds;
         for (i, tempo) in self.tempo.iter().enumerate() {
             if let Some(next) = self.tempo.get(i + 1) {
                 let duration = beats(next.position - tempo.position) * 60.0 / tempo.bpm;
@@ -128,7 +138,7 @@ impl TimeAxis {
                     continue;
                 }
             }
-            // Seconds-to-blick conversion truncates toward zero.
+
             return tempo.position + (left * tempo.bpm / 60.0 * QUARTER as f64) as i64;
         }
         0

@@ -1,13 +1,9 @@
-//! Transposed temporal convolution with ordered tap overlap-add.
-
 use super::{Convolution, ConvolutionError, MatrixError};
 
 pub const TRANSPOSED_CONVOLUTION_TYPE_ID: [u8; 16] = [
     0xbd, 0x96, 0x2b, 0x2e, 0x4a, 0x96, 0x75, 0x93, 0xb0, 0xfd, 0xdc, 0x63, 0x89, 0x97, 0x19, 0x1c,
 ];
 
-/// Transposed convolution shares the same tap layout and five-word config as
-/// ordinary convolution, but crops output boundaries instead of padding input.
 #[derive(Clone)]
 pub struct TransposedConvolution {
     inner: Convolution,
@@ -57,7 +53,6 @@ impl TransposedConvolution {
     }
 }
 
-/// Retains only overlap output rows, including the right crop until finalization.
 #[derive(Clone)]
 pub struct TransposedConvolutionStream {
     operator: TransposedConvolution,
@@ -114,8 +109,7 @@ impl TransposedConvolutionStream {
         };
         let previous_length = self.pending.len();
         self.pending.resize(length, 0.0);
-        // Unlike ordinary convolution, the transpose operation initializes
-        // each new output row with bias BEFORE adding matrix contributions.
+
         if let Some(bias) = &op.bias {
             for row in self.pending[previous_length..].chunks_exact_mut(output_channels) {
                 row.copy_from_slice(bias);

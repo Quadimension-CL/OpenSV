@@ -1,4 +1,3 @@
-//! Checked frame-major buffers passed between model operators.
 use crate::synthesis::voice::{Result, VoiceError};
 use std::ops::Range;
 

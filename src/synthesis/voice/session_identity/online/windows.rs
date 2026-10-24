@@ -17,8 +17,6 @@ mod process;
 
 use native::Handle;
 
-// Supported Synthesizer V Studio 2.2.1 x64 executable.
-// These offsets are used only after an exact binary digest match.
 const EXECUTABLE_SHA256: [u8; 32] = [
     0x7d, 0x81, 0x04, 0x4d, 0xf4, 0x82, 0x7d, 0x21, 0xa1, 0xf2, 0x32, 0xd2, 0xeb, 0x42, 0xd3, 0x7d,
     0x5a, 0xc8, 0x76, 0x48, 0xab, 0xfb, 0x40, 0x6a, 0x34, 0xf0, 0x27, 0xe4, 0xe7, 0x4c, 0xa3, 0x5b,
@@ -28,8 +26,7 @@ const SESSION_SINGLETON_RVA: usize = 0x191cd28;
 pub(super) fn sources() -> Result<Vec<OnlineContextSource>> {
     let mut sources = Vec::new();
     for process_id in process::candidate_process_ids()? {
-        // Processes can exit or become inaccessible between snapshot and open.
-        // Inaccessible/different-user/session entries must never be offered.
+
         let Ok(process) = Handle::process(process_id, false) else {
             continue;
         };
@@ -59,8 +56,7 @@ pub(super) fn read_field(process_id: u32) -> Result<Zeroizing<Vec<u8>>> {
         ));
     }
     let path = process::image_path(&process)?;
-    // Keep this read-only handle alive through the read to deny file mutation
-    // after version verification. No executable is started or modified.
+
     let _verified_executable = verify_executable(&path)?;
     let (base, size) = process::main_module(process_id, &path)?;
     if SESSION_SINGLETON_RVA + size_of::<u64>() > size {
@@ -70,8 +66,7 @@ pub(super) fn read_field(process_id: u32) -> Result<Zeroizing<Vec<u8>>> {
         .checked_add(SESSION_SINGLETON_RVA)
         .ok_or_else(|| VoiceError::new("原编辑器的主模块地址无效。"))?;
     let field = memory::session_field(&process, slot)?;
-    // Revalidate the source while the same process handle remains alive.
-    // Zeroizing drops field even when any of these checks fails.
+
     if process::main_module(process_id, &path)? != (base, size)
         || !access::same_user_and_session(&process)?
     {

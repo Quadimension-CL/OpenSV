@@ -15,22 +15,20 @@ use crate::synthesis::{
 pub struct ScorePhone {
     pub language: String,
     pub token: String,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_token: Option<String>,
     #[serde(default)]
-    pub source: Option<crate::model::SourcePhone>,
-    #[serde(default)]
-    pub attributes: crate::model::PhonemeAttributes,
-    /// Global seconds of the original note onset, shared by all its syllables.
-    #[serde(default)]
-    pub source_note_onset_seconds: Option<f64>,
+    pub onset_offset_seconds: Option<f64>,
 }
 
-/// One syllable/record. For a split note, duration_seconds remains the whole
-/// source-note duration and parts/part_index select its temporal partition.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ScoreNote {
     #[serde(default)]
     pub source_note_id: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note_error: Option<String>,
     #[serde(default)]
     pub retake_seeds: Option<RetakeSeeds>,
     #[serde(default)]
@@ -57,37 +55,53 @@ fn one() -> u32 {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct ExplicitScore {
-    /// Global seconds of the first record, before output cropping.
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vocal_modes: Option<crate::model::PublicModeMap>,
+
     pub start_seconds: f64,
     pub visible_begin_seconds: f64,
     #[serde(default)]
     pub visible_end_seconds: Option<f64>,
-    /// Chronological source records, including explicit sil between notes.
-    /// prepare adds boundary context and redistributes consonant onsets.
+
     pub notes: Vec<ScoreNote>,
 }
 
 #[derive(Clone, Debug)]
 pub struct PreparedPhrase {
-    /// Parameter curves on the owner's tempo-aware musical timeline.
-    pub automations: Option<std::sync::Arc<super::PreparedAutomations>>,
-    /// Native curve/point conditioning, sampled after the model clock is known.
+
+    pub(crate) unison_notes: Vec<FrontendNote>,
+    pub unison: crate::synthesis::unison::UnisonSettings,
+    pub note_errors: std::collections::BTreeMap<u64, String>,
+
+    pub phone_labels: std::collections::BTreeMap<PhoneSource,String>,
+    pub automation: Option<super::PreparedAutomation>,
+    pub voice_parameters:crate::synthesis::parameters::VoiceParameters,
+    pub vocal_modes: Option<crate::model::PublicModeMap>,
+    pub(crate) mode_coefficients: Option<crate::synthesis::vocal_modes::VocalModeCoefficients>,
+
     pub pitch_controls: Option<super::PreparedPitchControls>,
-    /// Note modulation sampled on the editor's tempo-aware parameter grid.
+
     pub performance_controls: Option<super::PreparedPerformanceControls>,
-    /// Resolved instance settings for each model stage.
-    pub voice_controls: Option<super::PreparedVoiceControls>,
-    /// These two arrays have identical indexing, including silence records.
+
     pub records: Vec<DurationRecord>,
     pub notes: Vec<FrontendNote>,
-    /// Stable score identity across phoneme redistribution and syllable splits.
-    /// Synthetic context and explicit rests have no source note.
+
     pub source_note_ids: Vec<Option<u64>>,
-    /// Reproducible sampling conditions on the complete record timeline.
+
+    pub phone_sources: Vec<Vec<Option<PhoneSource>>>,
+    pub phoneme_controls:std::collections::BTreeMap<PhoneSource,super::phonemes::PhoneControl>,
+
     pub retake_seeds: Vec<Option<RetakeSeeds>>,
     pub start_seconds: f64,
     pub visible_begin_seconds: f64,
     pub visible_end_seconds: Option<f64>,
+}
+
+#[derive(Clone,Copy,Debug,PartialEq,Eq,PartialOrd,Ord)]
+pub struct PhoneSource {
+    pub note_id:u64,
+    pub phone_index:usize,
 }
 
 impl ExplicitScore {
@@ -95,7 +109,14 @@ impl ExplicitScore {
         &self,
         duration_tree: &PreparedTree,
         family: VoiceFamily,
+        default_language: &str,
     ) -> Result<PreparedPhrase> {
+        if let Some(modes) = &self.vocal_modes {
+            if !modes.is_empty() && !matches!(family,VoiceFamily::Sv2|VoiceFamily::Sv2Compatible) {
+                return Err(VoiceError::new("Acoustic vocal modes require R3"));
+            }
+            crate::synthesis::vocal_modes::validate_public(modes)?;
+        }
         if !self.start_seconds.is_finite()
             || !self.visible_begin_seconds.is_finite()
             || self
@@ -108,9 +129,10 @@ impl ExplicitScore {
             start_seconds,
             notes: source,
             has_alignment_prefix,
-        } = super::context::padded(self, family);
+        } = super::context::padded(self, family, default_language);
         let mut records = Vec::with_capacity(source.len());
         let mut notes = Vec::with_capacity(source.len());
+        let mut silent_variants=std::collections::BTreeSet::new();
         for (index, note) in source.iter().enumerate() {
             super::retakes::validate_seeds(note.retake_seeds.unwrap_or_default(), family)?;
             super::options::validate_performance(note.performance, family)?;
@@ -118,7 +140,7 @@ impl ExplicitScore {
                 || note.duration_seconds <= 0.0
                 || !note.pitch.is_finite()
                 || !(0.0..=127.0).contains(&note.pitch)
-                || note.phones.is_empty()
+                || (note.phones.is_empty() && note.kind != 2)
                 || note.parts == 0
                 || note.part_index >= note.parts
             {
@@ -126,12 +148,11 @@ impl ExplicitScore {
                     "Score record {index} has invalid duration, pitch, syllable partition or empty phones"
                 )));
             }
-            for phone in &note.phones {
-                phone.attributes.validate().map_err(VoiceError::new)?;
+            for (phone_index,phone) in note.phones.iter().enumerate() {
                 if phone.token.is_empty()
                     || phone.token.chars().any(char::is_whitespace)
                     || phone
-                        .source_note_onset_seconds
+                        .onset_offset_seconds
                         .is_some_and(|value| !value.is_finite())
                 {
                     return Err(VoiceError::new(format!(
@@ -139,10 +160,10 @@ impl ExplicitScore {
                     )));
                 }
                 let resolved = duration_tree.resolve_phone(&phone.language, &phone.token)?;
-                if resolved.used_silence_fallback
-                    || (!phone.language.is_empty()
-                        && !resolved.selected_phone_set.contains(&phone.language))
-                {
+                let silent_variant=note.kind==1 && super::pronunciation::special::numbered_breath(&phone.token);
+                if resolved.used_silence_fallback && silent_variant {silent_variants.insert((index,phone_index));}
+
+                if resolved.used_silence_fallback && !silent_variant {
                     return Err(VoiceError::new(format!(
                         "Score record {index}: unsupported phone {:?} in language {:?}",
                         phone.token, phone.language
@@ -168,9 +189,7 @@ impl ExplicitScore {
                 appended_durations: Vec::new(),
                 performance: note.performance,
             };
-            // The internal alignment remainder may round to zero frames. Its
-            // time still participates in phrase placement; source notes must
-            // always span at least one model frame.
+
             if family != VoiceFamily::Sv1
                 && frame_count(&frontend)? == 0
                 && !(has_alignment_prefix && index == 0)
@@ -183,12 +202,11 @@ impl ExplicitScore {
                 phones: note
                     .phones
                     .iter()
-                    .map(|phone| ExplicitPhone {
+                    .enumerate()
+                    .map(|(phone_index,phone)| ExplicitPhone {
                         language: phone.language.clone(),
-                        token: phone.token.clone(),
-                        source: phone.source,
-                        attributes: phone.attributes,
-                        source_note_onset_seconds: phone.source_note_onset_seconds,
+                        token: if silent_variants.contains(&(index,phone_index)) {"sil".into()}else{phone.token.clone()},
+                        onset_offset_seconds: phone.onset_offset_seconds,
                     })
                     .collect(),
                 note: DurationNote {
@@ -204,15 +222,42 @@ impl ExplicitScore {
             });
             notes.push(frontend);
         }
-        super::records::redistribute_onsets(duration_tree, &mut records, &mut notes, family)?;
+        let mut counters=std::collections::BTreeMap::<u64,usize>::new();
+        let mut phone_sources:Vec<Vec<_>>=source.iter().map(|note|note.phones.iter().map(|_|{
+            note.source_note_id.map(|note_id|{
+                let next=counters.entry(note_id).or_default();let phone_index=*next;*next+=1;
+                PhoneSource{note_id,phone_index}
+            })
+        }).collect()).collect();
+        let mut phone_labels=std::collections::BTreeMap::new();
+        for (record,note) in source.iter().enumerate() {
+            for (phone,p) in note.phones.iter().enumerate() {
+                if let Some((source,label))=phone_sources[record][phone].zip(p.display_token.clone()) {
+                    phone_labels.insert(source,label);
+                }
+            }
+        }
+        phone_labels.extend(silent_variants.into_iter().filter_map(|(record,phone)|
+            phone_sources[record][phone].map(|source_id|(source_id,source[record].phones[phone].token.clone()))));
+        let unison_notes = notes.clone();
+        super::records::link_sustains(&mut records, &notes)?;
+        super::records::redistribute_onsets(duration_tree, &mut records, &mut notes,&mut phone_sources, family)?;
         Ok(PreparedPhrase {
-            automations: None,
+            unison_notes,
+            unison:Default::default(),
+            note_errors: source.iter().filter_map(|n| n.source_note_id.zip(n.note_error.clone())).collect(),
+            phone_labels,
+            automation: None,
+            voice_parameters:Default::default(),
+            vocal_modes: self.vocal_modes.clone(),
+            mode_coefficients: None,
             pitch_controls: None,
             performance_controls: None,
-            voice_controls: None,
             records,
             notes,
             source_note_ids: source.iter().map(|note| note.source_note_id).collect(),
+            phone_sources,
+            phoneme_controls:Default::default(),
             retake_seeds: source.iter().map(|note| note.retake_seeds).collect(),
             start_seconds,
             visible_begin_seconds: self.visible_begin_seconds,

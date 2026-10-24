@@ -2,35 +2,34 @@ use crate::synthesis::voice::{Result, VoiceError};
 
 use super::super::statistics::SyllableRange;
 
-/// Frame-aligned controls for both prediction passes.
 pub struct SamplerControls<'a> {
-    /// Appended to the positional features without a projection.
+
     pub noise: &'a [f32],
     pub expressiveness: &'a [f32],
     pub strength: &'a [f32],
-    /// NaN means unspecified and is measured from the preliminary pitch.
+
     pub slope: &'a [f32],
-    /// NaN means unspecified and is measured from the preliminary pitch.
+
     pub offset: &'a [f32],
-    /// Normalized absolute pitch control and its blend weight.
+
     pub absolute_control: &'a [f32],
     pub control_weight: &'a [f32],
-    /// Three ordered position channels, each expanded to sin/cos features.
+
     pub positions: [&'a [f32]; 3],
-    /// Multiplies the projected voice/style condition.
+
     pub style_weight: &'a [f32],
-    /// Additional scalar condition in the 13-child layout.
+
     pub accent: &'a [f32],
 }
 
 pub struct SamplerInputs<'a> {
     pub frames: usize,
     pub frame_features: usize,
-    /// Frame-major context features.
+
     pub frame_condition: &'a [f32],
-    /// Frame-major context input to the scalar source projection.
+
     pub source_condition: &'a [f32],
-    /// Frame-major style features.
+
     pub style_condition: &'a [f32],
     pub controls: SamplerControls<'a>,
     pub vowel_mask: &'a [bool],
@@ -81,7 +80,7 @@ impl SamplerInputs<'_> {
             .checked_mul(stride)
             .ok_or_else(|| VoiceError::new("F0 positional feature size overflow"))?;
         let mut result = vec![0.0; size];
-        // Compute f32 frequencies with exponent 2*i/width.
+
         let frequencies: Vec<_> = (0..width / 2)
             .map(|index| 10000.0_f32.powf((index * 2) as f32 / width as f32))
             .collect();

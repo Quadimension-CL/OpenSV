@@ -1,8 +1,5 @@
-//! Duration expansion and raised-cosine positions.
-
 use crate::synthesis::voice::{Result, VoiceError};
 
-/// A borrowed row-major sequence; zero columns are allowed for empty features.
 #[derive(Clone, Copy)]
 pub struct FeatureRows<'a> {
     pub rows: usize,
@@ -18,14 +15,14 @@ pub(super) struct ExpansionSpec {
 }
 
 pub struct ExpansionInput<'a> {
-    /// Primary features gathered using the first-level frame mapping.
+
     pub first_primary: FeatureRows<'a>,
-    /// Context rows that determine the number of first-level units.
+
     pub first_context: FeatureRows<'a>,
-    /// Optional features with one row per first-level unit.
+
     pub optional: Option<FeatureRows<'a>>,
     pub first_durations: &'a [u32],
-    /// An explicit position index for each frame, not an inferred local index.
+
     pub first_positions: &'a [u32],
     pub second: FeatureRows<'a>,
     pub second_durations: &'a [u32],
@@ -34,16 +31,13 @@ pub struct ExpansionInput<'a> {
 pub struct ExpandedFeatures {
     pub frames: usize,
     pub full_width: usize,
-    /// [first_primary, first_context, first_position, second, second_position,
-    /// optional, condition]. The condition region remains zero for the caller.
+
     pub full: Vec<f32>,
     pub second_width: usize,
-    /// [second, second_position].
+
     pub second: Vec<f32>,
 }
 
-/// Build both expanded matrices, leaving the trailing condition region
-/// for the caller to fill.
 pub(super) fn expand(spec: ExpansionSpec, input: &ExpansionInput<'_>) -> Result<ExpandedFeatures> {
     validate_rows(input.first_primary)?;
     validate_rows(input.first_context)?;
@@ -78,8 +72,6 @@ pub(super) fn expand(spec: ExpansionSpec, input: &ExpansionInput<'_>) -> Result<
     let mut full = zero_matrix(frames, full_width)?;
     let mut second = zero_matrix(frames, second_width)?;
 
-    // Iterate each unit to gather first-level features without allocating
-    // an additional frame-to-unit lookup table.
     let mut frame = 0;
     for (unit, &duration) in input.first_durations.iter().enumerate() {
         for _ in 0..duration {

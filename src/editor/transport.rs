@@ -44,7 +44,7 @@ impl Transport {
         self.start_position = 0;
         self.last = None;
     }
-    /// Keep an active loop's playback start inside its half-open interval.
+
     pub fn constrain_to_loop(&mut self) {
         if self.looping && !self.loop_region.contains(self.position) {
             self.position = self.loop_region.start();
@@ -60,8 +60,6 @@ impl Transport {
         })
     }
 
-    /// Returns true when the wall clock crosses a loop boundary. An audio
-    /// device wraps its own clock and does not need a second seek from the UI.
     pub fn update(&mut self, time: &TimeAxis, end: i64, audio_seconds: Option<f64>) -> bool {
         let now = Instant::now();
         let mut looped = false;
@@ -74,8 +72,7 @@ impl Transport {
             self.position = time.position_at(seconds);
             if let Some((start_seconds, end_seconds)) = self.loop_seconds(time) {
                 if audio_seconds.is_some() {
-                    // Conversion from device samples may round one blick past
-                    // a boundary. The device already owns loop wrapping.
+
                     self.position = self
                         .position
                         .clamp(self.loop_region.start(), self.loop_region.end() - 1);

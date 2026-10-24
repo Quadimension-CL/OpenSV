@@ -1,5 +1,3 @@
-//! Persistent acoustic DAG. Queues join rows by their cumulative position,
-//! never by the sizes returned by a single convolution call.
 use super::super::{
     TimbreNetwork, TimbreOutput,
     features::{assemble_normalized_acoustics, insert_vocoder_pitch, pitch_embedding},
@@ -83,7 +81,27 @@ impl<'network, 'tree> Program<'network, 'tree> {
         let network = self.network;
         let layout = &network.layout;
         let sampler = &network.sampler;
-        let refinement = &network.refinement;
+        let super::super::refinement::Refinement::Nineteen(refinement) = &network.refinement else {
+            return Err(VoiceError::new(
+                "19-child program received another refinement architecture",
+            ));
+        };
+        let super::super::sampling::SamplerChildren::Nineteen(children) = &sampler.children else {
+            return Err(VoiceError::new(
+                "19-child program received another sampler architecture",
+            ));
+        };
+        let super::super::config::TimbreArchitecture::Nineteen {
+            encoder,
+            encoded_affine,
+            decoder,
+            decoded_affine,
+        } = layout.architecture
+        else {
+            return Err(VoiceError::new(
+                "19-child program received another acoustic architecture",
+            ));
+        };
         let start = self.consumed;
         let end = start
             .saturating_add(max_frames)
@@ -128,11 +146,11 @@ impl<'network, 'tree> Program<'network, 'tree> {
         {
             *value = (*value + pitch) + impulse;
         }
-        let encoded = runtime.execute(layout.encoder, &sum, final_batch)?;
+        let encoded = runtime.execute(encoder, &sum, final_batch)?;
         self.encoded
-            .push(&runtime.execute(layout.encoded_affine, &encoded, final_batch)?)?;
+            .push(&runtime.execute(encoded_affine, &encoded, final_batch)?)?;
         self.down_controls.push(&runtime.execute(
-            sampler.children[2],
+            children[2],
             &input.controls.slice_frames(start..end)?,
             final_batch,
         )?)?;
@@ -153,11 +171,12 @@ impl<'network, 'tree> Program<'network, 'tree> {
             &input.ppg_intensity[low_range.clone()],
         )?;
         self.ppg_rows = low_range.end;
-        let hidden =
-            runtime.execute_conditioned(sampler.children[0], &noise, &condition, final_batch)?;
+        #[cfg(feature = "acoustic-diagnostic")]
+        super::super::probe::capture("0x1d3014", &noise, &condition)?;
+        let hidden = runtime.execute_conditioned(children[0], &noise, &condition, final_batch)?;
         self.ppg_hidden.push(&hidden)?;
-        let ppg_latent = runtime.execute(sampler.children[1], &hidden, final_batch)?;
-        let output_controls = runtime.execute(sampler.children[3], &hidden, final_batch)?;
+        let ppg_latent = runtime.execute(children[1], &hidden, final_batch)?;
+        let output_controls = runtime.execute(children[3], &hidden, final_batch)?;
         self.controls.push(&self.control_hold.extend(
             output_controls,
             target,
@@ -172,6 +191,8 @@ impl<'network, 'tree> Program<'network, 'tree> {
             &input.secondary_style.slice_frames(refine_range.clone())?,
         ])?;
         self.refinement_rows = refine_range.end;
+        #[cfg(feature = "acoustic-diagnostic")]
+        super::super::probe::capture("nineteen_refinement_input_unmapped", &refinement_input, &refinement_input)?;
         let latent = runtime.execute_conditioned(
             refinement.conditional,
             &refinement_input,
@@ -195,19 +216,22 @@ impl<'network, 'tree> Program<'network, 'tree> {
             &prior,
             &noise,
             &hidden,
-            &input.timbre_shape[timbre_range.clone()],
+            &input.timbre_intensity[timbre_range.clone()],
         )?;
         self.timbre_rows = timbre_range.end;
-        let hidden =
-            runtime.execute_conditioned(sampler.children[4], &data, &condition, final_batch)?;
-        let latent = runtime.execute(sampler.children[5], &hidden, final_batch)?;
-        let decoded = runtime.execute(layout.decoder, &latent, final_batch)?;
+        #[cfg(feature = "acoustic-diagnostic")]
+        super::super::probe::capture("0x1d4184", &data, &condition)?;
+        let hidden = runtime.execute_conditioned(children[4], &data, &condition, final_batch)?;
+        let latent = runtime.execute(children[5], &hidden, final_batch)?;
+        let decoded = runtime.execute(decoder, &latent, final_batch)?;
         let decoded = self
             .decoder_hold
             .extend(decoded, target, final_batch, false)?;
         self.decoded
-            .push(&runtime.execute(layout.decoded_affine, &decoded, final_batch)?)?;
+            .push(&runtime.execute(decoded_affine, &decoded, final_batch)?)?;
         let (refined, decoded) = align(&mut self.refined_spectral, &mut self.decoded, final_batch)?;
+        #[cfg(feature = "acoustic-diagnostic")]
+        super::super::probe::capture("0x1f66b2", &refined, &decoded)?;
         let spectral = runtime.execute_conditioned(
             layout.spectral_network,
             &refined,
@@ -222,6 +246,8 @@ impl<'network, 'tree> Program<'network, 'tree> {
             &mut self.spectral_auxiliary,
             final_batch,
         )?;
+        #[cfg(feature = "acoustic-diagnostic")]
+        super::super::probe::capture("0x1f6b29", &refined, &spectral)?;
         let auxiliary = runtime.execute_conditioned(
             layout.auxiliary_network,
             &refined,
@@ -274,10 +300,6 @@ impl<'network, 'tree> Program<'network, 'tree> {
 }
 
 fn identity(network: &TimbreNetwork<'_>, node: usize, frames: usize) -> Result<Sequence> {
-    let vector = network
-        .tree
-        .tensor(node)?
-        .vector()
-        .ok_or_else(|| VoiceError::new("Expected a timbre identity vector"))?;
+    let vector = crate::synthesis::voice::speakers::vector(network.tree, node, network.speaker)?;
     Sequence::new(frames, vector.len(), vector.repeat(frames))
 }

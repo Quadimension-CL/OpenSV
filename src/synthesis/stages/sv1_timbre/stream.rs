@@ -1,6 +1,3 @@
-//! Incremental compatible acoustic DAG. Temporal kernels retain their state;
-//! branch queues release only matching rows and flush only at the source end.
-
 use std::sync::Arc;
 
 use super::{
@@ -86,7 +83,6 @@ impl<'network, 'tree> Sv1TimbreStream<'network, 'tree> {
         self.consumed == self.total_frames()
     }
 
-    /// Consume a bounded input batch; delayed kernels can emit zero stable rows.
     pub fn next(&mut self, max_frames: usize) -> Result<TimbreOutput> {
         crate::synthesis::execution::checkpoint()?;
         if max_frames == 0 || self.is_finished() {
@@ -108,6 +104,10 @@ impl<'network, 'tree> Sv1TimbreStream<'network, 'tree> {
         self.convolution.push(&context.convolution)?;
         self.pointwise.push(&context.pointwise)?;
         let (context, features) = align(&mut self.convolution, &mut self.pointwise, flush)?;
+        #[cfg(feature="acoustic-diagnostic")]
+        for (label,value) in [("compatible_acoustic_context",&context),("compatible_acoustic_features",&features)] {
+            super::super::timbre::probe::capture(label,value,value)?;
+        }
         let range = self.sampler_rows..self.sampler_rows + context.frames;
         let mut noise = self.noise.next(context.frames)?;
         for (row, &scale) in noise
@@ -119,6 +119,10 @@ impl<'network, 'tree> Sv1TimbreStream<'network, 'tree> {
                 *value *= scale;
             }
         }
+        #[cfg(feature="acoustic-diagnostic")]
+        super::super::timbre::probe::capture("compatible_sampler_input",&noise,&context)?;
+        #[cfg(feature="acoustic-diagnostic")]
+        super::super::timbre::probe::capture("compatible_sampler_features",&features,&features)?;
         let latent = network.sampler.process(
             &mut self.runtime,
             SamplerInput {
@@ -130,11 +134,15 @@ impl<'network, 'tree> Sv1TimbreStream<'network, 'tree> {
             },
             flush,
         )?;
+        #[cfg(feature="acoustic-diagnostic")]
+        super::super::timbre::probe::capture("compatible_sampler_output",&latent,&latent)?;
         self.sampler_rows = range.end;
         let decoded =
             self.decoder
                 .process(&mut self.runtime, network.decoder, &context, &latent, flush)?;
         let physical = network.frontend.inverse_output(&decoded)?;
+        #[cfg(feature="acoustic-diagnostic")]
+        super::super::timbre::probe::capture("compatible_decoder_output",&physical,&physical)?;
         let output_end = self
             .emitted
             .checked_add(physical.frames)
@@ -143,15 +151,19 @@ impl<'network, 'tree> Sv1TimbreStream<'network, 'tree> {
                 VoiceError::new("Compatible acoustic stream exceeded its source timeline")
             })?;
         let mut acoustics = Sequence::zeros(physical.frames, physical.channels + 1)?;
-        for ((target, source), &log_hz) in acoustics
+        for (frame,((target, source), &log_hz)) in acoustics
             .values
             .chunks_exact_mut(acoustics.channels)
             .zip(physical.values.chunks_exact(physical.channels))
             .zip(&self.source.records.log_hz[self.emitted..output_end])
+            .enumerate()
         {
             target[0] = source[0];
             target[1] = log_hz.exp();
             target[2..].copy_from_slice(&source[1..]);
+            if self.source.spectral_silence.as_ref().is_some_and(|flags|flags[self.emitted+frame]) {
+                target[3..67].fill(-12.0);
+            }
         }
         let output = TimbreOutput {
             first_frame: self.emitted,

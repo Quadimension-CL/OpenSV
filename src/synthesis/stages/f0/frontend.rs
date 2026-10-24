@@ -1,8 +1,3 @@
-//! Shared note conditioning for the F0 and timbre models.
-//!
-//! This module builds the note matrix and frame expansion indexes. The matrix
-//! must pass through `normalizer_node` before entering the feature network.
-
 mod config;
 mod timing;
 
@@ -16,29 +11,31 @@ pub(crate) use timing::duration_seconds;
 pub const NOTE_FRONTEND_TYPE_ID: [u8; 16] = [
     0xc8, 0x66, 0x33, 0x90, 0x32, 0x8f, 0xfd, 0xad, 0x9d, 0x6a, 0x2c, 0xd8, 0x16, 0x42, 0x63, 0x22,
 ];
+pub const PHONETIC_NOTE_FRONTEND_TYPE_ID:[u8;16]=[
+    0xae,0xc1,0xef,0x93,0xaa,0xe8,0x3a,0xb6,
+    0x8f,0x0b,0xd7,0x2e,0xbe,0x6d,0x43,0xb1,
+];
 
-/// Note data and partitioning used by the conditioning frontend.
 #[derive(Clone, Debug)]
 pub struct FrontendNote {
-    /// Phone strings before language/unified-table mapping.
+
     pub phones: Vec<String>,
     pub pitch: f32,
     pub pitch_offset: f32,
     pub duration_seconds: f64,
-    /// Frame hop in seconds; normally 240 / 48_000.
+
     pub frame_seconds: f64,
-    /// Numeric record kind used directly by the conditioning model.
+
     pub kind: u32,
-    /// Per-note conditioning flag.
+
     pub flag: bool,
-    /// Optional tag, compared literally to the stored tags.
+
     pub tag: Option<String>,
     pub parts: u32,
     pub part_index: u32,
-    /// Durations of the associated linked notes.
+
     pub appended_durations: Vec<f64>,
-    /// Per-note performance controls retain the source note's full settings
-    /// after syllable splitting and boundary redistribution.
+
     pub performance: crate::model::NotePerformance,
 }
 
@@ -49,11 +46,11 @@ pub struct NoteFrontend {
 }
 
 pub struct NoteFeatures {
-    /// Unnormalized, note-major rows of `width` floats.
+
     pub values: Vec<f32>,
     pub width: usize,
     pub frame_counts: Vec<usize>,
-    /// Each note contributes `0..frame_counts[note]` to this flat array.
+
     pub frame_positions: Vec<usize>,
 }
 
@@ -62,17 +59,22 @@ impl NoteFrontend {
         #[cfg(feature = "synth-profile")]
         let _profile = crate::synthesis::profiling::span("note_frontend.prepare");
         let node = tree.node(index)?;
-        if node.type_id != NOTE_FRONTEND_TYPE_ID || node.children.len() != 4 {
-            return Err(VoiceError::new(
-                "Expected the shared note frontend with four children",
-            ));
-        }
+        let (normalizer,pitch_normalizer)=match (node.type_id,node.children.as_slice()) {
+            (NOTE_FRONTEND_TYPE_ID,[_,_,normalizer,pitch_normalizer])=>(*normalizer,*pitch_normalizer),
+            (PHONETIC_NOTE_FRONTEND_TYPE_ID,[map,normalizer,pitch_normalizer])=>{
+                if tree.node(*map)?.type_id!=crate::synthesis::voice::PHONETIC_MAP_TYPE_ID {
+                    return Err(VoiceError::new("Phonetic frontend lacks its named descriptor map"));
+                }
+                (*normalizer,*pitch_normalizer)
+            }
+            _=>return Err(VoiceError::new("Unsupported shared note frontend schema")),
+        };
         let configuration = Configuration::parse(&tree.payload(index)?)?;
-        let normalizer_node = node.children[2];
+        let normalizer_node = normalizer;
         Ok(Self {
             configuration,
             normalizer_node,
-            pitch_normalizer_node: node.children[3],
+            pitch_normalizer_node: pitch_normalizer,
         })
     }
 

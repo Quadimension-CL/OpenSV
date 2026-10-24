@@ -1,4 +1,3 @@
-//! Model-family contracts shared by full rendering and progressive preparation.
 use crate::synthesis::{
     rendered::PitchTrack,
     score::PreparedPhrase,

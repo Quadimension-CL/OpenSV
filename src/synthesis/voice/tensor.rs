@@ -4,7 +4,8 @@ use serde::Serialize;
 
 use super::{Result, VoiceError, array, product, sum, u32_at};
 
-/// File storage metadata. The inference layer separately defines execution layout.
+mod half;
+
 #[derive(Clone, Debug, Serialize)]
 pub struct TensorLayout {
     pub storage: &'static str,
@@ -15,19 +16,19 @@ pub struct TensorLayout {
     pub stored_bits: u32,
 }
 
-/// Owned immutable tensor values. Only `TensorLayout`, never weights, is serialized.
-/// Quantized bytes remain in file order; execution applies the decoding formula.
 #[derive(Clone)]
 pub enum TensorStorage {
     FloatMatrix {
         rows: usize,
         columns: usize,
+        stored_bits: u32,
         values: Arc<[f32]>,
     },
     FloatVector {
         values: Arc<[f32]>,
     },
     QuantizedMatrix {
+        legacy_integer_execution: bool,
         rows: usize,
         columns: usize,
         bits: u32,
@@ -45,8 +46,10 @@ impl TensorStorage {
                 rows,
                 columns,
                 values,
+                ..
             } => DenseMatrix::from_float(*rows, *columns, Arc::clone(values)),
             Self::QuantizedMatrix {
+                legacy_integer_execution,
                 rows,
                 columns,
                 bits,
@@ -54,7 +57,7 @@ impl TensorStorage {
                 scales,
                 values,
             } => {
-                DenseMatrix::from_quantized(*rows, *columns, *bits, *input_exponent, scales, values)
+                DenseMatrix::from_quantized_execution(*rows, *columns, *bits, *input_exponent, scales, values,*legacy_integer_execution)
             }
             Self::FloatVector { .. } => return Err(VoiceError::new("Expected matrix storage")),
         };
@@ -66,13 +69,18 @@ impl TensorStorage {
                 rows,
                 columns,
                 values,
+                stored_bits,
             } => TensorLayout {
-                storage: "float32_matrix",
+                storage: if *stored_bits == 16 {
+                    "float16_matrix"
+                } else {
+                    "float32_matrix"
+                },
                 rows: *rows,
                 columns: *columns,
                 elements: values.len(),
                 scales: 0,
-                stored_bits: 32,
+                stored_bits: *stored_bits,
             },
             Self::FloatVector { values } => TensorLayout {
                 storage: "float32_vector",
@@ -115,7 +123,6 @@ impl TensorStorage {
     }
 }
 
-/// Parse once into typed storage after the exact-size and overflow checks.
 pub(super) fn load(bytes: &[u8]) -> Result<TensorStorage> {
     let layout = parse(bytes)?;
     let payload = &bytes[16..];
@@ -123,7 +130,19 @@ pub(super) fn load(bytes: &[u8]) -> Result<TensorStorage> {
         FLOAT_MATRIX => Ok(TensorStorage::FloatMatrix {
             rows: layout.rows,
             columns: layout.columns,
+            stored_bits: 32,
             values: floats(&payload[8..]),
+        }),
+        HALF_MATRIX => Ok(TensorStorage::FloatMatrix {
+            rows: layout.rows,
+            columns: layout.columns,
+            stored_bits: 16,
+            values: payload[8..]
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .map(|chunk| half::to_f32(u16::from_le_bytes(*chunk)))
+                .collect(),
         }),
         FLOAT_VECTOR => Ok(TensorStorage::FloatVector {
             values: floats(&payload[4..]),
@@ -131,6 +150,7 @@ pub(super) fn load(bytes: &[u8]) -> Result<TensorStorage> {
         QUANTIZED => {
             let matrix = sum(16, product(layout.scales, 4)?)?;
             Ok(TensorStorage::QuantizedMatrix {
+                legacy_integer_execution: false,
                 rows: layout.rows,
                 columns: layout.columns,
                 bits: layout.stored_bits,
@@ -152,9 +172,11 @@ fn floats(bytes: &[u8]) -> Arc<[f32]> {
         .collect()
 }
 
-// Tensor type identities in DNNI v3 resources.
 const FLOAT_MATRIX: [u8; 16] = [
     0x16, 0xff, 0x49, 0x6e, 0xfa, 0x84, 0x6a, 0x4f, 0xd8, 0xf6, 0xcb, 0xce, 0x85, 0x85, 0x6b, 0x3d,
+];
+const HALF_MATRIX: [u8; 16] = [
+    0x3a, 0xf7, 0x90, 0xfd, 0x2c, 0x5b, 0xd8, 0x40, 0x48, 0x34, 0x48, 0x1c, 0xf6, 0x11, 0x34, 0x01,
 ];
 const FLOAT_VECTOR: [u8; 16] = [
     0x19, 0xd7, 0x8b, 0x4c, 0x9d, 0x82, 0x95, 0xbe, 0x5d, 0x83, 0x3b, 0x1e, 0x99, 0x97, 0x82, 0x44,
@@ -165,7 +187,7 @@ const QUANTIZED: [u8; 16] = [
 
 pub(super) fn is_known(prefix: &[u8]) -> bool {
     prefix.len() >= 16
-        && [FLOAT_MATRIX, FLOAT_VECTOR, QUANTIZED]
+        && [FLOAT_MATRIX, HALF_MATRIX, FLOAT_VECTOR, QUANTIZED]
             .contains(&prefix[..16].try_into().expect("16-byte prefix"))
 }
 
@@ -173,18 +195,26 @@ pub(super) fn parse(bytes: &[u8]) -> Result<TensorLayout> {
     let kind: [u8; 16] = array(bytes, 0)?;
     let payload = &bytes[16..];
     match kind {
-        FLOAT_MATRIX => {
+        FLOAT_MATRIX | HALF_MATRIX => {
             let rows = u32_at(payload, 0)? as usize;
             let columns = u32_at(payload, 4)? as usize;
             let elements = product(rows, columns)?;
-            exact_length(payload, sum(8, product(elements, 4)?)?)?;
+            let stored_bits = if kind == HALF_MATRIX { 16 } else { 32 };
+            exact_length(
+                payload,
+                sum(8, product(elements, stored_bits as usize / 8)?)?,
+            )?;
             Ok(TensorLayout {
-                storage: "float32_matrix",
+                storage: if stored_bits == 16 {
+                    "float16_matrix"
+                } else {
+                    "float32_matrix"
+                },
                 rows,
                 columns,
                 elements,
                 scales: 0,
-                stored_bits: 32,
+                stored_bits,
             })
         }
         FLOAT_VECTOR => {

@@ -9,11 +9,11 @@ use eframe::egui::*;
 pub(super) fn show(app: &mut App, ui: &mut Ui, selection: &PerformanceSelection, enabled: bool) {
     let accent_enabled = selected_mandarin(app);
     ui.add_enabled_ui(enabled, |ui| {
-        ui.weak("说唱声调");
+        ui.weak(crate::i18n::t("说唱声调"));
         let label = if accent_enabled {
             match selection.accent.as_deref() {
-                None => "多个值",
-                Some("") => "自动",
+                None => crate::i18n::t("多个值"),
+                Some("") => crate::i18n::t("自动"),
                 Some(value) => value,
             }
         } else {
@@ -26,7 +26,7 @@ pub(super) fn show(app: &mut App, ui: &mut Ui, selection: &PerformanceSelection,
                 .selected_text(label)
                 .show_ui(ui, |ui| {
                     if ui
-                        .selectable_label(selection.accent.as_deref() == Some(""), "自动")
+                        .selectable_label(selection.accent.as_deref() == Some(""), crate::i18n::t("自动"))
                         .clicked()
                     {
                         clicked = Some(None);
@@ -46,7 +46,7 @@ pub(super) fn show(app: &mut App, ui: &mut Ui, selection: &PerformanceSelection,
                 })
                 .response
                 .on_disabled_hover_text(
-                    "说唱声调仅用于汉语普通话，请选择语言均为汉语普通话的音符。",
+                    crate::i18n::t("说唱声调仅用于汉语普通话，请选择语言均为汉语普通话的音符。"),
                 );
         });
         if let Some(value) = clicked {
@@ -56,14 +56,14 @@ pub(super) fn show(app: &mut App, ui: &mut Ui, selection: &PerformanceSelection,
         for (parameter, label, current, minimum, maximum) in [
             (
                 PerformanceParameter::RapIntonation,
-                "语调",
+                crate::i18n::t("语调"),
                 selection.r_intonation,
                 NotePerformance::RAP_INTONATION_MIN,
                 NotePerformance::RAP_INTONATION_MAX,
             ),
             (
                 PerformanceParameter::RapTone,
-                "音调",
+                crate::i18n::t("音调"),
                 selection.r_tone,
                 NotePerformance::RAP_TONE_MIN,
                 NotePerformance::RAP_TONE_MAX,
@@ -74,8 +74,8 @@ pub(super) fn show(app: &mut App, ui: &mut Ui, selection: &PerformanceSelection,
             let span = f64::from(maximum) - minimum;
             let mut value = (f64::from(current.flatten().unwrap_or(0.0)) - minimum) / span;
             let text = match current {
-                None => "多个值".into(),
-                Some(None) => "自动".into(),
+                None => crate::i18n::t("多个值").into(),
+                Some(None) => crate::i18n::t("自动").into(),
                 Some(Some(value)) => format!("{value:+.2}"),
             };
             let response = widgets::labeled_slider(

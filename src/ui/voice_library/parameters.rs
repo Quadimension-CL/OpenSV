@@ -1,186 +1,49 @@
-mod interaction;
-
-pub(crate) use interaction::end_frame;
-
-use super::{error_label, selected_entry, weak, widgets};
-use crate::{
-    app::App,
-    editor::{VoiceEditParameter, VoiceParameterState},
-    model::{VocalModeValues, VoiceParameter},
-    synthesis::voice::VoiceFamily,
-};
+use crate::{app::App, synthesis::voice::VoiceFamily, ui::theme::*};
+use crate::synthesis::parameters::{ParameterSpec,VOICE_CONTROLS};
 use eframe::egui::*;
+use super::widgets;
 
-pub(super) fn styles(app: &mut App, ui: &mut Ui) {
-    interaction::prepare(app, ui.ctx());
-    let Some(styles) = app
-        .voice_inventory()
-        .and_then(|voice| voice.configuration.as_ref())
-        .map(|configuration| configuration.styles.clone())
-    else {
-        weak(ui, "加载歌声后显示支持的唱法");
-        return;
-    };
-    let mut current = state(app, ui);
-    let family = selected_entry(app).and_then(|entry| entry.family);
-    let components = match family {
-        Some(VoiceFamily::Sv2) => [true; 3],
-        Some(VoiceFamily::Sv1 | VoiceFamily::Sv2Compatible) => [false, true, false],
-        None => [false; 3],
-    };
-    if family.is_some()
-        && let Some(current_state) = &current
-        && unsupported_styles(app, ui, current_state, &styles, components)
-    {
-        current = state(app, ui);
-    }
-    if styles.is_empty() {
-        weak(ui, "此歌声没有可用的唱法");
-        return;
-    }
-    let enabled = current.is_some() && interaction::editable(app, ui);
-    let target = target_id(app);
-    ui.push_id(target, |ui| {
-        ui.spacing_mut().item_spacing.y = 2.0;
-        for name in styles {
-            let mut values = current
-                .as_ref()
-                .map_or(VocalModeValues::DEFAULT, |state| state.values.style(&name))
-                .as_array();
-            let id = ui.make_persistent_id(("vocal-mode", &name));
-            let response = ui
-                .add_enabled_ui(enabled, |ui| {
-                    widgets::style(ui, &name, &mut values, components)
-                })
-                .inner;
-            interaction::apply(
-                app,
-                ui.ctx(),
-                id,
-                response,
-                VoiceEditParameter::VocalMode(name.clone()),
-                |editor| editor.update_vocal_mode(&name, VocalModeValues::from_array(values)),
-            );
-        }
-    });
+pub(super) fn show(app: &mut App, ui: &mut Ui) {
+    ui.spacing_mut().item_spacing.y = 0.0;
+    for spec in VOICE_CONTROLS {control(app,ui,spec);}
 }
-
-fn unsupported_styles(
-    app: &mut App,
-    ui: &mut Ui,
-    state: &VoiceParameterState,
-    styles: &[String],
-    components: [bool; 3],
-) -> bool {
-    let unsupported = state.values.vocal_modes.iter().any(|(name, values)| {
-        let known = styles.contains(name);
-        values
-            .as_array()
-            .into_iter()
-            .zip(components)
-            .any(|(value, enabled)| value != 0.0 && (!known || !enabled))
-    });
-    if !unsupported {
-        return false;
-    }
-    weak(ui, "当前设置包含此歌声不支持的唱法参数。");
-    let enabled = interaction::editable(app, ui) && !app.editor.is_editing();
-    let clicked = ui
-        .add_enabled(enabled, Button::new("重置不支持的唱法"))
-        .on_hover_text("仅重置不支持的唱法设置，保留其余参数；可撤销。")
-        .clicked();
-    ui.add_space(8.0);
-    if !clicked {
-        return false;
-    }
-    app.commit_lyric();
-    match app.editor.reset_unsupported_vocal_modes(styles, components) {
-        Ok(()) => {
-            app.status.clear();
-            ui.ctx().request_repaint();
-            true
+pub(super) fn control(app:&mut App,ui:&mut Ui,spec:ParameterSpec) {
+    let supported = app.voice_inventory().and_then(|v| v.configuration.as_ref())
+        .is_some_and(|v| v.family == VoiceFamily::Sv2);
+    match app.editor.voice_parameter(spec) {
+        Ok((reference, value)) if supported => {
+            let id = ui.make_persistent_id((spec.key, reference, app.editor.revision));
+            let mut current = ui.ctx().data_mut(|d| d.get_temp::<f32>(id)).unwrap_or(value);
+            let response = slider(ui, &mut current,spec);
+            if response.dragged() { ui.ctx().data_mut(|d| d.insert_temp(id, current)); }
+            if response.drag_stopped() || response.clicked() || response.double_clicked() {
+                ui.ctx().data_mut(|d| d.remove::<f32>(id));
+                if let Err(error) = app.editor.set_voice_parameter(reference,spec,current) { app.error = Some(error); }
+            }
         }
-        Err(error) => {
-            app.error = Some(error);
-            false
-        }
+        _ => widgets::slider(ui,crate::i18n::t(spec.label)),
     }
 }
 
-pub(super) fn scalars(app: &mut App, ui: &mut Ui) {
-    sliders(app, ui, &VoiceParameter::BASIC);
-}
-
-pub(super) fn tuning(app: &mut App, ui: &mut Ui) {
-    let summary = match app.editor.voice_parameter_state() {
-        Ok(Some(state)) => {
-            let key_shift = state.values.scalar(VoiceParameter::KeyShift).unwrap_or(0.0);
-            let key = (60.0 + key_shift) as usize % 12;
-            let names = [
-                "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B",
-            ];
-            let frequency = 440.0 * (state.values.tuning_semitones() / 12.0).exp2();
-            let frequency = format!("{frequency:.2}");
-            let frequency = frequency.trim_end_matches('0').trim_end_matches('.');
-            format!("调性: {}，A4 = {frequency} Hz", names[key])
-        }
-        _ => "调性: —，A4 = — Hz".into(),
-    };
-    widgets::readout(ui, &summary);
-    ui.add_space(10.0);
-    sliders(app, ui, &VoiceParameter::TUNING);
-}
-
-fn sliders(app: &mut App, ui: &mut Ui, parameters: &[VoiceParameter]) {
-    interaction::prepare(app, ui.ctx());
-    let state = state(app, ui);
-    let enabled = state.is_some() && interaction::editable(app, ui);
-    let target = target_id(app);
-    ui.push_id(target, |ui| {
-        ui.spacing_mut().item_spacing.y = 0.0;
-        for &parameter in parameters {
-            let mut value = state
-                .as_ref()
-                .and_then(|state| state.values.scalar(parameter))
-                .unwrap_or_else(|| parameter.default_value());
-            let id = ui.make_persistent_id(parameter.key());
-            let response = ui
-                .add_enabled_ui(enabled, |ui| {
-                    widgets::parameter_slider(ui, parameter, &mut value)
-                })
-                .inner;
-            interaction::apply(
-                app,
-                ui.ctx(),
-                id,
-                response,
-                VoiceEditParameter::Scalar(parameter),
-                |editor| editor.update_voice_parameter(parameter, value),
-            );
-        }
-    });
-}
-
-fn state(app: &App, ui: &mut Ui) -> Option<VoiceParameterState> {
-    match app.editor.voice_parameter_state() {
-        Ok(Some(state)) => Some(state),
-        Ok(None) => {
-            weak(ui, "请选择歌声音轨以调整参数");
-            None
-        }
-        Err(error) => {
-            error_label(ui, format!("无法读取当前歌声参数：{error}"));
-            None
-        }
+pub(super) fn slider(ui: &mut Ui, value: &mut f32,spec:ParameterSpec) -> Response {
+    let height=if spec.key.starts_with("consonant"){48.0}else{51.0};
+    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::hover());
+    let y = rect.top() + 32.0;
+    let rail = Rect::from_min_max(pos2(rect.left() + 9.5, y - 10.0), pos2(rect.right() - 9.5, y + 10.0));
+    let response = ui.interact(rail.expand2(vec2(9.5, 0.0)), ui.id().with(spec.key), Sense::click_and_drag());
+    if response.double_clicked() { *value = 0.0; }
+    else if (response.dragged() || response.clicked()) && let Some(pointer) = response.interact_pointer_pos() {
+        let raw=((pointer.x-rail.center().x)/(rail.width()/2.0)*spec.limit).clamp(-spec.limit,spec.limit);
+        *value=if spec.step>0.0 {(raw/spec.step).round()*spec.step}else{raw};
     }
-}
-
-fn target_id(app: &App) -> Id {
-    Id::new((
-        "voice-parameters",
-        app.editor.track,
-        app.editor.reference,
-        app.voice_selection()
-            .map(|selection| (selection.database_id, selection.revision)),
-    ))
+    let painter = ui.painter();
+    painter.text(rect.min + vec2(0.0, 4.0), Align2::LEFT_TOP,crate::i18n::t(spec.label), FontId::proportional(12.0), MUTED);
+    painter.hline(rail.x_range(), y, Stroke::new(2.0, EDGE));
+    let center = pos2(rail.center().x + (*value/spec.limit).clamp(-1.0,1.0) * rail.width() / 2.0, y);
+    painter.line_segment([pos2(rail.center().x, y), center], Stroke::new(2.0, TEXT));
+    painter.circle(center, 9.5, EDGE, Stroke::NONE);
+    painter.circle(center, 8.5, Color32::from_rgb(65,63,68), Stroke::new(0.7, BUTTON_ACTIVE));
+    painter.circle_filled(center, 3.0, TEXT);
+    response.widget_info(|| WidgetInfo::labeled(WidgetType::Slider, true,crate::i18n::t(spec.label)));
+    response.on_hover_text(format!("{}: {:.3} {}",crate::i18n::t(spec.label),*value,crate::i18n::t(spec.unit)))
 }

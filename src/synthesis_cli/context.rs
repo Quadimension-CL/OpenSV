@@ -1,14 +1,13 @@
-//! Explicit model-context imports, shared by Windows and Linux CLI entry points.
-
 use rynthv::synthesis::voice::{VoiceInventory, session_identity};
 use serde_json::{Value, json};
 use std::{collections::BTreeMap, ffi::OsString, path::PathBuf};
+use zeroize::Zeroizing;
 
 pub enum ContextImport {
     File(PathBuf),
     Identity(u64),
     Process(u32),
-    SessionFile(PathBuf),
+    SessionFile { path: PathBuf, key: Option<Zeroizing<u64>> },
 }
 
 impl ContextImport {
@@ -17,6 +16,8 @@ impl ContextImport {
         let identity = values.remove("--identity");
         let process = values.remove("--process-id");
         let session_file = values.remove("--session-file");
+        let key = values.remove("--session-key");
+        if key.is_some() && session_file.is_none() {return Err("--session-key requires --session-file; it is not a duration override".into());}
         match (file, identity, process, session_file) {
             (Some(path), None, None, None) => {
                 if path.is_empty() {
@@ -54,7 +55,9 @@ impl ContextImport {
                             .into(),
                     );
                 }
-                Ok(Self::SessionFile(PathBuf::from(path)))
+                let key = key.map(|value| session_identity::parse_session_key(value.to_str().ok_or("--session-key must be UTF-8")?)
+                    .map(Zeroizing::new).map_err(|e|e.to_string())).transpose()?;
+                Ok(Self::SessionFile {path: PathBuf::from(path), key})
             }
             _ => Err(
                 "import-context requires exactly one of --context-file, --identity, --process-id, or --session-file"
@@ -81,8 +84,11 @@ impl ContextImport {
             Self::Process(process_id) => {
                 session_identity::import_online_context(name, version, process_id)
             }
-            Self::SessionFile(path) => {
-                session_identity::import_session_context(name, version, &path)
+            Self::SessionFile { path, key } => {
+                match key {
+                    Some(key) => session_identity::import_session_context_with_key(name, version, &path, *key),
+                    None => session_identity::import_session_context(name, version, &path),
+                }
             }
         }
         .map_err(|error| error.to_string())?;

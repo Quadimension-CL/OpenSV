@@ -20,9 +20,12 @@ struct PhonemeDraft {
 }
 
 pub(super) fn show(app: &mut App, ui: &mut Ui) {
-    section(ui, "模式", |ui| performance::mode(app, ui));
-    section(ui, "演绎", |ui| performance::expression(app, ui));
-    section(ui, "AI 重录", |ui| retakes::show(app, ui));
+    section(ui, crate::i18n::t("模式"), |ui| performance::mode(app, ui));
+    if performance::spread::available(app) {
+        section(ui, crate::i18n::t("合唱扩散"), |ui| performance::spread::show(app,ui));
+    }
+    section(ui, crate::i18n::t("演绎"), |ui| performance::expression(app, ui));
+    section(ui, crate::i18n::t("AI 重录"), |ui| retakes::show(app, ui));
     let notes: Vec<_> = app
         .editor
         .notes()
@@ -30,13 +33,13 @@ pub(super) fn show(app: &mut App, ui: &mut Ui) {
         .filter(|n| app.editor.selected.contains(&n.id))
         .cloned()
         .collect();
-    section(ui, "语言", |ui| {
+    section(ui, crate::i18n::t("语言"), |ui| {
         ui.add_enabled_ui(!notes.is_empty(), |ui| language(app, ui, &notes));
     });
-    section(ui, "音素", |ui| {
+    section(ui, crate::i18n::t("音素"), |ui| {
         ui.add_enabled_ui(!notes.is_empty(), |ui| phonemes(app, ui));
         if notes.is_empty() {
-            ui.weak("在钢琴卷帘中选择音符");
+            ui.weak(crate::i18n::t("在钢琴卷帘中选择音符"));
         }
     });
 }
@@ -71,15 +74,15 @@ fn language(app: &mut App, ui: &mut Ui, notes: &[Note]) {
     let mixed = notes.iter().any(|n| override_value(n) != original);
     let mut selected = original.clone();
     let default_label = inherited.map_or_else(
-        || "继承歌声语言".into(),
-        |lang| format!("{}（继承歌声）", lang.label()),
+        || crate::i18n::t("继承歌声语言").into(),
+        |lang| crate::lformat!("{}（继承歌声）", crate::i18n::t(lang.label())),
     );
     let label = if mixed {
-        "多个值".into()
+        crate::i18n::t("多个值").into()
     } else if selected.is_empty() {
         default_label.clone()
     } else {
-        Language::parse(&selected).map_or_else(|| selected.clone(), |lang| lang.label().into())
+        Language::parse(&selected).map_or_else(|| selected.clone(), |lang| crate::i18n::t(lang.label()).into())
     };
     let mut clicked = false;
     ComboBox::from_id_salt("note-language")
@@ -91,7 +94,7 @@ fn language(app: &mut App, ui: &mut Ui, notes: &[Note]) {
                 .clicked();
             for language in languages {
                 clicked |= ui
-                    .selectable_value(&mut selected, language.id().to_owned(), language.label())
+                    .selectable_value(&mut selected, language.id().to_owned(), crate::i18n::t(language.label()))
                     .clicked();
             }
         });
@@ -114,8 +117,7 @@ fn phonemes(app: &mut App, ui: &mut Ui) {
             .collect::<std::collections::BTreeSet<_>>()
             != app.editor.selected;
     if selection_changed && draft.dirty {
-        // A canvas click can change selection before this panel is drawn. The
-        // draft belongs to the original notes, never the newly selected ones.
+
         let still_current = app.editor.project.group(&draft.group).is_some_and(|group| {
             draft
                 .selection
@@ -165,12 +167,12 @@ fn phonemes(app: &mut App, ui: &mut Ui) {
         };
     }
     let mixed = draft.source.windows(2).any(|pair| pair[0] != pair[1]);
-    ui.weak("音素");
+    ui.weak(crate::i18n::t("音素"));
     let response = ui.add_sized(
         vec2(ui.available_width(), 28.0),
         TextEdit::singleline(&mut draft.text)
             .id(id.with("input"))
-            .hint_text(if mixed { "多个值" } else { "自动" })
+            .hint_text(if mixed { crate::i18n::t("多个值") } else { crate::i18n::t("自动") })
             .vertical_align(Align::Center)
             .margin(vec2(7.0, 5.0))
             .background_color(crate::ui::theme::BORDER),
@@ -195,7 +197,7 @@ fn phonemes(app: &mut App, ui: &mut Ui) {
         response.surrender_focus();
     }
     response.on_hover_text(
-        "音素以空格分隔；回车或移开焦点应用到所选音符，清空恢复自动发音。Esc 取消输入。",
+        crate::i18n::t("音素以空格分隔；回车或移开焦点应用到所选音符，清空恢复自动发音。Esc 取消输入。"),
     );
     let even = |note: &Note| {
         note.attributes
@@ -206,7 +208,7 @@ fn phonemes(app: &mut App, ui: &mut Ui) {
     let mut value = notes.first().is_none_or(even);
     let mixed = notes.iter().any(|note| even(note) != value);
     if ui
-        .add(Checkbox::new(&mut value, "按音符时值均匀分配音节").indeterminate(mixed))
+        .add(Checkbox::new(&mut value, crate::i18n::t("按音符时值均匀分配音节")).indeterminate(mixed))
         .changed()
     {
         app.commit_lyric();

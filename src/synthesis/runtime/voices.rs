@@ -137,10 +137,9 @@ impl Runtime {
             worker::Event::VisualPatches { revision, patches } if revision == v.revision => {
                 self.patch_visuals(patches)
             }
-            worker::Event::Phonemes {
-                revision,
-                snapshots,
-            } if revision == v.revision => self.complete_phonemes(snapshots),
+            worker::Event::Phonemes {revision,owner,snapshot} if revision==v.revision => {
+                self.prepared_phonemes(owner,snapshot);
+            }
             worker::Event::Source { revision, source } if revision == v.revision => {
                 let unchanged = v
                     .live
@@ -215,8 +214,7 @@ impl Runtime {
         self.stats.failed += self.binding_errors.len();
     }
     pub(super) fn clear_voices(&mut self) {
-        // A confirmed import owns its singer and must deliver its result even
-        // if resource settings are refreshed while the file is being saved.
+
         if !self
             .context_import
             .dialog
@@ -226,7 +224,6 @@ impl Runtime {
             self.context_import = super::ContextImport::default();
         }
         self.voices.clear();
-        self.phonemes.clear();
         self.export_owners.clear();
         self.stats = CacheStats::default();
         self.error = None;

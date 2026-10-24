@@ -1,8 +1,6 @@
 use super::{Clock, PcmComponents, Result, VoiceError};
 use std::ops::Range;
 
-/// A bounded rolling buffer. Already published samples are discarded rather
-/// than cloning a growing full render on each half-second publication.
 #[derive(Default)]
 pub(super) struct Buffer {
     origin: i64,
@@ -17,8 +15,7 @@ impl Buffer {
             if !pcm.secondary.is_empty() || !pcm.start_seconds.is_finite() {
                 return Err(VoiceError::new("Invalid empty progressive vocoder chunk"));
             }
-            // The network can consume frames without releasing PCM yet. An
-            // empty return supplies no sample-clock evidence or ready audio.
+
             return Ok(());
         }
         let clock = Clock::new(pcm.start_seconds, pcm.primary.len())?;
@@ -74,7 +71,6 @@ impl Buffer {
         }
     }
 
-    /// This may only be called after observing the actual final model sample.
     pub fn natural_padding(&mut self, final_sample: i64, required_end: i64) -> Result<()> {
         if self.received_end != Some(final_sample) {
             return Err(VoiceError::new(

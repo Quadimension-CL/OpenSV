@@ -1,332 +1,160 @@
-mod create;
-mod edits;
-
-use super::{geometry::Mapping, *};
+use super::geometry;
+use crate::{
+    app::App,
+    model::{Automation, EntityId, GroupRef, Parameter, QUARTER, ticks},
+    ui::{
+        piano::Gesture,
+        state::{CurveTool, Lane},
+        timeline::beat_at,
+    },
+};
+use eframe::egui::*;
 use std::collections::BTreeMap;
 
-pub struct ParameterGesture {
-    owner: Owner,
-    mapping: Mapping,
-    origin: Pos2,
-    pointer: Pos2,
-    original: Vec<(i64, f64)>,
-    initial: BTreeSet<i64>,
-    selected: BTreeSet<i64>,
-    kind: Kind,
-    button: PointerButton,
+pub struct CurveGesture {
+    pub lane: u64,
+    reference: GroupRef,
+    track: EntityId,
+    parameter: Parameter,
+    tool: CurveTool,
+    original: Automation,
+    points: BTreeMap<i64, f64>,
+    first: (i64, f64),
+    last: (i64, f64),
+    guard: i64,
     frame: u64,
-    transaction: bool,
 }
-
-enum Kind {
-    Select {
-        time_range: bool,
-        additive: bool,
-    },
-    Move,
-    Draw {
-        line: bool,
-        first: (i64, f64),
-        last: (i64, f64),
-        samples: BTreeMap<i64, f64>,
-        range: (i64, i64),
-    },
-    Erase {
-        range: (i64, i64),
-        radius: i64,
-    },
-}
-
-impl ParameterGesture {
-    pub fn lane(&self) -> u64 {
-        self.owner.lane
-    }
-    fn owns(&self, app: &App) -> bool {
-        app.editor.track == self.owner.track
-            && app.editor.active_ref() == Some(&self.mapping.reference)
-            && app.view.lanes.iter().any(|lane| {
-                lane.id == self.owner.lane && lane.visible && lane.foreground == self.owner.target
-            })
-            && (!self.transaction || app.editor.is_editing())
-    }
-}
-
-fn blocked(app: &App, ctx: &Context) -> bool {
-    app.piano_collapsed
-        || app.pending.is_some()
-        || app.error.is_some()
-        || app.settings
-        || app.voice_manager
-        || app.about
-        || app.rename.is_some()
-        || app.time_edit.is_some()
-        || app.fill_lyrics.is_some()
-        || app.midi_import.is_some()
-        || app.synthesis.context_import.dialog.is_some()
-        || Popup::is_any_open(ctx)
-        || app.view_pan.is_active()
-}
-
 pub(super) fn interaction(
     app: &mut App,
     ui: &Ui,
     response: &Response,
+    canvas: Rect,
     lane: &Lane,
-    mapping: &Mapping,
+    clip: Rect,
 ) {
-    if !ui.is_enabled() || blocked(app, ui.ctx()) || !ui.input(|input| input.focused) {
+    if lane.tool == CurveTool::Point {
         return;
     }
-    if response.hovered() {
-        ui.ctx()
-            .set_cursor_icon(if lane.tool == ParameterTool::ControlPoints {
-                CursorIcon::Default
+    if response.drag_started_by(PointerButton::Primary)
+        && app.gesture.is_none()
+        && !app.editor.is_editing()
+        && let Some(p) = ui
+            .input(|i| i.pointer.press_origin())
+            .filter(|p| clip.contains(*p))
+        && let Some(reference) = app.editor.active_ref().cloned()
+    {
+        let first = sample(app, canvas, lane, &reference, p);
+        let original = app
+            .editor
+            .group()
+            .unwrap()
+            .automation(&lane.foreground)
+            .cloned()
+            .unwrap_or_default();
+        app.editor.begin(crate::i18n::t("绘制参数曲线"));
+        app.gesture = Some(Gesture::Curve(Box::new(CurveGesture {
+            lane: lane.id,
+            reference,
+            track: app.editor.track,
+            parameter: lane.foreground.clone(),
+            tool: lane.tool,
+            original,
+            points: BTreeMap::from([first]),
+            first,
+            last: first,
+            guard: if lane.tool == CurveTool::Line {
+                QUARTER / 40
             } else {
-                CursorIcon::Crosshair
-            });
+                QUARTER / 64
+            },
+            frame: ui.ctx().cumulative_frame_nr(),
+        })));
     }
-    if response.double_clicked()
-        && lane.tool == ParameterTool::ControlPoints
-        && let Some(pos) = response.interact_pointer_pos()
-        && mapping.clip().contains(pos)
-        && editable(app, &lane.foreground)
-    {
-        finish(app, ui.ctx(), false);
-        create::add_point(app, lane, mapping, pos);
+    let active = matches!(&app.gesture,Some(Gesture::Curve(g)) if g.lane==lane.id);
+    if !active {
         return;
     }
-    for event in ui.input(|input| input.events.clone()) {
-        match event {
-            Event::PointerButton {
-                pos,
-                button,
-                pressed: true,
-                modifiers,
-            } if app.gesture.is_none()
-                && app.group_gesture.is_none()
-                && mapping.clip().contains(pos)
-                && (response.hovered()
-                    || response.is_pointer_button_down_on()
-                    || response.clicked_by(button)
-                    || response.dragged_by(button)) =>
-            {
-                if button == PointerButton::Primary
-                    || (button == PointerButton::Secondary
-                        && lane.tool != ParameterTool::ControlPoints)
-                {
-                    start(app, ui, lane, mapping, pos, button, modifiers);
-                }
-            }
-            Event::PointerMoved(pos) if matches!(&app.gesture, Some(Gesture::Parameter(gesture)) if gesture.owner.lane == lane.id) =>
-            {
-                extend(app, pos);
-            }
-            Event::PointerButton {
-                pos,
-                button,
-                pressed: false,
-                ..
-            } if matches!(&app.gesture, Some(Gesture::Parameter(gesture)) if gesture.owner.lane == lane.id && gesture.button == button) =>
-            {
-                extend(app, pos);
-                finish(app, ui.ctx(), false);
-            }
-            _ => {}
-        }
-    }
-    if let Some(Gesture::Parameter(gesture)) = &mut app.gesture
-        && gesture.owner.lane == lane.id
-    {
-        gesture.frame = ui.ctx().cumulative_frame_nr();
-        ui.ctx().set_dragged_id(response.id);
-    }
-}
-
-fn start(
-    app: &mut App,
-    ui: &Ui,
-    lane: &Lane,
-    mapping: &Mapping,
-    pos: Pos2,
-    button: PointerButton,
-    modifiers: Modifiers,
-) {
-    crate::ui::phonemes::phoneme_deactivate(app);
-    app.commit_lyric();
-    if app.editor.is_editing() {
-        return;
-    }
-    ui.ctx().memory_mut(|memory| {
-        if let Some(id) = memory.focused() {
-            memory.surrender_focus(id);
-        }
-    });
-    focus(app, lane);
-    let original = app
-        .editor
-        .automation(&lane.foreground)
-        .map_or_else(Vec::new, |curve| curve.points.clone());
-    let initial = app.parameter_lane.selected.clone();
-    let point = mapping.value_at(pos);
-    let kind = if lane.tool == ParameterTool::ControlPoints {
-        if let Some(time) = mapping.nearest(&original, pos) {
-            if modifiers.ctrl || modifiers.command {
-                if !app.parameter_lane.selected.remove(&time) {
-                    app.parameter_lane.selected.insert(time);
-                }
-                app.parameter_lane.anchor = Some(time);
-                return;
-            }
-            if modifiers.shift {
-                let anchor = app.parameter_lane.anchor.unwrap_or(time);
-                app.parameter_lane
-                    .selected
-                    .extend(original.iter().filter_map(|point| {
-                        ((anchor.min(time)..=anchor.max(time)).contains(&point.0))
-                            .then_some(point.0)
-                    }));
-            } else if !app.parameter_lane.selected.contains(&time) {
-                app.parameter_lane.selected = BTreeSet::from([time]);
-            }
-            app.parameter_lane.anchor = Some(time);
-            if !editable(app, &lane.foreground) {
-                return;
-            }
-            Kind::Move
-        } else {
-            if !modifiers.ctrl && !modifiers.command {
-                app.parameter_lane.selected.clear();
-            }
-            Kind::Select {
-                time_range: modifiers.shift,
-                additive: modifiers.ctrl || modifiers.command,
-            }
-        }
-    } else {
-        if !editable(app, &lane.foreground) {
+    if let Some(p) = response.interact_pointer_pos() {
+        let Some(Gesture::Curve(mut g)) = app.gesture.take() else {
+            unreachable!()
+        };
+        if g.track != app.editor.track || app.editor.active_ref() != Some(&g.reference) {
+            app.editor.cancel();
             return;
         }
-        if button == PointerButton::Secondary {
-            let radius = (4.0 * QUARTER as f64 / f64::from(mapping.viewport.beat_width))
-                .round()
-                .max(1.0) as i64;
-            Kind::Erase {
-                range: (point.0, point.0),
-                radius,
-            }
+        let point = sample(app, canvas, lane, &g.reference, p);
+        if g.tool == CurveTool::Line {
+            g.points.clear();
+            g.points.insert(g.first.0, g.first.1);
+            g.points.insert(point.0, point.1);
         } else {
-            Kind::Draw {
-                line: lane.tool == ParameterTool::Line,
-                first: point,
-                last: point,
-                samples: BTreeMap::from([point]),
-                range: (point.0, point.0),
-            }
+            let left = g.last.0.min(point.0);
+            let right = g.last.0.max(point.0);
+            g.points.retain(|t, _| *t < left || *t > right);
+            g.points.insert(g.last.0, g.last.1);
+            g.points.insert(point.0, point.1);
         }
-    };
-    let transaction = !matches!(kind, Kind::Select { .. });
-    if transaction {
-        app.editor.begin(match kind {
-            Kind::Move => "移动参数控制点",
-            Kind::Erase { .. } => "擦除参数控制点",
-            _ => "绘制参数曲线",
-        });
+        g.last = point;
+        g.frame = ui.ctx().cumulative_frame_nr();
+        apply(app, &g);
+        app.gesture = Some(Gesture::Curve(g));
     }
-    let selected = app.parameter_lane.selected.clone();
-    app.gesture = Some(Gesture::Parameter(Box::new(ParameterGesture {
-        owner: app.parameter_lane.owner.as_ref().unwrap().clone(),
-        mapping: mapping.clone(),
-        origin: pos,
-        pointer: pos,
-        original,
-        initial,
-        selected,
-        kind,
-        button,
-        frame: ui.ctx().cumulative_frame_nr(),
-        transaction,
-    })));
-    extend(app, pos);
-}
-
-fn extend(app: &mut App, pos: Pos2) {
-    let Some(Gesture::Parameter(mut gesture)) = app.gesture.take() else {
-        return;
-    };
-    if !gesture.owns(app) {
-        app.gesture = Some(Gesture::Parameter(gesture));
-        return;
-    }
-    gesture.pointer = pos;
-    let result = edits::update(app, &mut gesture);
-    app.gesture = Some(Gesture::Parameter(gesture));
-    if let Err(error) = result {
-        finish_without_context(app, true);
-        app.error = Some(error);
+    if response.drag_stopped_by(PointerButton::Primary) {
+        app.editor.finish();
+        app.gesture = None;
     }
 }
-
-pub(super) fn finish_without_context(app: &mut App, cancel: bool) {
-    if !matches!(app.gesture, Some(Gesture::Parameter(_))) {
-        return;
+fn sample(app: &App, canvas: Rect, lane: &Lane, reference: &GroupRef, p: Pos2) -> (i64, f64) {
+    let time = ticks(beat_at(canvas, &app.view.piano, p.x))
+        .clamp(reference.blick_absolute_begin, reference.visible_end() - 1)
+        - reference.blick_offset;
+    let (lo, hi) = geometry::lane_range(lane);
+    let (allowed_lo, allowed_hi) = lane.foreground.range();
+    let value = (lo + f64::from((canvas.bottom() - p.y) / canvas.height()) * (hi - lo))
+        .clamp(allowed_lo, allowed_hi);
+    (time, f64::from(value as f32))
+}
+fn apply(app: &mut App, g: &CurveGesture) {
+    let left = *g.points.first_key_value().unwrap().0;
+    let right = *g.points.last_key_value().unwrap().0;
+    let begin = g.reference.blick_absolute_begin - g.reference.blick_offset;
+    let end = g.reference.visible_end() - 1 - g.reference.blick_offset;
+    let low = left.saturating_sub(g.guard).max(begin);
+    let high = right.saturating_add(g.guard).min(end);
+    let mut curve = g.original.clone();
+    curve.points.retain(|p| p.0 < low || p.0 > high);
+    if low < left {
+        curve.insert(
+            low,
+            f64::from(g.original.sample(low, g.parameter.default_value() as f32)),
+        );
     }
-    let Some(Gesture::Parameter(gesture)) = app.gesture.take() else {
+    if high > right {
+        curve.insert(
+            high,
+            f64::from(g.original.sample(high, g.parameter.default_value() as f32)),
+        );
+    }
+    for (&time, &value) in &g.points {
+        curve.insert(time, value);
+    }
+    *app.editor.group_mut().unwrap().automation_mut(&g.parameter) = curve;
+}
+pub fn end_frame(app: &mut App, ctx: &Context) {
+    let Some(Gesture::Curve(g)) = &app.gesture else {
         return;
     };
-    if gesture.transaction && app.editor.is_editing() {
+    let cancel = g.frame != ctx.cumulative_frame_nr()
+        || g.track != app.editor.track
+        || app.editor.active_ref() != Some(&g.reference)
+        || ctx.input(|i| !i.focused);
+    if cancel || ctx.input(|i| !i.pointer.primary_down()) {
         if cancel {
             app.editor.cancel();
         } else {
             app.editor.finish();
         }
+        app.gesture = None;
+        ctx.stop_dragging();
     }
-    if cancel {
-        app.parameter_lane.selected = gesture.initial;
-    }
-    app.parameter_lane.anchor = app.parameter_lane.selected.first().copied();
-}
-
-pub(super) fn finish(app: &mut App, ctx: &Context, cancel: bool) {
-    if !matches!(app.gesture, Some(Gesture::Parameter(_))) {
-        return;
-    }
-    finish_without_context(app, cancel);
-    ctx.stop_dragging();
-}
-
-pub(super) fn end_frame(app: &mut App, ctx: &Context) {
-    let Some(Gesture::Parameter(gesture)) = &app.gesture else {
-        return;
-    };
-    let cancel = !ctx.input(|input| input.focused);
-    let end = !gesture.owns(app)
-        || blocked(app, ctx)
-        || gesture.frame != ctx.cumulative_frame_nr()
-        || !app.parameter_lane.focused
-        || ctx.input(|input| !input.pointer.button_down(gesture.button));
-    if cancel || end {
-        finish(app, ctx, cancel);
-    }
-}
-
-pub(super) fn selection_overlay(app: &App, ui: &Ui, lane: u64, mapping: &Mapping) {
-    let Some(Gesture::Parameter(gesture)) = &app.gesture else {
-        return;
-    };
-    let Kind::Select { time_range, .. } = gesture.kind else {
-        return;
-    };
-    if gesture.owner.lane != lane {
-        return;
-    }
-    let mut area = Rect::from_two_pos(gesture.origin, gesture.pointer).intersect(mapping.clip());
-    if time_range {
-        area.min.y = mapping.canvas.top();
-        area.max.y = mapping.canvas.bottom();
-    }
-    let color = super::super::track_color::TrackColors::new(app.editor.current_track()).accent;
-    ui.painter()
-        .rect_filled(area, 0, color.gamma_multiply(0.16));
-    ui.painter()
-        .rect_stroke(area, 0, Stroke::new(1.0, color), StrokeKind::Inside);
 }

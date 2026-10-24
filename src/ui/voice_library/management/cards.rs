@@ -27,7 +27,7 @@ pub(super) fn show(app: &mut App, ui: &mut Ui, entry: &VoiceCatalogEntry, state:
                     rect.min + vec2(0.0, 4.0),
                     Vec2::splat(if compact { 60.0 } else { 80.0 }),
                 );
-                artwork::paint(ui, art, entry.icon_path.as_deref());
+                artwork::paint(ui, art, entry.icon.as_ref());
                 let origin = pos2(art.right() + 18.0, rect.top() + 3.0);
                 let end = rect.right() - if compact { 30.0 } else { 174.0 };
                 let name = Rect::from_min_max(origin, pos2(end, origin.y + 26.0));
@@ -132,13 +132,13 @@ fn version(
                     ui.selectable_value(
                         &mut revision,
                         version.revision,
-                        format!(
+                        crate::lformat!(
                             "版本 {}{}",
                             version.revision,
                             if version.availability.is_loadable() {
                                 ""
                             } else {
-                                " · 不可用"
+                                crate::i18n::t(" · 不可用")
                             }
                         ),
                     );
@@ -185,17 +185,17 @@ fn badge(ui: &Ui, app: &App, entry: &VoiceCatalogEntry, current: bool, rect: Rec
     let (label, color, check) = if !matches!(voice, VoiceState::Unloaded) {
         match voice {
             VoiceState::Loaded(_) if app.synthesis.voice_error(&key).is_some() => {
-                ("待配置", Color32::from_rgb(219, 167, 101), false)
+                (crate::i18n::t("待配置"), Color32::from_rgb(219, 167, 101), false)
             }
-            VoiceState::Loaded(_) => (if current { "当前音轨" } else { "已加载" }, ACCENT, true),
-            VoiceState::Loading => ("正在加载", MUTED, false),
-            VoiceState::Failed(_) => ("加载失败", Color32::from_rgb(218, 142, 126), false),
-            VoiceState::Unloaded => ("未加载", MUTED, false),
+            VoiceState::Loaded(_) => (if current { crate::i18n::t("当前音轨") } else { crate::i18n::t("已加载") }, ACCENT, true),
+            VoiceState::Loading => (crate::i18n::t("正在加载"), MUTED, false),
+            VoiceState::Failed(_) => (crate::i18n::t("加载失败"), Color32::from_rgb(218, 142, 126), false),
+            VoiceState::Unloaded => (crate::i18n::t("未加载"), MUTED, false),
         }
     } else if entry.availability.is_loadable() {
-        ("可加载", MUTED, false)
+        (crate::i18n::t("可加载"), MUTED, false)
     } else {
-        ("不可用", MUTED, false)
+        (crate::i18n::t("不可用"), MUTED, false)
     };
     let point = if left {
         rect.left_center() + vec2(if check { 19.0 } else { 0.0 }, 0.0)

@@ -162,7 +162,7 @@ pub fn headers(app: &mut App, ui: &mut Ui, canvas: Rect, groups: &[SceneGroup]) 
             .group(&g.reference.group_id)
             .map(|g| g.name.as_str())
             .unwrap_or("");
-        let name = if name == "main" { "主音符组" } else { name };
+        let name = if name == "main" { crate::i18n::t("主音符组") } else { name };
         let ink = foreground(color);
         let text = painter.layout_no_wrap(name.into(), FontId::proportional(12.0), ink);
         if let Some(tag) = label_rect(r, canvas, text.size().x + 12.0) {

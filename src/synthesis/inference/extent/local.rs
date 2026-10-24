@@ -1,9 +1,3 @@
-//! Finite temporal context for same-length, single-input model execution.
-//!
-//! This follows `ModelRuntime::execute`: a gated/conditional block receives no
-//! condition stream. It does not describe `execute_conditioned`, recurrent
-//! state, or a resampled timeline.
-
 use crate::synthesis::voice::{PreparedModule, PreparedTree, Result, VoiceError};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -28,11 +22,6 @@ impl Context {
     }
 }
 
-/// Sufficient source context on both sides of any retained output row.
-///
-/// Every executed branch must preserve frame count and have finite support.
-/// Slice bounds can be clamped only at the real source boundaries; a temporary
-/// slice boundary must remain outside this context for every retained row.
 pub fn context(tree: &PreparedTree, index: usize) -> Result<Context> {
     let node = tree.node(index)?;
     match &node.module {
@@ -41,6 +30,7 @@ pub fn context(tree: &PreparedTree, index: usize) -> Result<Context> {
         | PreparedModule::Affine(_)
         | PreparedModule::Embedding(_)
         | PreparedModule::LayerNorm(_)
+        | PreparedModule::RmsNorm(_)
         | PreparedModule::ChannelAffine(_) => Ok(Context::default()),
         PreparedModule::Convolution(op) => {
             let config = op.config;
@@ -70,7 +60,7 @@ pub fn context(tree: &PreparedTree, index: usize) -> Result<Context> {
             if node.children.len() != expected {
                 return Err(VoiceError::new("Invalid local-context gated children"));
             }
-            // The optional projection is not executed without a condition.
+
             context(tree, node.children[0])
         }
         PreparedModule::Conditional(config) => {
@@ -82,9 +72,7 @@ pub fn context(tree: &PreparedTree, index: usize) -> Result<Context> {
             }
             conditional(tree, &node.children)
         }
-        // In particular, GRU state and attention cannot be made local merely
-        // by choosing a large context. Strided and transpose operators require
-        // separate phase/origin reasoning, not a same-length slice contract.
+
         _ => Err(unsupported(index)),
     }
 }
@@ -106,8 +94,7 @@ fn conditional(tree: &PreparedTree, children: &[usize]) -> Result<Context> {
     let mut state = Context::default();
     let mut output = Context::default();
     for ((&gate_node, &skip_node), &residual_node) in lists[0].iter().zip(lists[1]).zip(lists[2]) {
-        // skip is evaluated before the residual is added to the gate output.
-        // In the unconditional program the initial output is identically zero.
+
         let gate = state.then(context(tree, gate_node)?)?;
         output = output.union(gate.then(context(tree, skip_node)?)?);
         let residual = state.then(context(tree, residual_node)?)?;

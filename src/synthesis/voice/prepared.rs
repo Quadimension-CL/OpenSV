@@ -1,8 +1,3 @@
-//! Typed module preparation, not a generic dataflow interpreter.
-//!
-//! Children in the source arena describe ownership. Unknown parent modules retain
-//! those children without inventing the order in which tensors flow through them.
-
 mod affine;
 mod convolution;
 mod duration;
@@ -32,6 +27,7 @@ use crate::synthesis::inference::{
         embedding::Embedding,
         gated::GatedConfig,
         normalization::{ChannelAffine, LayerNorm},
+        rms_normalization::RmsNorm,
         parameterized::LeakyRelu,
         range_normalizer::RangeNormalizer,
         standard_normalizer::StandardNormalizer,
@@ -50,10 +46,11 @@ use super::{
 };
 
 pub struct PreparedTree {
+    legacy_numeric: bool,
     nodes: Vec<PreparedNode>,
     root: usize,
     duration_input: Option<DurationInputLayout>,
-    // Keep the verified immutable source for unresolved modules and future stages.
+
     source: source::ModelSource,
 }
 
@@ -80,6 +77,7 @@ pub enum PreparedModule {
     ModuleList,
     Embedding(Embedding),
     LayerNorm(LayerNorm),
+    RmsNorm(RmsNorm),
     ChannelAffine(ChannelAffine),
     RangeNormalizer(RangeNormalizer),
     StandardNormalizer(StandardNormalizer),
@@ -92,7 +90,7 @@ pub enum PreparedModule {
 }
 
 impl PreparedTree {
-    pub(super) fn prepare(archive: Arc<Archive>, source: &ModuleTree) -> Result<Self> {
+    pub(super) fn prepare_execution(archive:Arc<Archive>,source:&ModuleTree,legacy_numeric:bool)->Result<Self> {
         let records = source
             .nodes
             .iter()
@@ -110,10 +108,15 @@ impl PreparedTree {
             source::ModelSource::Indexed(archive),
             records,
             source.root.index(),
+            legacy_numeric,
         )
     }
 
     pub(crate) fn prepare_embedded(bytes: &[u8]) -> Result<Self> {
+        Self::prepare_embedded_execution(bytes,false)
+    }
+
+    pub(super) fn prepare_embedded_execution(bytes:&[u8],legacy_numeric:bool)->Result<Self> {
         let records = super::embedded::parse(bytes)?;
         let root = records.len() - 1;
         let mut nodes = Vec::with_capacity(records.len());
@@ -122,13 +125,14 @@ impl PreparedTree {
             nodes.push((index, record.children));
             resources.push(record.bytes);
         }
-        Self::prepare_source(source::ModelSource::Inline(resources), nodes, root)
+        Self::prepare_source(source::ModelSource::Inline(resources), nodes, root,legacy_numeric)
     }
 
     fn prepare_source(
         source: source::ModelSource,
         records: Vec<(usize, Vec<usize>)>,
         root: usize,
+        legacy_numeric: bool,
     ) -> Result<Self> {
         if root >= records.len() {
             return Err(VoiceError::new("Prepared root is outside its module arena"));
@@ -147,7 +151,11 @@ impl PreparedTree {
                 let storage = match tensors.get(&resource_index) {
                     Some(storage) => Arc::clone(storage),
                     None => {
-                        let storage = Arc::new(tensor::load(&bytes)?);
+                        let mut storage=tensor::load(&bytes)?;
+                        if let TensorStorage::QuantizedMatrix{legacy_integer_execution,..}=&mut storage {
+                            *legacy_integer_execution=legacy_numeric;
+                        }
+                        let storage = Arc::new(storage);
                         tensors.insert(resource_index, Arc::clone(&storage));
                         storage
                     }
@@ -176,7 +184,7 @@ impl PreparedTree {
                     &children,
                 )?)
             } else {
-                factory::prepare_operator(type_id, &bytes[16..], &nodes, &children)?
+                factory::prepare_operator(type_id, &bytes[16..], &nodes, &children,legacy_numeric)?
                     .unwrap_or(PreparedModule::Unsupported)
             };
             nodes.push(PreparedNode {
@@ -198,6 +206,7 @@ impl PreparedTree {
             None
         };
         Ok(Self {
+            legacy_numeric,
             nodes,
             root,
             duration_input,
@@ -209,6 +218,8 @@ impl PreparedTree {
         &self.nodes
     }
 
+    pub(crate) fn legacy_numeric(&self)->bool {self.legacy_numeric}
+
     pub fn root_index(&self) -> usize {
         self.root
     }
@@ -219,8 +230,6 @@ impl PreparedTree {
             .ok_or_else(|| VoiceError::new("Model node index is out of range"))
     }
 
-    /// Raw verified resource including the type prefix; stays private to the
-    /// numerical pipeline and is never included in serialized diagnostics.
     pub fn resource_bytes(&self, index: usize) -> Result<std::borrow::Cow<'_, [u8]>> {
         self.source.read(self.node(index)?.resource_index)
     }
@@ -281,8 +290,6 @@ impl PreparedTree {
             .map_err(|error| VoiceError::new(error.to_string()))
     }
 
-    /// Run a complete independent sequence for diagnostics or an offline stage.
-    /// Stateful chunked execution must use an explicitly owned ModelRuntime.
     pub fn execute_node(&self, index: usize, input: &[f32]) -> Result<Vec<f32>> {
         let mut runtime = ModelRuntime::new(self);
         let channels = match runtime.input_channels(index)? {

@@ -1,9 +1,3 @@
-//! Centered, edge-replicated condition interpolation.
-//!
-//! Instead of repeating every input frame, the operator places each frame
-//! at the center of its upsampled interval and interpolates between centers.
-//! Only the last input frame is retained between calls.
-
 use crate::synthesis::{
     execution::checkpoint,
     inference::Sequence,
@@ -18,7 +12,7 @@ pub struct ConditionUpsampler {
 }
 
 impl ConditionUpsampler {
-    /// Mo Xu uses `frame_samples / bands = 240 / 8 = 30`.
+
     pub fn new(factor: usize) -> Result<Self> {
         if factor == 0 || factor > i32::MAX as usize {
             return Err(VoiceError::new("Invalid condition upsampling factor"));
@@ -35,10 +29,6 @@ impl ConditionUpsampler {
         self.finished = false;
     }
 
-    /// Returns only newly available frames. Before the final call, the stream
-    /// withholds `ceil(factor / 2)` frames, waiting for the next input center.
-    /// A final empty call is supported; a complete N-frame stream yields
-    /// exactly `N * factor` output frames without adding a temporal offset.
     pub fn process(&mut self, input: &Sequence, flush: bool) -> Result<Sequence> {
         #[cfg(feature = "synth-profile")]
         let _profile = crate::synthesis::profiling::span("vocoder.postfilter.condition.process");

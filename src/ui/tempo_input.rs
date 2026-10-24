@@ -15,7 +15,7 @@ pub struct BpmEdit {
 }
 impl BpmEdit {
     fn commit(&self, editor: &mut Editor) -> Result<(), String> {
-        // Merely entering and leaving a rounded readout must preserve full precision.
+
         if self.text == self.initial_text {
             return Ok(());
         }
@@ -26,13 +26,13 @@ impl BpmEdit {
             .iter()
             .any(|t| t.position == self.position)
         {
-            return Err("所编辑的曲速事件已不存在".into());
+            return Err(crate::i18n::t("所编辑的曲速事件已不存在").into());
         }
         let bpm = self
             .text
             .trim()
             .parse::<f64>()
-            .map_err(|_| "请输入有效的 BPM 数值")?;
+            .map_err(|_| crate::i18n::t("请输入有效的 BPM 数值"))?;
         editor.set_tempo(self.position, bpm)
     }
 }
@@ -59,7 +59,6 @@ pub fn open(app: &mut App, position: i64, ctx: &Context) {
     ctx.request_repaint();
 }
 
-/// Finish before saving, switching projects or opening another time-event editor.
 pub fn finish(app: &mut App) {
     if let Some(edit) = app.bpm_edit.take()
         && let Err(error) = edit.commit(&mut app.editor)
@@ -128,7 +127,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
             Stroke::new(1.0, Color32::from_rgb(230, 139, 122)),
             StrokeKind::Inside,
         );
-        input.on_hover_text(error);
+        input.on_hover_text(crate::i18n::message(error));
     }
     app.bpm_edit = Some(edit);
 }

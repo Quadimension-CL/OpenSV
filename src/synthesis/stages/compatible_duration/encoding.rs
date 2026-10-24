@@ -24,8 +24,7 @@ pub(super) fn encode(
         .ok_or_else(|| VoiceError::new("Compatibility duration feature buffer size overflows"))?;
     let mut result = Vec::with_capacity(capacity);
     for phone in phones {
-        // Share the modern duration frontend's block order and powf-based
-        // sinusoidal encoding, without its impulse heads.
+
         embedding(
             tree,
             children[3],

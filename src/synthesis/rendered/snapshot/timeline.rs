@@ -2,9 +2,6 @@ use super::{VisualFlash, VisualPatch, VisualPiece, VisualSnapshot, intersection,
 use crate::synthesis::{plan::OwnerInput, rendered::RenderVisuals};
 use std::{ops::Range, sync::Arc, time::Instant};
 
-/// A progressive display retains old geometry until each replacement interval
-/// is ready. Its partition is in musical time; every piece still owns the tempo
-/// map needed to query its original pitch and PCM data.
 #[derive(Clone, Debug, Default)]
 pub struct VisualTimeline {
     input: Option<Arc<OwnerInput>>,
@@ -78,8 +75,7 @@ impl VisualTimeline {
         if patch.highlight || !has_data {
             self.replace_flashes(&range, now);
         } else {
-            // Ready blocks are replayed when mixer-only metadata changes. A
-            // replay refreshes geometry without interrupting the existing fade.
+
             self.flashes.retain(|flash| flash.intensity(now) > 0.0);
         }
         if patch.highlight && has_data {
@@ -90,8 +86,6 @@ impl VisualTimeline {
         }
     }
 
-    /// Consolidation releases old and per-block snapshots without restarting
-    /// the fade of blocks that were published immediately before completion.
     pub fn complete(&mut self, snapshot: VisualSnapshot) {
         if !self.accepts(&snapshot.input)
             || self
@@ -168,7 +162,7 @@ impl VisualTimeline {
 }
 
 fn visible_range(input: &OwnerInput) -> Range<i64> {
-    input.visible_begin.0..input.visible_end.map_or(i64::MAX, |end| end.0)
+    input.publication_range()
 }
 
 fn coalesce(pieces: Vec<VisualPiece>) -> Vec<VisualPiece> {

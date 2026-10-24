@@ -1,5 +1,6 @@
 mod inspect;
 mod nofs;
+mod styles;
 
 use std::{
     collections::BTreeMap,
@@ -21,7 +22,6 @@ use super::{
     tree::ModuleTree,
 };
 
-/// Metadata is safe to serialize; retained archives contain private model bytes.
 #[derive(Serialize)]
 pub struct VoiceInventory {
     pub database_id: String,
@@ -39,7 +39,6 @@ pub struct VoiceInventory {
     preparation: OnceLock<Result<Arc<PreparedVoice>>>,
 }
 
-/// Each arena stays with its archive: a ResourceId is container-local.
 enum LoadedModel {
     Dnni {
         archive: Arc<Archive>,
@@ -106,14 +105,17 @@ impl VoiceInventory {
                             .iter()
                             .enumerate()
                             .map(|(index, graph)| {
+                                let legacy_integer=self.configuration.as_ref().is_some_and(|c|
+                                    c.family==super::VoiceFamily::Sv2Compatible && matches!(graph.role,"f0"|"timbre"));
                                 let tree = match model {
                                     LoadedModel::Dnni { archive, trees } => match &trees[index] {
                                         LoadedTree::Indexed(tree) => {
-                                            PreparedTree::prepare(Arc::clone(archive), tree)?
+                                            PreparedTree::prepare_execution(Arc::clone(archive), tree,legacy_integer)?
                                         }
                                         LoadedTree::Embedded { resource_index } => {
-                                            PreparedTree::prepare_embedded(
+                                            PreparedTree::prepare_embedded_execution(
                                                 &archive.read(*resource_index, None)?,
+                                                legacy_integer,
                                             )?
                                         }
                                     },
@@ -141,8 +143,9 @@ impl VoiceInventory {
                     files,
                     configuration.family,
                     configuration.f0_enhancement,
-                    configuration.styles.clone(),
-                )))
+                    configuration.speakers.clone(),
+                ).with_acoustic_version(&configuration.version)
+                .with_vocal_modes(Some(configuration.vocal_mode_names().to_vec()))?))
             })
             .clone()
     }
@@ -155,8 +158,6 @@ impl VoiceInventory {
         &self.content_hash
     }
 
-    /// Load exactly the selected revision directory. Catalog selection, not
-    /// the model loader, resolves a database root and its installed revisions.
     pub fn load(directory: &Path) -> Result<Self> {
         if super::nofs::is_file(directory) {
             return nofs::load(directory);
@@ -235,6 +236,18 @@ impl VoiceInventory {
             }
             inventory.files.push(file);
             inventory._models.push(LoadedModel::Dnni { archive, trees });
+        }
+        if inventory
+            .configuration
+            .as_ref()
+            .is_some_and(|config| config.model_version == 2)
+        {
+            let names = inventory.embedded_style_names()?;
+            inventory
+                .configuration
+                .as_mut()
+                .expect("checked configuration")
+                .resolve_embedded_styles(&names)?;
         }
         let mut identity = Sha256::new();
         for file in &inventory.files {

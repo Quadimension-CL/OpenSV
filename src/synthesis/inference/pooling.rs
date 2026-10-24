@@ -1,8 +1,3 @@
-//! Temporal pooling with its own configuration layout and persistent input rows.
-//!
-//! The five configuration words describe K, stride, dilation, left padding
-//! and right padding; their meanings differ from convolution's configuration.
-
 use std::fmt;
 
 pub const POOL_TYPE_ID: [u8; 16] = [
@@ -179,7 +174,7 @@ impl PoolStream {
         }
         let consumed = frames * self.config.stride * self.channels;
         self.pending.drain(..consumed);
-        // Pool forward sets final before its zero-output early return.
+
         self.finished = final_chunk;
         Ok(output)
     }

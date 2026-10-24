@@ -2,9 +2,7 @@ use super::{OwnerId, RenderCache, RenderJob, State};
 use std::sync::{Arc, atomic::AtomicBool};
 
 impl RenderCache {
-    /// Share current ready results after reconciling the complete owner set,
-    /// independently of scheduling priority. Pending owners' old baselines are
-    /// reserved for their own incremental render, never for other owners.
+
     pub fn reuse_queued(&mut self) {
         let queued: Vec<_> = self
             .owners
@@ -23,8 +21,6 @@ impl RenderCache {
         }
     }
 
-    /// Only independently dispatchable owners: equivalent work already running
-    /// remains queued until that owner publishes its complete cache baseline.
     pub fn queued_owners(&self) -> Vec<OwnerId> {
         self.owners
             .iter()
@@ -39,8 +35,6 @@ impl RenderCache {
             .collect()
     }
 
-    /// The caller chooses demand priority; the job retains the same commit and
-    /// cancellation identity throughout every bounded streaming batch.
     pub fn take_owner(&mut self, id: OwnerId) -> Option<RenderJob> {
         if !self.queued_owners().contains(&id) {
             return None;

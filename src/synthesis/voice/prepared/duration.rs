@@ -25,11 +25,17 @@ impl DurationInputLayout {
         }
         let constant_node = root.children[1];
         let constant_width = match &nodes[constant_node].module {
-            PreparedModule::Tensor(storage) => storage.vector().map(<[f32]>::len),
+            PreparedModule::Tensor(storage) => match storage.as_ref() {
+                super::TensorStorage::FloatVector { values } => Some(values.len()),
+                super::TensorStorage::FloatMatrix { columns, rows, .. } if *rows > 0 => {
+                    Some(*columns)
+                }
+                _ => None,
+            },
             _ => None,
         }
         .ok_or_else(|| {
-            VoiceError::new("Duration root child 1 must be its constant float vector")
+            VoiceError::new("Duration conditioning must be a float vector or speaker matrix")
         })?;
         let input_projection_node = root.children[5];
         let PreparedModule::Affine(projection) = &nodes[input_projection_node].module else {

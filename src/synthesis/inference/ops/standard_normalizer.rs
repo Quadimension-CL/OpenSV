@@ -1,8 +1,3 @@
-//! Per-channel mean/std transforms.
-//!
-//! Normalization clamps only the denominator to 1e-5. The inverse uses the
-//! unmodified standard deviation and neither direction clips output values.
-
 use std::{fmt, sync::Arc};
 
 pub const STANDARD_NORMALIZER_TYPE_ID: [u8; 16] = [

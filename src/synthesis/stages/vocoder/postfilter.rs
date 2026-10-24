@@ -1,10 +1,5 @@
-//! Vocoder postfilter controller.
-//!
-//! Analysis, noise and interpolated conditioning retain their own latency;
-//! queues align their output before the conditioned network. Its persistent
-//! model runtime returns only stable newly available subband frames.
-
 mod condition;
+mod compatible_noise;
 mod noise;
 
 use std::collections::VecDeque;
@@ -45,8 +40,12 @@ pub struct Postfilter {
 }
 
 impl Postfilter {
-    /// `gate_noise` gates noise with projection logits;
-    /// it does not bypass this controller.
+    pub(crate) fn set_streamed_frame_noise(&mut self) {self.noise.set_streamed(self.frame_samples/BANDS);}
+    pub(crate) fn append_frame_noise_seeds(&mut self,seeds:&[u64])->Result<()> {self.noise.append_frame_seeds(seeds)}
+    pub(crate) fn set_compatible_noise(&mut self) {
+        self.noise.set_compatible(self.frame_samples / BANDS);
+    }
+
     pub fn prepare(
         tree: &PreparedTree,
         modules: &Modules,
@@ -78,6 +77,14 @@ impl Postfilter {
                 "Postfilter projection must be a recovered sequence",
             ));
         }
+
+        if let Some(fast) = modules.fast_postfilter
+            && !matches!(tree.node(fast)?.module, PreparedModule::Sequential)
+        {
+            return Err(VoiceError::new(
+                "Fast postfilter must be a recovered sequence",
+            ));
+        }
         Ok(Self {
             analysis: AnalysisBank::prepare(tree, modules.analysis_filterbank)?,
             synthesis: SynthesisBank::prepare(tree, modules.synthesis_filterbank)?,
@@ -97,7 +104,6 @@ impl Postfilter {
         })
     }
 
-    /// Reset this state together with the `ModelRuntime` used to execute it.
     pub fn reset(&mut self) {
         self.analysis.reset();
         self.synthesis.reset();
@@ -112,8 +118,6 @@ impl Postfilter {
         self.finished = false;
     }
 
-    /// Conditions are 72-channel acoustic frames; excitation contains
-    /// `frame_samples` consecutive mono samples per acoustic frame.
     pub fn process(
         &mut self,
         runtime: &mut ModelRuntime<'_>,
@@ -197,7 +201,7 @@ impl Postfilter {
                 checkpoint()?;
             }
             let mut noise = [0.0; BANDS];
-            self.noise.fill(&mut noise);
+            self.noise.fill(&mut noise)?;
             self.input_queue.extend(band_frame);
             self.input_queue.extend(noise);
             if self.gate_noise {

@@ -1,316 +1,270 @@
-mod edit;
+use super::Cell;
+use crate::{
+    app::App,
+    model::{EntityId, GroupRef},
+    synthesis::{
+        plan::{GlobalBlick, TempoMapping},
+        score::PhoneSource,
+    },
+    ui::{
+        piano::Gesture,
+        theme::*,
+        timeline::{beat_at, x_at},
+    },
+};
+use eframe::egui::*;
 
-use super::*;
-use std::sync::Arc;
-
-pub(super) struct Capture {
-    pub mapping: Mapping,
-    pub original: Arc<[RenderedPhoneme]>,
-    pub preview: Vec<RenderedPhoneme>,
-    pub track: EntityId,
-    pub reference: GroupRef,
-    pub index: usize,
-    pub handle: Handle,
-    pub source: SourcePhone,
-    pub attributes: PhonemeAttributes,
-    pub origin: Pos2,
-    pub frame: u64,
-    pub changed: bool,
-    pub dragged: bool,
+pub struct PhonemeGesture {
+    reference: GroupRef,
+    track: EntityId,
+    source: PhoneSource,
+    note_origin: f64,
+    tempo: TempoMapping,
+    initial_onset: f64,
+    pointer_origin: f64,
+    current: f64,
+    body: Option<BodyEdit>,
+    frame: u64,
 }
-
-pub(super) fn right_source(phones: &[RenderedPhoneme], index: usize) -> Option<usize> {
-    let phone = phones.get(index)?;
-    let next = phones.get(index + 1)?;
-    (next.supports_timing && (phone.end_seconds - next.begin_seconds).abs() < 1e-7)
-        .then_some(index + 1)
+struct BodyEdit {
+    cell: Cell,
+    canvas: Rect,
+    activity: bool,
 }
+fn boundary_hit(cells:&[Cell],canvas:Rect,p:Pos2)->Option<&Cell> {
+    if !canvas.contains(p) {return None;}
+    cells.iter().rev().filter(|cell|cell.editable && (cell.rect.left()-p.x).abs()<6.0)
+        .min_by(|a,b|(a.rect.left()-p.x).abs().total_cmp(&(b.rect.left()-p.x).abs()))
+}
+pub(super) fn show(app: &mut App, ui: &Ui, response: &Response, canvas: Rect, cells: &[Cell]) {
+    let pointer = ui.input(|i| i.pointer.hover_pos());
 
-pub(super) fn hit(
-    mapping: &Mapping,
-    phones: &[RenderedPhoneme],
-    pos: Pos2,
-) -> Option<(usize, Handle)> {
-    if !mapping.clip().contains(pos) {
-        return None;
+    let hit = |p:Pos2|boundary_hit(cells,canvas,p);
+    if let Some(c) = pointer.and_then(hit) {
+        ui.ctx().set_cursor_icon(CursorIcon::ResizeHorizontal);
+        ui.painter()
+            .vline(c.rect.left(), canvas.y_range(), Stroke::new(1.0, TEXT));
     }
-    let boundary = phones
-        .iter()
-        .enumerate()
-        .flat_map(|(index, phone)| {
-            let rect = mapping.phone_rect(phone);
-            [(rect.left(), Handle::Left), (rect.right(), Handle::Right)]
-                .into_iter()
-                .map(move |(x, handle)| (index, handle, (x - pos.x).abs()))
+    if response.double_clicked()
+        && let Some(c) = pointer.and_then(|p| {
+            cells
+                .iter()
+                .rev()
+                .find(|c| c.editable && c.rect.contains(p) && p.y >= canvas.top() + 32.0)
         })
-        .filter(|(_, _, distance)| *distance < 3.0)
-        .min_by(|left, right| left.2.total_cmp(&right.2));
-    if let Some((index, handle, _)) = boundary {
-        return Some((index, handle));
-    }
-    if pos.y <= mapping.content().top() {
-        return None;
-    }
-    phones.iter().enumerate().find_map(|(index, phone)| {
-        let rect = mapping.phone_rect(phone);
-        (rect.left() <= pos.x && pos.x < rect.right())
-            .then(|| {
-                if phone.supports_impulse {
-                    Some((index, Handle::Impulse))
-                } else {
-                    phone.strength.map(|_| (index, Handle::Strength))
-                }
-            })
-            .flatten()
-    })
-}
-
-fn blocked(app: &App, ctx: &Context) -> bool {
-    !app.view.phonemes
-        || app.piano_collapsed
-        || app.pending.is_some()
-        || app.error.is_some()
-        || app.settings
-        || app.voice_manager
-        || app.about
-        || app.rename.is_some()
-        || app.time_edit.is_some()
-        || app.fill_lyrics.is_some()
-        || app.midi_import.is_some()
-        || app.synthesis.context_import.dialog.is_some()
-        || Popup::is_any_open(ctx)
-        || app.view_pan.is_active()
-}
-
-pub(super) fn show(
-    app: &mut App,
-    ui: &Ui,
-    response: &Response,
-    mapping: &Mapping,
-    phones: &[RenderedPhoneme],
-) {
-    if !ui.is_enabled() || !ui.input(|input| input.focused) || blocked(app, ui.ctx()) {
-        return;
-    }
-    if response.double_clicked_by(PointerButton::Primary)
-        && let Some(pos) = response.interact_pointer_pos()
-        && let Some((index, handle)) = hit(mapping, phones, pos)
     {
-        finish(app, true);
-        if let Err(error) = reset(app, phones, index, handle) {
-            app.error = Some(error);
-        }
-        ui.ctx().stop_dragging();
-        return;
-    }
-    if let Some(pos) = response.hover_pos()
-        && let Some((index, handle)) = hit(mapping, phones, pos)
-    {
-        let enabled = match handle {
-            Handle::Left => phones[index].supports_timing,
-            Handle::Right => right_source(phones, index).is_some(),
-            Handle::Strength | Handle::Impulse => true,
-        };
-        ui.ctx().set_cursor_icon(if !enabled {
-            CursorIcon::Default
-        } else if matches!(handle, Handle::Left | Handle::Right) {
-            CursorIcon::ResizeHorizontal
-        } else if handle == Handle::Strength {
-            CursorIcon::ResizeVertical
-        } else {
-            CursorIcon::Move
-        });
-        if !enabled {
-            response.clone().on_hover_text(if handle == Handle::Right {
-                "尾部边界随音符长度调整"
+        if let Some(reference) = app.editor.active_ref().cloned()
+            && !app.editor.is_editing()
+            && app.gesture.is_none()
+            && c.input
+                .notes
+                .iter()
+                .find(|n| n.id == c.phone.source.unwrap().note_id)
+                .zip(app.editor.phoneme_note(c.phone.source.unwrap().note_id))
+                .is_some_and(|(snapshot, note)| {
+                    snapshot.phonemes == note.phonemes && snapshot.lyrics == note.lyrics
+                })
+        {
+            app.editor.begin(crate::i18n::t("重置音素力度"));
+            let result = ["strength", "activity", "position"]
+                .into_iter()
+                .try_for_each(|key| {
+                    app.editor.set_phoneme_attribute(
+                        &reference.group_id,
+                        c.phone.source.unwrap(),
+                        key,
+                            (key == "strength").then_some(0.0),
+                    )
+                });
+            if let Err(error) = result {
+                app.error = Some(error);
+                app.editor.cancel();
             } else {
-                "当前声库暂不支持音素时值编辑"
-            });
+                app.editor.finish();
+            }
         }
     }
-    for event in ui.input(|input| input.events.clone()) {
-        match event {
-            Event::PointerButton {
-                pos,
-                button: PointerButton::Primary,
-                pressed: true,
-                ..
-            } if !phoneme_dragging(app)
-                && app.gesture.is_none()
-                && app.group_gesture.is_none()
-                && mapping.clip().contains(pos)
-                && ui.clip_rect().contains(pos) =>
-            {
-                focus(app, ui.ctx());
-                if let Some((index, handle)) = hit(mapping, phones, pos) {
-                    begin(app, ui, mapping, phones, pos, index, handle);
+    if response.drag_started_by(PointerButton::Primary)
+        && app.gesture.is_none()
+        && !app.editor.is_editing()
+        && let Some(p) = ui
+            .input(|i| i.pointer.press_origin())
+            .filter(|p| canvas.contains(*p))
+        && let Some(cell) = hit(p).or_else(|| {
+            cells
+                .iter()
+                .rev()
+                .find(|c| c.editable && c.rect.contains(p) && p.y >= canvas.top() + 32.0)
+        })
+        && let Some(reference) = app.editor.active_ref().cloned()
+    {
+        let source = cell.phone.source.unwrap();
+        let Some(note) = app.editor.phoneme_note(source.note_id) else {
+            return;
+        };
+        let Some(snapshot_note) = cell.input.notes.iter().find(|n| n.id == source.note_id) else {
+            return;
+        };
+
+        let stable_attributes=|attributes:&crate::model::Extra|{
+            let mut attributes=attributes.clone();attributes.remove("phonemes");attributes
+        };
+        if note.onset != snapshot_note.onset.0 || note.duration!=snapshot_note.duration
+            || note.lyrics!=snapshot_note.lyrics || note.phonemes!=snapshot_note.phonemes
+            || stable_attributes(&note.attributes)!=stable_attributes(&snapshot_note.attributes) {
+            return;
+        }
+        let note_origin = cell.input.tempo.seconds_at(GlobalBlick(
+            snapshot_note.onset.0 + cell.input.content_offset.0,
+        ));
+        let pointer_origin =
+            cell.input
+                .tempo
+                .seconds_at(GlobalBlick(crate::model::ticks(beat_at(
+                    canvas,
+                    &app.view.piano,
+                    p.x,
+                ))));
+        let body = hit(p).is_none().then(|| BodyEdit {
+            cell: cell.clone(),
+            canvas,
+            activity: cell.phone.has_activity,
+        });
+        app.editor.begin(if body.is_some() {
+            crate::i18n::t("调整音素力度")
+        } else {
+            crate::i18n::t("调整音素时值")
+        });
+        app.gesture = Some(Gesture::Phoneme(Box::new(PhonemeGesture {
+            reference,
+            track: app.editor.track,
+            source,
+            note_origin,
+            tempo: cell.input.tempo.clone(),
+            initial_onset: cell.phone.start_seconds,
+            pointer_origin,
+            current: cell.phone.start_seconds,
+            body,
+            frame: ui.ctx().cumulative_frame_nr(),
+        })));
+    }
+    if !matches!(&app.gesture, Some(Gesture::Phoneme(_))) {
+        return;
+    }
+    if let Some(Gesture::Phoneme(mut g)) = app.gesture.take() {
+        if app.editor.active_ref() != Some(&g.reference) || app.editor.track != g.track {
+            app.editor.cancel();
+            return;
+        }
+        if let Some(p) = response.interact_pointer_pos() {
+            if let Some(body) = &g.body {
+
+                let ratio = ((canvas.bottom() - p.y) / (canvas.height() - 32.0)).clamp(0.0, 1.0);
+                let mut cell = body.cell.clone();
+                let result = if body.activity {
+                    let position = ((p.x - cell.rect.left()) / cell.rect.width()).clamp(0.0, 1.0);
+                    let offset = cell
+                        .input
+                        .voice
+                        .instance_options
+                        .get("voice")
+                        .and_then(|v| v.get("consonantStrength"))
+                        .and_then(serde_json::Value::as_f64)
+                        .unwrap_or(0.0) as f32;
+                    cell.phone.boundary_strength = f64::from(ratio.sqrt());
+                    cell.phone.boundary_position = f64::from(position);
+                    app.editor
+                        .set_phoneme_attribute(
+                            &g.reference.group_id,
+                            g.source,
+                            "position",
+                            Some(position),
+                        )
+                        .and_then(|_| {
+                            app.editor.set_phoneme_attribute(
+                                &g.reference.group_id,
+                                g.source,
+                                "activity",
+                                Some(ratio.sqrt() - offset),
+                            )
+                        })
+                } else {
+                    cell.phone.strength = ratio * 2.0 - 1.0;
+                    app.editor.set_phoneme_attribute(
+                        &g.reference.group_id,
+                        g.source,
+                        "strength",
+                        Some(cell.phone.strength),
+                    )
+                };
+                if let Err(error) = result {
+                    app.error = Some(error);
+                    app.editor.cancel();
+                    return;
                 }
+                let area = Rect::from_min_max(
+                    pos2(cell.rect.left(), body.canvas.top() + 32.0),
+                    pos2(cell.rect.right(), body.canvas.bottom()),
+                );
+                let painter = ui.painter().with_clip_rect(canvas);
+                painter.rect_filled(area, 0, PANEL);
+                super::draw::body(
+                    &painter,
+                    &cell,
+                    area,
+                    crate::ui::track_color::TrackColors::new(app.editor.current_track()).accent,
+                );
+            } else {
+                let now = g.tempo.seconds_at(GlobalBlick(crate::model::ticks(beat_at(
+                    canvas,
+                    &app.view.piano,
+                    p.x,
+                ))));
+                g.current = g.initial_onset + (now - g.pointer_origin);
+                let value = (g.current - g.note_origin) as f32;
+                if let Err(error) = app.editor.set_phoneme_attribute(
+                    &g.reference.group_id,
+                    g.source,
+                    "leftOffset",
+                    Some(value),
+                ) {
+                    app.error = Some(error);
+                    app.editor.cancel();
+                    return;
+                }
+                g.frame = ui.ctx().cumulative_frame_nr();
+                let x = x_at(
+                    canvas,
+                    &app.view.piano,
+                    crate::model::beats(g.tempo.position_at(g.current).0),
+                );
+                ui.painter()
+                    .vline(x, canvas.y_range(), Stroke::new(1.0, GREEN));
             }
-            Event::PointerMoved(pos) if phoneme_dragging(app) => {
-                extend(app, pos);
-            }
-            Event::PointerButton {
-                pos,
-                button: PointerButton::Primary,
-                pressed: false,
-                ..
-            } if phoneme_dragging(app) => {
-                extend(app, pos);
-                finish(app, false);
-                ui.ctx().stop_dragging();
-            }
-            _ => {}
+            g.frame = ui.ctx().cumulative_frame_nr();
         }
-    }
-    if let Some(capture) = &mut app.phoneme_editing.capture {
-        capture.frame = ui.ctx().cumulative_frame_nr();
-        ui.ctx().set_dragged_id(response.id);
-    }
-}
-
-fn reset(
-    app: &mut App,
-    phones: &[RenderedPhoneme],
-    index: usize,
-    handle: Handle,
-) -> Result<(), String> {
-    if app.gesture.is_some() || app.group_gesture.is_some() || app.editor.is_editing() {
-        return Ok(());
-    }
-    let target = match handle {
-        Handle::Left if phones[index].supports_timing => Some(index),
-        Handle::Right => right_source(phones, index),
-        Handle::Left => None,
-        _ => Some(index),
-    };
-    let Some(target) = target else {
-        return Ok(());
-    };
-    let source = phones[target].source;
-    if matches!(handle, Handle::Left | Handle::Right) {
-        return app
-            .editor
-            .reset_phoneme_attributes(source, Some(PhonemeParameter::LeftOffset));
-    }
-    let mut attributes = app.editor.phoneme_attributes(source)?;
-    attributes.strength = None;
-    attributes.activity = None;
-    attributes.position = None;
-    if !app.editor.begin_phoneme_edit(source) {
-        return Err("无法编辑当前音素".into());
-    }
-    if app.editor.update_phoneme_attributes(source, attributes) {
-        app.editor.finish_phoneme_edit();
-        Ok(())
-    } else {
-        app.editor.cancel_phoneme_edit();
-        Err("无法重置当前音素的强度和爆破设置".into())
-    }
-}
-
-fn begin(
-    app: &mut App,
-    ui: &Ui,
-    mapping: &Mapping,
-    phones: &[RenderedPhoneme],
-    origin: Pos2,
-    index: usize,
-    handle: Handle,
-) {
-    let target = match handle {
-        Handle::Right => {
-            let Some(target) = right_source(phones, index) else {
-                return;
-            };
-            target
-        }
-        Handle::Left if !phones[index].supports_timing => return,
-        _ => index,
-    };
-    let source = phones[target].source;
-    let Ok(attributes) = app.editor.phoneme_attributes(source) else {
-        return;
-    };
-    let Some(reference) = app.editor.active_ref().cloned() else {
-        return;
-    };
-    let fresh = app.editor.group().is_some_and(|group| {
-        mapping.input.matches_project(
-            &app.editor.project,
-            app.editor.current_track(),
-            &reference,
-            group,
-        )
-    });
-    if !mapping.same_reference(&reference) || !fresh || !app.editor.begin_phoneme_edit(source) {
-        return;
-    }
-    app.phoneme_editing.capture = Some(Capture {
-        mapping: mapping.clone(),
-        original: phones.to_vec().into(),
-        preview: phones.to_vec(),
-        track: app.editor.track,
-        reference,
-        index,
-        handle,
-        source,
-        attributes,
-        origin,
-        frame: ui.ctx().cumulative_frame_nr(),
-        changed: false,
-        dragged: false,
-    });
-}
-
-fn extend(app: &mut App, pointer: Pos2) {
-    let Some(mut capture) = app.phoneme_editing.capture.take() else {
-        return;
-    };
-    if !app.editor.phoneme_edit_matches_selection() {
-        app.editor.finish_phoneme_edit();
-        return;
-    }
-    if !capture.dragged && pointer.distance_sq(capture.origin) < 1.0 {
-        app.phoneme_editing.capture = Some(capture);
-        return;
-    }
-    capture.dragged = true;
-    match edit::apply(app, &mut capture, pointer) {
-        Ok(()) => app.phoneme_editing.capture = Some(capture),
-        Err(error) => {
-            app.editor.cancel_phoneme_edit();
-            app.error = Some(error);
+        if response.drag_stopped_by(PointerButton::Primary) {
+            app.editor.finish();
+        } else {
+            app.gesture = Some(Gesture::Phoneme(g));
         }
     }
 }
-
-pub(super) fn finish(app: &mut App, cancel: bool) {
-    let Some(capture) = app.phoneme_editing.capture.take() else {
+pub fn end_frame(app: &mut App, ctx: &Context) {
+    let Some(Gesture::Phoneme(g)) = &app.gesture else {
         return;
     };
-    if cancel || !capture.changed {
-        app.editor.cancel_phoneme_edit();
-    } else {
-        app.editor.finish_phoneme_edit();
-    }
-}
-
-pub(super) fn end_frame(app: &mut App, ctx: &Context) {
-    let Some(capture) = &app.phoneme_editing.capture else {
-        if !phoneme_active(app) {
-            app.phoneme_editing.focused = None;
+    let cancel = g.frame != ctx.cumulative_frame_nr()
+        || app.editor.active_ref() != Some(&g.reference)
+        || app.editor.track != g.track
+        || ctx.input(|i| !i.focused);
+    if cancel || ctx.input(|i| !i.pointer.primary_down()) {
+        if cancel {
+            app.editor.cancel();
+        } else {
+            app.editor.finish();
         }
-        return;
-    };
-    let cancel = !ctx.input(|input| input.focused);
-    let end = blocked(app, ctx)
-        || capture.frame != ctx.cumulative_frame_nr()
-        || capture.track != app.editor.track
-        || app.editor.active_ref() != Some(&capture.reference)
-        || !app.editor.phoneme_edit_matches_selection()
-        || !ctx.input(|input| input.pointer.primary_down());
-    if cancel || end {
-        finish(app, cancel);
+        app.gesture = None;
         ctx.stop_dragging();
     }
 }

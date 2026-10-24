@@ -19,8 +19,6 @@ impl Events {
     }
 }
 
-/// Kept outside `run` so its event sender is already dropped before the final
-/// wakeup. This also exposes an unexpected worker exit without periodic polls.
 pub(super) struct WakeOnExit(pub egui::Context);
 
 impl Drop for WakeOnExit {

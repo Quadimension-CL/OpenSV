@@ -1,6 +1,3 @@
-//! Owner scheduling, immutable completed baselines and render reuse. This layer
-//! never runs a model, creates substitute audio, or guesses phrase boundaries.
-//! The runtime must reset it when replacing the project or inference context.
 mod results;
 mod scheduling;
 mod types;
@@ -55,9 +52,6 @@ impl Owner {
     }
 }
 
-/// Holds one completed baseline per current owner for incremental replacement.
-/// Completing a replacement releases its prior baseline; historical versions
-/// are not retained. Equivalent ready owners can share their current result.
 #[derive(Default)]
 pub struct RenderCache {
     owners: BTreeMap<OwnerId, Owner>,
@@ -68,14 +62,13 @@ pub struct RenderCache {
 }
 
 impl RenderCache {
-    /// Consume the authoritative owner set, not only the last edit's delta.
-    /// Repeated calls with the same plan leave running/completed work intact.
+
     pub fn reconcile(&mut self, plan: &RenderPlan) -> CacheUpdate {
         let mut update = CacheUpdate::default();
         let mut previous = std::mem::take(&mut self.owners);
         for (&id, request) in &plan.requests {
             let Some(controls) = plan.output_controls.get(&id) else {
-                // A malformed/incomplete plan must not keep stale playback.
+
                 continue;
             };
             let old = previous.remove(&id);
@@ -109,8 +102,7 @@ impl RenderCache {
                         request: Arc::clone(request),
                         controls: controls.clone(),
                         state: State::Queued,
-                        // A -> B -> C must compare C with the completed A even
-                        // when B was cancelled or failed before publication.
+
                         committed,
                     };
                     if let Some(rendered) = reused {
@@ -133,8 +125,6 @@ impl RenderCache {
         update
     }
 
-    /// Invalidate every captured run and withdraw audio and visuals for project/
-    /// backend replacement. Runtime must replace both published snapshots too.
     pub fn reset(&mut self) {
         for owner in self.owners.values() {
             owner.cancel();

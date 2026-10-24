@@ -2,8 +2,7 @@ use super::{PreparedModule, PreparedTree};
 use crate::synthesis::voice::{ResolvedPhone, Result, VoiceError};
 
 impl PreparedTree {
-    /// Keep the language table child order, separate from the unified
-    /// table. Configuration's supported-language display order is not this order.
+
     pub fn resolve_phone(&self, language: &str, token: &str) -> Result<ResolvedPhone<'_>> {
         let tables: Vec<_> = self
             .nodes

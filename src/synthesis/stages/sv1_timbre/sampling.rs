@@ -1,5 +1,3 @@
-//! `_didsv0`: the single-pass acoustic latent head.
-
 use crate::synthesis::{
     inference::{ModelRuntime, Sequence},
     voice::{PreparedModule, PreparedTree, Result, VoiceError, embedded::types},

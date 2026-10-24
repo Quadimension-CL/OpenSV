@@ -1,5 +1,3 @@
-//! Parallelize independent frames, retaining the reduction order of every dot.
-
 use super::{Affine, MatrixError, baseline_dot};
 use crate::synthesis::{
     execution::{self, Cancellation},
@@ -17,8 +15,7 @@ impl Affine {
         output: &mut [f32],
         frames: usize,
     ) -> Result<(), MatrixError> {
-        // GRU/sample loops call one frame at a time. Keep them free of pool
-        // dispatch and per-call TLS cloning; their outer loops check cancellation.
+
         if frames < 8 {
             return self.execute_block(input, output, None);
         }
@@ -71,9 +68,13 @@ impl Affine {
             if cancellation.is_some_and(Cancellation::is_cancelled) {
                 return Err(MatrixError::Cancelled);
             }
+            if self.matrix.integer_frame(input,output,false) {
+                if let Some(bias)=&self.bias {for (value,bias) in output.iter_mut().zip(bias.iter()) {*value+=bias;}}
+                continue;
+            }
             for (channel, target) in output.iter_mut().enumerate() {
                 let mut value = baseline_dot(self.matrix.row(channel), input);
-                // Bias remains after the dot product, matching the scalar path.
+
                 if let Some(bias) = &self.bias {
                     value += bias[channel];
                 }

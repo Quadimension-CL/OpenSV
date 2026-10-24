@@ -3,6 +3,7 @@ use rynthv::synthesis::{
     audio::save_wav,
     engine,
     score::ExplicitScore,
+    settings::{SynthesisSettings, VoiceSelection},
     voice::{PreparedVoice, VoiceInventory, session_identity},
 };
 use serde_json::{Value, json};
@@ -27,19 +28,34 @@ pub fn run(
         .prepare(
             voice.model("duration").map_err(|error| error.to_string())?,
             voice.family,
+            &inventory.configuration.as_ref().ok_or("Voice metadata is unavailable")?.default_language,
         )
         .map_err(|error| error.to_string())?;
-    let name = &inventory
+    let config = inventory
         .configuration
         .as_ref()
-        .ok_or("Voice metadata is unavailable")?
-        .name;
+        .ok_or("Voice metadata is unavailable")?;
+    let name = &config.name;
+    let mut identity_source = "not required";
     let identity = if voice.family.requires_identity() {
-        Some(match args.duration_identity {
-            Some(identity) => identity,
-            None => session_identity::saved_identity(name, voice.family.model_version())
-                .map_err(|error| error.to_string())?,
-        })
+        let selection = VoiceSelection { database_id: inventory.database_id.clone(), revision: config.version.parse()? };
+        let settings = SynthesisSettings::load()?;
+        let per_version = settings.voice_duration_key_override(&selection).filter(|entry| entry.enabled);
+
+        let selected = if let Some(entry) = per_version {
+            identity_source = "voice revision override";
+            entry.value
+        } else if let Some(value) = args.duration_identity {
+            identity_source = "explicit invocation override";
+            value
+        } else if let Some(value) = settings.duration_key_override_for(&selection) {
+            identity_source = "global settings override";
+            value
+        } else {
+            identity_source = "saved RynthV context/session";
+            session_identity::saved_identity(name, voice.family.model_version()).map_err(|error| error.to_string())?
+        };
+        Some(selected)
     } else if args.duration_identity.is_some() {
         return Err("原生 SV1 时长模型不接受 --duration-identity 条件。".into());
     } else {
@@ -91,7 +107,9 @@ pub fn run(
         "render_ms": render_ms,
         "wav_write_ms": wav_write_ms,
         "stage_timings": output.timings,
-        "identity_source": if args.duration_identity.is_some() { "explicit model conditioning" } else if voice.family.requires_identity() { "saved RynthV context" } else { "not required" },
+        "identity_source": identity_source,
+        "duration_identity": identity.map(|value| value.to_string()),
+        "duration_identity_hex": identity.map(|value| format!("0x{value:016x}")),
         "original_engine_bit_exact_verified": false,
     }))
 }

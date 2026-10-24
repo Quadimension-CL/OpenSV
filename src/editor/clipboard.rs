@@ -9,7 +9,6 @@ const PREFIX: &str = "RynthV notes\n";
 const MAX_BYTES: usize = 16 * 1024 * 1024;
 const MAX_NOTES: usize = 100_000;
 
-/// Onsets are relative to the first copied note; pitches are project pitches.
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct NoteClipboard {
@@ -65,7 +64,7 @@ impl NoteClipboard {
 }
 
 impl Editor {
-    /// Creates a portable payload for the system clipboard.
+
     pub fn copy(&self) -> Result<Option<String>, String> {
         let Some(clipboard) = self.capture_note_selection()? else {
             return Ok(None);
@@ -73,7 +72,6 @@ impl Editor {
         clipboard.to_text().map(Some)
     }
 
-    /// Only explicitly identified note payloads may mutate the project.
     pub fn paste_text(&mut self, text: &str, at: i64) -> Result<usize, String> {
         let clipboard = NoteClipboard::from_text(text)?;
         let plan = PastePlan::prepare(self, &clipboard, at, false)?;

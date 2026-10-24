@@ -4,7 +4,7 @@ use eframe::egui::*;
 
 mod drawing;
 pub mod loop_region;
-pub use drawing::{draw_ruler, grid, playhead, playhead_line};
+pub use drawing::{draw_ruler, grid, playhead, playhead_line, hover_playhead};
 
 pub const GUTTER: f32 = 48.0;
 pub const ARRANGEMENT_GRID: f64 = 1.0;
@@ -18,7 +18,7 @@ pub fn snap_arrangement_position(view: &Viewport, time: &TimeAxis, beat: f64) ->
     let step = grid_step(view, ARRANGEMENT_GRID);
     let position = ticks(beat);
     let (bar, start) = time.bar_at(position);
-    // Bar boundaries may fall between quarter-note lines (for example, in 7/8).
+
     [
         ticks((beat / step).round() * step),
         start,
@@ -35,13 +35,19 @@ pub fn beat_at(rect: Rect, view: &Viewport, x: f32) -> f64 {
     view.start + (x - rect.left()) as f64 / view.beat_width as f64
 }
 
-/// Advance by whole visible pages, leaving a little room for the playhead cap
-/// and the piano's vertical scrollbar. Backward seeks/loops use the same rule.
+pub fn reveal(view:&mut Viewport,width:f32,position:i64) {
+    let visible=f64::from(width.max(1.0))/f64::from(view.beat_width);
+    let beat=beats(position).max(0.0);
+
+    if beat<view.start {view.start=beat;}
+    else if beat>view.start+visible {view.start=(beat-visible).max(0.0);}
+}
+
 pub fn follow_playhead(ui: &Ui, rect: Rect, view: &mut Viewport, position: i64, playing: bool) {
     if !playing || rect.width() <= 12.0 {
         return;
     }
-    // Never change the coordinate system under an active pointer gesture.
+
     let interacting = ui.input(|input| {
         input.pointer.any_down()
             || (input.pointer.hover_pos().is_some_and(|p| rect.contains(p))
@@ -58,17 +64,32 @@ pub fn follow_playhead(ui: &Ui, rect: Rect, view: &mut Viewport, position: i64, 
     let position = beats(position).max(0.0);
     let relative = position - view.start;
     if relative < 0.0 || relative >= visible {
-        // A delayed frame or an explicit seek can skip more than one page.
+
         view.start = (view.start + (relative / visible).floor() * visible).max(0.0);
     }
 }
 
-pub fn scroll(ui: &Ui, response: &Response, rect: Rect, view: &mut Viewport) -> f32 {
+pub fn scroll(ui: &Ui, response: &Response, rect: Rect, view: &mut Viewport, zoom:std::ops::RangeInclusive<f32>) -> f32 {
     if !response.contains_pointer() {
         return 0.0;
     }
-    let (delta, modifiers, pointer) = ui.input(|i| {
-        let delta = i
+    let delta = wheel_delta(ui, rect.height());
+    let (modifiers, pointer) = ui.input(|i| (i.modifiers, i.pointer.hover_pos()));
+    if modifiers.ctrl && delta.y != 0.0 {
+        let x = pointer.map_or(rect.center().x, |p| p.x);
+        let anchor = beat_at(rect, view, x);
+        view.beat_width = (view.beat_width * (delta.y * 0.002).exp()).clamp(*zoom.start(), *zoom.end());
+        view.start = (anchor - (x - rect.left()) as f64 / view.beat_width as f64).max(0.0);
+    } else if modifiers.shift || delta.x != 0.0 {
+        view.start = (view.start - (delta.x + delta.y) as f64 / view.beat_width as f64).max(0.0);
+    } else {
+        return delta.y;
+    }
+    0.0
+}
+
+pub fn wheel_delta(ui: &Ui, page_height: f32) -> Vec2 {
+    ui.input(|i| i
             .raw
             .events
             .iter()
@@ -78,22 +99,9 @@ pub fn scroll(ui: &Ui, response: &Response, rect: Rect, view: &mut Viewport) -> 
                         * match unit {
                             MouseWheelUnit::Point => 1.0,
                             MouseWheelUnit::Line => 24.0,
-                            MouseWheelUnit::Page => rect.height(),
+                            MouseWheelUnit::Page => page_height,
                         }
                 }
                 _ => sum,
-            });
-        (delta, i.modifiers, i.pointer.hover_pos())
-    });
-    if modifiers.ctrl && delta.y != 0.0 {
-        let x = pointer.map_or(rect.center().x, |p| p.x);
-        let anchor = beat_at(rect, view, x);
-        view.beat_width = (view.beat_width * (delta.y * 0.002).exp()).clamp(8.0, 640.0);
-        view.start = (anchor - (x - rect.left()) as f64 / view.beat_width as f64).max(0.0);
-    } else if modifiers.shift || delta.x != 0.0 {
-        view.start = (view.start - (delta.x + delta.y) as f64 / view.beat_width as f64).max(0.0);
-    } else {
-        return delta.y;
-    }
-    0.0
+            }))
 }

@@ -129,9 +129,6 @@ impl<'network, 'tree> WorkState<'network, 'tree> {
     }
 }
 
-/// Identical queued owners share one render job; they must also share its ready
-/// intervals, otherwise overlapping linked instances would hold playback until
-/// the whole shared owner completes. Input equality includes timeline mapping.
 pub(super) fn equivalent_owners(plan: &RenderPlan, owner: OwnerId) -> Vec<OwnerId> {
     let Some(source) = plan.requests.get(&owner) else {
         return Vec::new();

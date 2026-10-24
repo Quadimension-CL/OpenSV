@@ -1,5 +1,3 @@
-//! Both timbre streams use an identical seed-event protocol with distinct salts.
-
 use crate::synthesis::{
     inference::noise::{
         NormalNoise,
@@ -48,8 +46,7 @@ pub(super) fn generate(
     let mut normal = NormalNoise::default();
     let mut current_note = 0;
     let mut current_text = 0;
-    // Noise must be replayed from zero even when feature preparation starts at
-    // a later aligned frame. Resets also discard the cached normal partner.
+
     for frame in 0..total {
         let note_event = note_seed.next_event();
         let text_event = text_seed.next_event();
@@ -62,6 +59,10 @@ pub(super) fn generate(
         if note_event.is_some() || text_event.is_some() {
             normal.reseed(current_note ^ current_text);
         }
+
+        if config.retained_noise_only && frame % config.stride != config.stride - 1 {
+            continue;
+        }
         let retain = frame >= first_frame && frame % config.stride == config.stride - 1;
         for _ in 0..width {
             let sample = normal.next_sample() * scale;
@@ -70,5 +71,13 @@ pub(super) fn generate(
             }
         }
     }
+    #[cfg(feature = "acoustic-diagnostic")]
+    super::super::probe::capture_noise(
+        match salt {
+            "pingpongpingpong" => "records_ppg_noise",
+            "non terrae plus ultra" => "records_timbre_noise",
+            _ => return Err(VoiceError::new("Unmapped acoustic noise diagnostic salt")),
+        }, first_frame, config.stride, width, &output,
+    )?;
     Ok(output)
 }

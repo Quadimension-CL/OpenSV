@@ -1,14 +1,7 @@
-//! Validate synthesis options against the selected voice family's support.
-//! Unimplemented options are reported, never silently discarded.
-
 use serde_json::Value;
 
 use crate::{
-    model::{
-        Automation, Extra, Language, NoteMode, NotePerformance, Parameter, PhonemeAttributes,
-        PhonemeParameter, VocalModeComponent, VoiceParameter, VoiceSettings, database_language,
-        pitch::PitchControl,
-    },
+    model::{Extra, Language, NoteMode, NotePerformance, database_language, pitch::PitchControl},
     synthesis::{
         plan::{NoteInput, OwnerInput},
         voice::{Result, VoiceError, VoiceFamily},
@@ -16,16 +9,13 @@ use crate::{
 };
 
 pub(super) fn validate_owner(input: &OwnerInput, family: VoiceFamily) -> Result<()> {
-    for (name, curve) in input.automation.iter().chain(&input.track_automation) {
-        let parameter = Parameter::from_key(name)
-            .ok_or_else(|| VoiceError::new(format!("Unsupported automation {name}")))?;
-        validate_automation(curve, parameter.range(), name)?;
-    }
-    for (name, curve) in &input.vocal_modes {
-        validate_automation(curve, (-150.0, 150.0), name)?;
-    }
-    for (name, curve) in &input.track_vocal_modes {
-        validate_automation(curve, (-150.0, 150.0), name)?;
+    for (name, curve) in &input.automation {
+        let parameter = crate::model::Parameter::ALL.into_iter().find(|p|p.key()==name);
+        let neutral = parameter.as_ref().is_some_and(|p|curve.points.iter().all(|(_,value)|*value==p.default_value()));
+        if curve.extra.keys().any(|key|key!="scriptData")
+            || (!curve.points.is_empty() && !matches!(name.as_str(),"pitchDelta"|"vibratoEnv"|"mouthOpening"|"toneShift"|"loudness"|"tension"|"breathiness"|"voicing"|"gender") && !name.starts_with("vocalMode_") && !neutral) {
+            return unsupported(format!("automation {name}"));
+        }
     }
     for control in &input.pitch_controls {
         if matches!(control, PitchControl::Point(_)) && family != VoiceFamily::Sv2 {
@@ -43,27 +33,29 @@ pub(super) fn validate_owner(input: &OwnerInput, family: VoiceFamily) -> Result<
             return unsupported(format!("pitch control option {key}"));
         }
     }
-    if let Some(key) = input.group_options.keys().next() {
-        return unsupported(format!("group option {key}"));
+    for (key, value) in &input.group_options {
+        if key != "vocalModes" || !empty_object(value) {
+            return unsupported(format!("group option {key}"));
+        }
     }
     for (label, values) in [
         ("instance", &input.voice.instance_options),
         ("track default", &input.voice.track_default_options),
     ] {
-        VoiceSettings::from_extra(values).map_err(VoiceError::new)?;
         for (key, value) in values {
             let supported = match key.as_str() {
                 "isInstrumental" => value.as_bool() == Some(false),
                 "dictionary" => value.is_string(),
                 "voicePresetName" => value.as_str() == Some(""),
                 "voice" => {
-                    validate_voice(value, label)?;
+                    validate_voice(value, label, family)?;
                     true
                 }
                 "takes" => {
                     super::retakes::validate_instance(value)?;
                     true
                 }
+                "pitchTakes" | "timbreTakes" => super::retakes::neutral_legacy(value),
                 _ => false,
             };
             if !supported {
@@ -102,25 +94,7 @@ pub(super) fn validate_owner(input: &OwnerInput, family: VoiceFamily) -> Result<
     Ok(())
 }
 
-fn validate_automation(curve: &Automation, range: (f64, f64), name: &str) -> Result<()> {
-    curve.validate().map_err(VoiceError::new)?;
-    if let Some(key) = curve.extra.keys().find(|key| key.as_str() != "scriptData") {
-        return unsupported(format!("automation {name} option {key}"));
-    }
-    if curve
-        .points
-        .iter()
-        .any(|(_, value)| *value < range.0 || *value > range.1)
-    {
-        return Err(VoiceError::new(format!(
-            "Automation {name} is outside its supported range"
-        )));
-    }
-    Ok(())
-}
-
 pub(super) fn validate_note(note: &NoteInput, family: VoiceFamily) -> Result<()> {
-    PhonemeAttributes::read(&note.attributes).map_err(VoiceError::new)?;
     validate_performance(
         NotePerformance::from_parts(&note.musical_type, &note.attributes)
             .map_err(VoiceError::new)?,
@@ -133,14 +107,12 @@ pub(super) fn validate_note(note: &NoteInput, family: VoiceFamily) -> Result<()>
             "languageOverride" => value
                 .as_str()
                 .is_some_and(|id| id.is_empty() || Language::parse(id).is_some()),
-            // The alphabet is checked after resolving the note's language.
+
             "phonesetOverride" => value.is_string(),
-            // The typed performance parser above validates these values.
+
             "expValueX" | "expValueY" | "dF0VbrMod" | "rTone" | "rIntonation" => true,
-            "phonemes" => {
-                validate_phonemes(value, note.id)?;
-                true
-            }
+            "cTimeDispersion" | "cPhraseTailDispersion" | "cPitchDispersion" if family == VoiceFamily::Sv2 => true,
+            "phonemes" if family==VoiceFamily::Sv2=>value.as_array().is_some_and(|rows|rows.iter().all(|r|r.as_object().is_some_and(|v|v.iter().all(|(k,v)|matches!(k.as_str(),"leftOffset"|"activity"|"position"|"strength") || (k=="alt" && v.as_i64()==Some(0)))))),
             _ => false,
         };
         if !supported {
@@ -150,7 +122,10 @@ pub(super) fn validate_note(note: &NoteInput, family: VoiceFamily) -> Result<()>
     for (key, value) in &note.extensions {
         let supported = match key.as_str() {
             "accent" => matches!(value.as_str(), Some("" | "1" | "2" | "3" | "4" | "5")),
-            "detune" => value.as_f64() == Some(0.0),
+            "detune" => value.as_f64().is_some_and(f64::is_finite),
+
+            "instantMode" if family==VoiceFamily::Sv2 => value.is_boolean(),
+            "pitchTakes" | "timbreTakes" => super::retakes::neutral_legacy(value),
             "takes" => {
                 super::retakes::validate(value, family)?;
                 true
@@ -159,26 +134,6 @@ pub(super) fn validate_note(note: &NoteInput, family: VoiceFamily) -> Result<()>
         };
         if !supported {
             return unsupported(format!("note {} option {key}", note.id));
-        }
-    }
-    Ok(())
-}
-
-fn validate_phonemes(value: &Value, note_id: u64) -> Result<()> {
-    let entries = value
-        .as_array()
-        .ok_or_else(|| VoiceError::new("Note phoneme attributes must be an array"))?;
-    for (index, value) in entries.iter().enumerate() {
-        let fields = value
-            .as_object()
-            .ok_or_else(|| VoiceError::new("Phoneme attributes must be objects"))?;
-        if let Some(key) = fields.keys().find(|key| {
-            !(key.as_str() == "alt" && fields.get(key.as_str()).and_then(Value::as_u64) == Some(0))
-                && !PhonemeParameter::ALL
-                    .iter()
-                    .any(|parameter| parameter.key() == key.as_str())
-        }) {
-            return unsupported(format!("note {note_id} phoneme {index} attribute {key}"));
         }
     }
     Ok(())
@@ -236,26 +191,43 @@ pub(super) fn muted(attributes: &Extra) -> Result<bool> {
     }
 }
 
-fn validate_voice(value: &Value, scope: &str) -> Result<()> {
+fn validate_voice(value: &Value, scope: &str, family: VoiceFamily) -> Result<()> {
     let Some(object) = value.as_object() else {
         return unsupported(format!("{scope} non-object voice"));
     };
+    let unison=crate::synthesis::unison::UnisonSettings::from_voice(Some(value))?;
     for (key, value) in object {
-        if VoiceParameter::ALL
-            .iter()
-            .any(|parameter| parameter.key() == key)
-        {
-            // The typed parser above validates the supported scalar range.
-            continue;
-        }
         let supported = match key.as_str() {
+
+            "paramLoudness" if family == VoiceFamily::Sv2 => value.as_f64()
+                .is_some_and(|v| v.is_finite() && (-12.0..=12.0).contains(&v)),
+            "paramToneShift" if family==VoiceFamily::Sv2 => value.as_f64()
+                .is_some_and(|v|v.is_finite()&&v.abs()<=800.0),
+            "paramTension"|"paramBreathiness"|"paramGender" if family==VoiceFamily::Sv2 => value.as_f64()
+                .is_some_and(|v|v.is_finite()&&(-2.0..=2.0).contains(&v)),
+            "transposeCents" | "transposeSemitones" => value.as_f64()
+                .is_some_and(|v|v.is_finite() && v.abs()<=1_000_000.0),
+            "consonantStrength"|"consonantDuration" if family==VoiceFamily::Sv2 => value.as_f64()
+                .is_some_and(|v|v.is_finite() && (-1.0..=1.0).contains(&v)),
+            "relaxedPronunciation" | "europeanPronunciation" if family == VoiceFamily::Sv2 =>
+                matches!(value.as_str(), Some("default" | "true" | "false")),
+            "paramLoudness" | "paramTension" | "paramBreathiness" | "paramGender"
+            | "paramToneShift" => {
+                value.as_f64() == Some(0.0)
+            }
             "vocalModeInherited" => value.is_boolean(),
             "vocalModePreset" => value.as_str() == Some(""),
-            "vocalModeParams" => {
-                validate_vocal_modes(value, scope)?;
+            "vocalModeParams" if matches!(family,VoiceFamily::Sv2|VoiceFamily::Sv2Compatible) => {
+                let controls: crate::model::PublicModeMap = serde_json::from_value(value.clone())
+                    .map_err(|error| VoiceError::new(format!("Invalid {scope} vocal modes: {error}")))?;
+                crate::synthesis::vocal_modes::validate_public(&controls)?;
                 true
             }
-            "choirSeatingSeparation" => value.as_f64() == Some(f64::from(0.7_f32)),
+            "vocalModeParams" => empty_object(value),
+            "choirNumStems"|"choirPartName"|"choirSeatingSeed"|"choirSeatingFullSize"
+            |"choirSeatingCenterIndex"|"choirSeatingSeparation" => {
+                family!=VoiceFamily::Sv1 || unison==Default::default()
+            },
             _ => false,
         };
         if !supported {
@@ -265,24 +237,8 @@ fn validate_voice(value: &Value, scope: &str) -> Result<()> {
     Ok(())
 }
 
-fn validate_vocal_modes(value: &Value, scope: &str) -> Result<()> {
-    let Some(modes) = value.as_object() else {
-        return unsupported(format!("{scope} non-object vocal mode parameters"));
-    };
-    for (name, values) in modes {
-        let Some(values) = values.as_object() else {
-            return unsupported(format!("{scope} non-object vocal mode {name}"));
-        };
-        for key in values.keys() {
-            if !VocalModeComponent::ALL
-                .iter()
-                .any(|component| component.key() == key)
-            {
-                return unsupported(format!("{scope} vocal mode {name}.{key}"));
-            }
-        }
-    }
-    Ok(())
+fn empty_object(value: &Value) -> bool {
+    value.as_object().is_some_and(|object| object.is_empty())
 }
 
 fn unsupported<T>(feature: impl std::fmt::Display) -> Result<T> {

@@ -29,15 +29,14 @@ impl Runtime {
                 / coverage.sample_rate as f64)
                 .ceil() as usize;
             end = end.max(last);
-            let voice = self.routes.get(id).and_then(|key| self.voices.get(key));
+            let voice = self.routes.get(&id.reference()).and_then(|key| self.voices.get(key));
             if voice.is_some_and(|v| v.live.is_some()) {
                 continue;
             }
-            // Unassigned tracks are silent. A specified but unavailable singer
-            // remains pending instead of silently substituting another voice.
-            if !self.routes.contains_key(id)
-                && !self.binding_errors.contains_key(id)
-                && !self.pending_voices.contains(id)
+
+            if !self.routes.contains_key(&id.reference())
+                && !self.binding_errors.contains_key(&id.reference())
+                && !self.pending_voices.contains(&id.reference())
             {
                 continue;
             }

@@ -1,8 +1,3 @@
-//! Separate note and phone clocks for the SV1 NOFS DDS frontend.
-//!
-//! The acoustic wrapper truncates another clock, so its TimedPhone.frames
-//! must not be reused here. Note and phone boundaries also differ in precision.
-
 use crate::synthesis::{
     stages::f0::frontend::FrontendNote,
     voice::{Result, VoiceError},
@@ -36,8 +31,7 @@ pub(super) fn note_frame_counts(notes: &[FrontendNote], step: f32) -> Result<Vec
     notes
         .iter()
         .map(|note| {
-            // Left uses float seconds and a float reciprocal; the right endpoint
-            // adds the note's double seconds before the double round operation.
+
             let left = frame(f64::from((elapsed * inverse).round()))?;
             let end = f64::from(elapsed) + duration_seconds(note)?;
             let right = frame((end * inverse_double).round())?;

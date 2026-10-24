@@ -1,6 +1,5 @@
-//! Audio and display publication for the current worker revision.
 use super::{
-    Event, phonemes,
+    Event,
     state::{Session, WorkState, equivalent_owners},
     visuals,
 };
@@ -58,8 +57,7 @@ impl<'network, 'tree> WorkState<'network, 'tree> {
                 revision: self.revision,
                 source: self.live.as_ref().and_then(LiveMixer::source),
             });
-            // A metadata-only plan replaces the sparse audio source but keeps
-            // every ready display interval, without restarting its highlight.
+
             for (&owner, session) in &self.sessions {
                 visuals::publish(
                     events,
@@ -103,13 +101,11 @@ impl<'network, 'tree> WorkState<'network, 'tree> {
             } else {
                 None
             };
-            let visuals = self.cache.visual_snapshot();
-            self.publish_phonemes(events, &visuals);
             let _ = events.send(Event::Publication {
                 revision: self.revision,
                 audio,
                 owners,
-                visuals,
+                visuals: self.cache.visual_snapshot(),
             });
         }
         self.publish_status(events);
@@ -117,14 +113,16 @@ impl<'network, 'tree> WorkState<'network, 'tree> {
 
     pub fn publish_prepared(&mut self, owner: OwnerId, events: &Events) -> Result<(), String> {
         if let Some(session) = self.sessions.get_mut(&owner) {
-            phonemes::publish(
-                events,
-                &self.plan,
-                self.revision,
-                owner,
-                session.visuals.phonemes(),
-            );
             let mirrors = equivalent_owners(&self.plan, owner);
+            let phones=session.prepared.phoneme_track();
+            for &mirror in &mirrors {
+                let _=events.send(Event::Phonemes {
+                    revision:self.revision,owner:mirror,
+                    snapshot:crate::synthesis::rendered::PhonemeSnapshot {
+                        input:Arc::clone(&session.job.request.input),phones:phones.clone(),
+                    },
+                });
+            }
             if !self.rebuild_source
                 && let Some(live) = &mut self.live
             {
@@ -161,8 +159,7 @@ impl<'network, 'tree> WorkState<'network, 'tree> {
         chunks: Vec<crate::synthesis::audio::RenderedAudio>,
         events: &Events,
     ) -> Result<(), String> {
-        // A plan arriving inside a numerical batch gets a new sparse source
-        // from the retained prepared state after reinsertion, never old PCM.
+
         let owner = session.job.request.owner;
         let mirrors = equivalent_owners(&self.plan, owner);
         let mut patches = Vec::new();

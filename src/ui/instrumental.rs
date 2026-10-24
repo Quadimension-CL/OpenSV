@@ -11,12 +11,12 @@ pub struct AudioDrag {
 }
 
 pub fn create_menu(app: &mut App, ui: &mut Ui) {
-    if ui.button("创建新的音轨").clicked() {
+    if ui.button(crate::i18n::t("创建新的音轨")).clicked() {
         app.commit_lyric();
         app.editor.add_track();
         ui.close();
     }
-    if ui.button("创建新的伴奏轨").clicked() {
+    if ui.button(crate::i18n::t("创建新的伴奏轨")).clicked() {
         app.commit_lyric();
         let id = app.editor.add_instrumental_track();
         ui.close();
@@ -34,9 +34,8 @@ pub fn update_drag(app: &mut App, ctx: &Context) {
     if let Some(pos) = ctx.input(|i| i.pointer.interact_pos()) {
         let beat = app
             .view
-            .snap_beat(drag.beat + f64::from((pos.x - drag.pointer_x) / drag.beat_width))
-            .max(0.0);
-        let seconds = app.editor.project.time.seconds_at(ticks(beat)).max(0.0);
+            .snap_beat(drag.beat + f64::from((pos.x - drag.pointer_x) / drag.beat_width));
+        let seconds = app.editor.project.time.seconds_at(ticks(beat));
         app.editor.move_audio_clip(drag.track, seconds);
     }
     if ctx.input(|i| i.pointer.button_released(PointerButton::Primary) || !i.pointer.primary_down())

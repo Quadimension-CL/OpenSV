@@ -1,52 +1,80 @@
-use crate::synthesis::plan::OwnerInput;
+use super::super::{
+    score::{PhoneSource, PreparedPhrase},
+    stages::duration::DurationResult,
+};
 use std::sync::Arc;
 
-mod prepare;
-
-pub use crate::model::SourcePhone;
-
-/// One source phoneme on the acoustic clock, including its unedited model values.
 #[derive(Clone, Debug)]
-pub struct RenderedPhoneme {
-    pub source: SourcePhone,
+pub struct RenderedPhone {
     pub token: String,
-    pub language: String,
-    pub begin_seconds: f64,
+    pub start_seconds: f64,
     pub end_seconds: f64,
-    pub default_begin_seconds: f64,
-    pub default_end_seconds: f64,
-    pub activity: Option<f64>,
-    pub position: Option<f64>,
-    pub strength: Option<f64>,
-    pub default_activity: Option<f64>,
-    pub default_position: Option<f64>,
-    pub default_strength: Option<f64>,
-    pub supports_timing: bool,
-    pub supports_impulse: bool,
+    pub predicted_start_seconds: f64,
+    pub predicted_end_seconds: f64,
+    pub source: Option<PhoneSource>,
+    pub boundary_strength: f64,
+    pub boundary_position: f64,
+    pub has_activity: bool,
+    pub strength: f32,
+    pub error: Option<Arc<str>>,
+    pub predicted_activity: Option<f64>,
+    pub predicted_position: f64,
 }
-
-/// The complete owner result is shared before any PCM block is requested.
 #[derive(Clone, Debug)]
-pub struct RenderedPhonemeTrack {
-    pub phones: Arc<[RenderedPhoneme]>,
-}
-
-impl RenderedPhonemeTrack {
-    pub fn memory_bytes(&self) -> usize {
-        self.phones.iter().fold(
-            std::mem::size_of_val(self.phones.as_ref()),
-            |bytes, phone| {
-                bytes
-                    .saturating_add(phone.token.capacity())
-                    .saturating_add(phone.language.capacity())
-            },
-        )
-    }
-}
-
-/// Source geometry remains attached to timing data while an editor revision changes.
+pub struct PhonemeTrack(pub Arc<[RenderedPhone]>);
 #[derive(Clone, Debug)]
 pub struct PhonemeSnapshot {
-    pub input: Arc<OwnerInput>,
-    pub data: RenderedPhonemeTrack,
+    pub input: Arc<crate::synthesis::plan::OwnerInput>,
+    pub phones: PhonemeTrack,
+}
+impl PhonemeTrack {
+    pub fn new(phrase: &PreparedPhrase, duration: &DurationResult) -> Self {
+        let mut seconds = phrase.start_seconds;
+        let mut natural_seconds=phrase.start_seconds;
+        Self(
+            duration
+                .durations
+                .iter()
+                .enumerate()
+                .map(|(index, phone)| {
+                    let start_seconds = seconds;
+                    seconds += phone.duration_seconds;
+                    let predicted_start_seconds=natural_seconds;
+                    natural_seconds+=duration.natural_frames[index] as f64*crate::synthesis::score::FRAME_SECONDS;
+                    let source = phrase.phone_sources[phone.record_index][phone.phone_index];
+                    let control = source.and_then(|s| phrase.phoneme_controls.get(&s));
+                    RenderedPhone {
+                        token: source.and_then(|s|phrase.phone_labels.get(&s)).cloned().unwrap_or_else(||
+                            phrase.records[phone.record_index].phones[phone.phone_index].token.clone()),
+                        start_seconds,
+                        end_seconds: seconds,
+                        predicted_start_seconds,
+                        predicted_end_seconds:natural_seconds,
+                        source,
+                        error: source.and_then(|s| phrase.note_errors.get(&s.note_id))
+                            .map(|error| Arc::from(error.as_str())),
+                        predicted_activity: duration.prediction.impulse_values.get(index).copied().filter(|v|*v>0.0),
+                        predicted_position: duration.prediction.impulse_positions.get(index).copied().map_or(0.0,f64::from),
+                        boundary_strength: crate::synthesis::score::phonemes::activity(
+                            phrase, duration, index,
+                        )
+                        .unwrap_or(0.0),
+                        has_activity: crate::synthesis::score::phonemes::activity(
+                            phrase, duration, index,
+                        )
+                        .is_some(),
+                        strength: control.and_then(|c| c.strength).unwrap_or(0.0),
+                        boundary_position: control
+                            .and_then(|c| c.position)
+                            .or_else(|| duration.prediction.impulse_positions.get(index).copied())
+                            .map_or(0.0, f64::from),
+                    }
+                })
+                .collect(),
+        )
+    }
+    pub fn memory_bytes(&self) -> usize {
+        std::mem::size_of_val(self.0.as_ref())
+            + self.0.iter().map(|p| p.token.capacity()).sum::<usize>()
+    }
 }

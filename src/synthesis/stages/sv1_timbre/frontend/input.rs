@@ -11,9 +11,11 @@ impl Frontend<'_> {
         let mut raw = Sequence::zeros(phones.len(), self.width)?;
         let mut language_ids = Vec::with_capacity(phones.len());
         let mut noise_ids = Vec::with_capacity(phones.len());
+        let mut silence=Vec::with_capacity(phones.len());
         for (phone, row) in phones.iter().zip(raw.values.chunks_exact_mut(self.width)) {
             let resolved =
                 resolve_explicit(&self.languages, self.unified, &phone.language, &phone.token)?;
+            silence.push(resolved.source_class.unwrap_or("silence")=="silence");
             if resolved.unified_phone_index >= self.width - 1 {
                 return Err(VoiceError::new(
                     "SV1 timbre phone exceeds its one-hot feature width",
@@ -23,8 +25,7 @@ impl Frontend<'_> {
             let seconds = phone.frames as f32 * self.frame_seconds;
             row[self.width - 1] = (seconds + 0.05).ln();
             language_ids.push(resolved.language_index);
-            // Hash the selected source table's numeric token ID before
-            // mapping to the unified neural vocabulary.
+
             let source = (!phone.language.is_empty())
                 .then(|| {
                     self.languages
@@ -51,8 +52,7 @@ impl Frontend<'_> {
             .normalize(&raw.values, &mut normalized.values, true)
             .map_err(error)?;
         if self.contract == Contract::Native {
-            // Hash the first positive argmax among the normalized unified
-            // categories, excluding the duration channel.
+
             for (row, id) in normalized
                 .values
                 .chunks_exact(self.width)
@@ -74,6 +74,7 @@ impl Frontend<'_> {
             normalized,
             language_ids,
             noise_ids,
+            silence,
         })
     }
 }

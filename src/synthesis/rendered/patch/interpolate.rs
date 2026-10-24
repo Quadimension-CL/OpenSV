@@ -1,7 +1,5 @@
 use super::{Result, VoiceError};
 
-/// The tail warp's radius-three polynomial. Its powers are f32 but
-/// polynomial coefficients and combinations are f64, followed by f32 weights.
 fn weight(distance: f32) -> f32 {
     let r = distance.abs();
     if r >= 3.0 {

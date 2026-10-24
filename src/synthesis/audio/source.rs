@@ -1,20 +1,20 @@
 use super::{LiveAudio, RenderedAudio, metronome::Metronome};
 use std::{ops::Range, sync::Arc};
 
-/// A decoded recording and cheap placement/mixer metadata. Moving or mixing a
-/// recording never copies its PCM or recomputes its waveform index.
 #[derive(Clone)]
 pub struct AudioLayer {
     pub track_id: u64,
     pub audio: Arc<RenderedAudio>,
-    pub start_frame: usize,
+
+    pub start_frame: i64,
+    pub source_start: usize,
     pub frames: usize,
     pub gains: [f32; 2],
 }
 
 impl AudioLayer {
     pub fn end_frame(&self) -> usize {
-        self.start_frame.saturating_add(self.frames)
+        (i128::from(self.start_frame) + self.frames as i128).clamp(0, usize::MAX as i128) as usize
     }
 
     pub(crate) fn sample(&self, position: f64) -> [f32; 2] {
@@ -22,8 +22,8 @@ impl AudioLayer {
             return [0.0; 2];
         }
         let local = position - self.start_frame as f64;
-        let a = local.floor() as usize;
-        let b = (a + 1).min(self.frames - 1);
+        let a = self.source_start + local.floor() as usize;
+        let b = (a + 1).min(self.source_start + self.frames - 1);
         let channels = self.audio.layout().channels();
         let fraction = local.fract() as f32;
         std::array::from_fn(|c| {
@@ -35,8 +35,6 @@ impl AudioLayer {
     }
 }
 
-/// Both sources share one device clock. Pending vocal/recording regions stop
-/// the whole mix, so accompaniment cannot run ahead while vocals are loading.
 pub struct PlaybackSource {
     pub(crate) metronome: Option<Arc<Metronome>>,
     pub(crate) vocals: Vec<Arc<LiveAudio>>,

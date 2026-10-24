@@ -27,18 +27,20 @@ pub struct MidiImport {
 
 impl App {
     pub fn begin_midi_import(&mut self, mode: MidiImportMode, ctx: &Context) {
-        ui::phonemes::phoneme_deactivate(self);
         ui::piano::cancel_audition(self);
         ui::tempo_input::finish(self);
         self.commit_lyric();
         self.editor.finish();
         let Some(path) = rfd::FileDialog::new()
-            .set_title("导入 MIDI")
-            .add_filter("MIDI 文件", &["mid", "midi"])
+            .set_title(crate::i18n::t("导入工程"))
+            .add_filter(crate::i18n::t("歌声工程"), rynthv::project_import::EXTENSIONS)
             .pick_file()
         else {
             return;
         };
+        if !path.extension().is_some_and(|e|e.eq_ignore_ascii_case("mid") || e.eq_ignore_ascii_case("midi")) {
+            self.begin_project_import(path,mode,ctx);return;
+        }
         let (tx, rx) = mpsc::channel();
         let source = path.clone();
         let repaint = ctx.clone();
@@ -50,7 +52,7 @@ impl App {
             });
         let phase = match worker {
             Ok(_) => MidiImportPhase::Loading(rx),
-            Err(error) => MidiImportPhase::Failed(format!("无法启动 MIDI 读取线程：{error}")),
+            Err(error) => MidiImportPhase::Failed(crate::lformat!("无法启动 MIDI 读取线程：{error}")),
         };
         self.midi_import = Some(MidiImport {
             path,
@@ -70,7 +72,7 @@ impl App {
         let result = match receiver.try_recv() {
             Ok(result) => result,
             Err(TryRecvError::Empty) => return,
-            Err(TryRecvError::Disconnected) => Err("MIDI 读取线程意外停止。".into()),
+            Err(TryRecvError::Disconnected) => Err(crate::i18n::t("MIDI 读取线程意外停止。").into()),
         };
         import.phase = match result {
             Ok(file) => {
@@ -86,9 +88,8 @@ impl App {
     }
 
     pub fn apply_midi_import(&mut self, import: &MidiImport) -> Result<(), String> {
-        ui::phonemes::phoneme_deactivate(self);
         let MidiImportPhase::Ready { file, selected } = &import.phase else {
-            return Err("MIDI 尚未读取完成。".into());
+            return Err(crate::i18n::t("MIDI 尚未读取完成。").into());
         };
         let indices: Vec<_> = selected
             .iter()
@@ -99,15 +100,15 @@ impl App {
         self.editor.finish();
         let summary: crate::editor::ImportSummary = match import.mode {
             MidiImportMode::NewProject => {
-                // Construct and validate before retiring the current project.
+
                 let (editor, summary) = Editor::from_midi(file, &indices)?;
                 self.synthesis.reset_project();
                 self.editor = editor;
+                self.restore_transport_choices();
                 self.path = None;
                 self.audio_import = None;
                 self.gesture = None;
                 self.piano_anchor = crate::ui::piano::AnchorSelection::default();
-                self.phoneme_editing = ui::phonemes::PhonemeEditing::default();
                 self.group_gesture = None;
                 self.audio_drag = None;
                 self.view_pan = ui::view_pan::ViewPan::default();
@@ -131,13 +132,13 @@ impl App {
             self.view.arrangement.start = start;
             self.view.top_pitch = (first.pitch + 9).clamp(12, 127) as f32;
         }
-        self.status = format!(
+        self.status = crate::lformat!(
             "已导入 {} 个音符到 {} 条音轨",
             summary.notes, summary.tracks
         );
         if summary.split_tracks > 0 {
             self.status
-                .push_str(&format!(" · 重叠音符拆出 {} 条声部", summary.split_tracks));
+                .push_str(&crate::lformat!(" · 重叠音符拆出 {} 条声部", summary.split_tracks));
         }
         Ok(())
     }

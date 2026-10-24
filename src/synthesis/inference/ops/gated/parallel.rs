@@ -1,12 +1,8 @@
-//! Parallelize only independent complete frames, keeping small gates serial.
-
 use rayon::prelude::*;
 
 use super::MatrixError;
 use crate::synthesis::inference::parallel::pool;
 
-// Nonlinearities cost more than scalar multiply/adds, but short streaming
-// batches still need enough work per task to amortize scheduling and joining.
 const MIN_PARALLEL_VALUES: usize = 16 * 1024;
 const MIN_TASK_VALUES: usize = 2 * 1024;
 

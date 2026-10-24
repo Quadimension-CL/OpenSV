@@ -2,8 +2,6 @@ use super::{GroupRef, Language, Project, Track};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-/// RV pronunciation overrides travel with the project instead of referencing a
-/// machine-specific dictionary file. SVP's `dictionary` field selects the name.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PronunciationDictionary {

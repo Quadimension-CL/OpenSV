@@ -1,6 +1,5 @@
 use serde::Serialize;
 
-/// Container generation and its matching native stage adapters are distinct.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 pub enum VoiceFamily {
     Sv1,

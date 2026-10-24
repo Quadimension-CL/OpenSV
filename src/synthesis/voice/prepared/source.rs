@@ -2,7 +2,6 @@ use std::{borrow::Cow, sync::Arc};
 
 use crate::synthesis::voice::{Result, VoiceError, archive::Archive};
 
-/// Immutable verified resources, independent of their enclosing file grammar.
 pub(super) enum ModelSource {
     Indexed(Arc<Archive>),
     Inline(Vec<Vec<u8>>),

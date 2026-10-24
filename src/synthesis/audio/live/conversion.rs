@@ -2,10 +2,7 @@ use super::{LIVE_BLOCK_FRAMES, LIVE_CHANNELS, LIVE_SAMPLE_RATE, LiveAudio};
 use crate::synthesis::audio::{AudioError, RenderedAudio};
 
 impl LiveAudio {
-    /// Prepare a complete source through the same sparse playback path used by
-    /// progressive synthesis. Conversion runs outside the device callback.
-    /// Project time before this clip is explicitly silent, without allocating
-    /// a leading PCM buffer. Rate conversion uses linear interpolation.
+
     pub fn from_rendered(audio: &RenderedAudio) -> Result<Self, AudioError> {
         let rate = f64::from(LIVE_SAMPLE_RATE);
         let end = (audio.start_seconds() * rate

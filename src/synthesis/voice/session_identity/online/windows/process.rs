@@ -12,7 +12,7 @@ pub(super) fn candidate_process_ids() -> Result<Vec<u32>> {
     let snapshot = Handle::snapshot(SNAP_PROCESS, 0)?;
     let mut entry = ProcessEntry::new();
     let mut processes = Vec::new();
-    // SAFETY: entry is a writable PROCESSENTRY32W with its required size set.
+
     let mut found = unsafe { Process32FirstW(snapshot.0, &mut entry) };
     while found != 0 {
         if wide_path(&entry.exe_file)
@@ -22,10 +22,10 @@ pub(super) fn candidate_process_ids() -> Result<Vec<u32>> {
         {
             processes.push(entry.process_id);
         }
-        // SAFETY: The snapshot and output record remain valid across iteration.
+
         found = unsafe { Process32NextW(snapshot.0, &mut entry) };
     }
-    // SAFETY: Read the enumeration's last-error value immediately after failure.
+
     if unsafe { GetLastError() } != ERROR_NO_MORE_FILES {
         return Err(api_error("Process32NextW"));
     }
@@ -35,7 +35,7 @@ pub(super) fn candidate_process_ids() -> Result<Vec<u32>> {
 pub(super) fn image_path(process: &Handle) -> Result<PathBuf> {
     let mut buffer = vec![0u16; 32768];
     let mut length = buffer.len() as u32;
-    // SAFETY: buffer is a writable length-code-unit UTF-16 output.
+
     if unsafe { QueryFullProcessImageNameW(process.0, 0, buffer.as_mut_ptr(), &mut length) } == 0 {
         return Err(api_error("QueryFullProcessImageNameW"));
     }
@@ -52,12 +52,10 @@ pub(super) fn image_path(process: &Handle) -> Result<PathBuf> {
     Ok(path)
 }
 
-/// The executable's loaded base comes from the OS module snapshot, never from
-/// its preferred PE image base or a presumed address without ASLR.
 pub(super) fn main_module(process_id: u32, executable: &Path) -> Result<(usize, usize)> {
     let snapshot = Handle::snapshot(SNAP_MODULE, process_id)?;
     let mut entry = ModuleEntry::new();
-    // SAFETY: entry is a writable MODULEENTRY32W with its required size set.
+
     if unsafe { Module32FirstW(snapshot.0, &mut entry) } == 0 {
         return Err(api_error("Module32FirstW"));
     }

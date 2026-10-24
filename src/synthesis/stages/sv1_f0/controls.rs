@@ -1,5 +1,3 @@
-//! Note performance controls from the two DDS editor adapters.
-
 use super::Contract;
 
 use crate::synthesis::{
@@ -18,11 +16,11 @@ pub(super) struct Controls {
 
 #[derive(Clone, Copy)]
 pub(super) struct Defaults {
-    /// Base noise temperature; SV2 compatibility uses 1.
+
     pub temperature: f32,
-    /// Additional temperature multiplier when the source note flag is set.
+
     pub flagged_temperature_scale: f32,
-    /// Base position scaling; SV2 compatibility uses 1.
+
     pub position_scale: f32,
 }
 
@@ -41,7 +39,10 @@ pub(super) fn prepare(
         || !defaults.temperature.is_finite()
         || !defaults.flagged_temperature_scale.is_finite()
         || !defaults.position_scale.is_finite()
-        || notes.iter().any(|note| note.kind > 1)
+        || notes.iter().any(|note| note.kind > match contract {
+            Contract::Compatible => 2,
+            Contract::Native { .. } => 1,
+        })
     {
         return Err(VoiceError::new("Invalid version 1 F0 default controls"));
     }
@@ -75,10 +76,7 @@ pub(super) fn prepare(
                 )
             }
             Contract::Native { enhancement } => {
-                // The NOFS special-mode flag is separate from the connection
-                // flag in FrontendNote.flag. Ordinary notes have expression .5,
-                // so its multiplier is one; synthetic rests have no expression
-                // and keep position zero.
+
                 (
                     defaults.temperature,
                     if note.kind == 0 { enhancement } else { 0.0 },
@@ -98,7 +96,7 @@ pub(super) fn prepare(
         .map(|((&temperature, a), c)| {
             let position_b = match contract {
                 Contract::Compatible => {
-                    // The compatibility mapping requires f64 arithmetic.
+
                     let scale = if f64::from(temperature) > 0.8 {
                         ((1.2 - f64::from(temperature)) / 0.4).max(0.0)
                     } else {
@@ -107,7 +105,7 @@ pub(super) fn prepare(
                     (f64::from(defaults.position_scale) * scale) as f32
                 }
                 Contract::Native { .. } => {
-                    // Keep the NOFS mapping's f32 multiply/add order.
+
                     if temperature > 0.8 {
                         defaults.position_scale * (temperature * -2.5 + 3.0).max(0.0)
                     } else {
@@ -173,8 +171,7 @@ pub(super) fn vibrato(
     if values.iter().any(|value| !value.is_finite()) {
         return Err(VoiceError::new("DDS vibrato controls must be finite"));
     }
-    // Neutral modulation is one; the sampler projection takes a centered
-    // scalar. Both DDS wrappers use unit scale and zero offset by default.
+
     Ok(values
         .into_iter()
         .map(|value| value.clamp(0.0, 2.0) - 1.0)

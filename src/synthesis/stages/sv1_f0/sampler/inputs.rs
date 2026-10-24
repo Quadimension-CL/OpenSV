@@ -1,4 +1,3 @@
-//! Frame grouping, conditioning order and expansion for the DDS pitch sampler.
 use crate::synthesis::{
     inference::Sequence,
     voice::{Result, VoiceError},
@@ -38,6 +37,7 @@ pub(super) fn condition(
     group: usize,
     width: usize,
     scale: f32,
+    legacy_numeric:bool,
 ) -> Result<Sequence> {
     let channels = width
         .checked_mul(3)
@@ -47,7 +47,8 @@ pub(super) fn condition(
     let mut output = Sequence::zeros(context.frames, channels)?;
     let frequency_step = f32::from_bits(0xc1d4_9a78) / width as f32;
     let frequencies: Vec<f32> = (0..width / 2)
-        .map(|index| (index as f32 * frequency_step).exp2())
+        .map(|index| if legacy_numeric {10000.0_f32.powf((index as f32+index as f32)/width as f32)}
+            else {(index as f32 * frequency_step).exp2()})
         .collect();
     for frame in 0..context.frames {
         let row = &mut output.values[frame * channels..(frame + 1) * channels];
@@ -61,10 +62,11 @@ pub(super) fn condition(
             row[context.channels + 3 * width + offset] = noise[source];
         }
         for (position_index, sum) in position_sum.into_iter().enumerate() {
-            let angle = sum * scale / group as f32;
+            let angle = if legacy_numeric {(sum / group as f32)*scale}else{sum * scale / group as f32};
             let start = context.channels + position_index * width;
             for (index, frequency) in frequencies.iter().enumerate() {
-                let (sin, cos) = (frequency * angle).sin_cos();
+                let phase=if legacy_numeric {angle / frequency}else{frequency * angle};
+                let (sin, cos) = if legacy_numeric {(phase.sin(),phase.cos())}else{phase.sin_cos()};
                 row[start + index] = sin;
                 row[start + width / 2 + index] = cos;
             }

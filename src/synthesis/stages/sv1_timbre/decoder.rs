@@ -4,7 +4,6 @@ use crate::synthesis::{
     voice::Result,
 };
 
-/// Both decoder branches retain their right context across acoustic batches.
 pub(super) struct Decoder {
     spectral_context: Rows,
     latent: Rows,

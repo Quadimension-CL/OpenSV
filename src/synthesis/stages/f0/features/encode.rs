@@ -3,10 +3,10 @@ use crate::synthesis::{
     voice::{Result, VoiceError},
 };
 
-use super::{FeatureEncoding, FeatureInputs, FeatureNetwork};
+use super::{FeatureEncoding, FeatureInputs, FeatureNetwork,phones::{PhoneEncoder,PhoneValues}};
 
 impl FeatureNetwork<'_> {
-    /// Encode complete note and phoneme context rows.
+
     pub fn encode(&self, input: &FeatureInputs<'_>) -> Result<FeatureEncoding> {
         #[cfg(feature = "synth-profile")]
         let _profile = crate::synthesis::profiling::span("features.encode");
@@ -18,8 +18,8 @@ impl FeatureNetwork<'_> {
         }
         let note_count = input.notes.len() / self.note_input_channels;
         let phone_count = input.phone_to_note.len();
-        if input.phone_ids.len() != phone_count
-            || input.language_ids.len() != phone_count
+        if input.phones.language_ids.len() != phone_count
+            || input.phones.vowels.len()!=phone_count
             || input.phone_to_note.iter().any(|&index| index >= note_count)
         {
             return Err(VoiceError::new(
@@ -44,27 +44,45 @@ impl FeatureNetwork<'_> {
         if let Some(style) = &style {
             add(&mut notes, style)?;
         }
-        for &node in &self.tree.node(self.children[5])?.children {
-            notes = context::encode(self.tree, node, &notes, width)?;
-        }
+        notes=self.encode_context(self.children[5],&notes,width)?;
         add(&mut notes, &projected)?;
 
-        let phone_ids: Vec<f32> = input.phone_ids.iter().map(|&value| value as f32).collect();
         let language_ids: Vec<f32> = input
-            .language_ids
+            .phones.language_ids
             .iter()
             .map(|&value| value as f32)
             .collect();
-        let phone_width = self.phone_embedding.features();
+        let phone_width = self.configuration.phone_embedding_channels;
         let language_width = self.language_embedding.features();
-        let mut phone_embeddings = zeros(phone_count, phone_width)?;
+        let phone_embeddings=match (&self.phone_encoder,&input.phones.values) {
+            (PhoneEncoder::Categorical(embedding),PhoneValues::Categorical(ids)) if ids.len()==phone_count=>{
+                let mut values=zeros(phone_count,phone_width)?;
+                embedding.execute(&ids.iter().map(|i|*i as f32).collect::<Vec<_>>(),&mut values)
+                    .map_err(|error|VoiceError::new(error.to_string()))?;values
+            }
+            (PhoneEncoder::Phonetic(_),PhoneValues::Phonetic(values)) if values.len()==phone_count*73=>{
+                #[cfg(feature="acoustic-diagnostic")]
+                super::diagnostic::capture(self.tree,"phonetic_phone_features73",phone_count,values)?;
+                self.tree.execute_node(self.children[0],values)?
+            }
+            _=>return Err(VoiceError::new("Shared phone input schema or shape differs from model")),
+        };
         let mut language_embeddings = zeros(phone_count, language_width)?;
-        self.phone_embedding
-            .execute(&phone_ids, &mut phone_embeddings)
-            .map_err(|error| VoiceError::new(error.to_string()))?;
         self.language_embedding
             .execute(&language_ids, &mut language_embeddings)
             .map_err(|error| VoiceError::new(error.to_string()))?;
+        #[cfg(feature="acoustic-diagnostic")]
+        {
+            if let PhoneValues::Categorical(ids)=&input.phones.values {
+                let categories=ids.iter().zip(&input.phones.language_ids).flat_map(|(&phone,&language)|[phone as f32,language as f32]).collect::<Vec<_>>();
+                super::diagnostic::capture(self.tree,"categories",phone_count,&categories)?;
+            }else{
+                super::diagnostic::capture(self.tree,"language_ids",phone_count,&language_ids)?;
+            }
+            super::diagnostic::capture(self.tree,"phone_embeddings",phone_count,&phone_embeddings)?;
+            super::diagnostic::capture(self.tree,"language_embeddings",phone_count,&language_embeddings)?;
+            super::diagnostic::capture(self.tree,"note_context",note_count,&notes)?;
+        }
         let combined_width = phone_width + language_width + width;
         let mut combined = zeros(phone_count, combined_width)?;
         for ((phone, &note), row) in input
@@ -96,9 +114,9 @@ impl FeatureNetwork<'_> {
                 add(row, &style[note * width..(note + 1) * width])?;
             }
         }
-        for &node in &self.tree.node(self.children[6])?.children {
-            phones = context::encode(self.tree, node, &phones, phone_width)?;
-        }
+        phones=self.encode_context(self.children[6],&phones,phone_width)?;
+        #[cfg(feature="acoustic-diagnostic")]
+        super::diagnostic::capture(self.tree,"phone_context",phone_count,&phones)?;
         Ok(FeatureEncoding {
             note_count,
             note_channels: width,
@@ -107,6 +125,13 @@ impl FeatureNetwork<'_> {
             phone_channels: phone_width,
             phones: phones.into(),
         })
+    }
+
+    fn encode_context(&self,index:usize,values:&[f32],width:usize)->Result<Vec<f32>> {
+        if self.phonetic() {return super::phonetic_context::encode_stack(self.tree,index,values,width,|_,_|Ok(()));}
+        let mut values=values.to_vec();
+        for &node in &self.tree.node(index)?.children {values=context::encode(self.tree,node,&values,width)?;}
+        Ok(values)
     }
 }
 

@@ -1,5 +1,3 @@
-//! Explicit RynthV model contexts, either machine-bound or manually supplied.
-
 mod location;
 mod storage;
 
@@ -23,10 +21,12 @@ struct VoiceContext {
     voice_name: String,
     model_version: u8,
     identity: u64,
-    /// None is an explicitly supplied portable condition. Session-file
-    /// and process imports remain tied to their original local user and processor.
+
     #[serde(default)]
     machine_fingerprint: Option<String>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    session_file: Option<PathBuf>,
 }
 
 pub(super) fn read(voice_name: &str, model_version: u8) -> Result<Option<u64>> {
@@ -36,6 +36,9 @@ pub(super) fn read(voice_name: &str, model_version: u8) -> Result<Option<u64>> {
     let Some(entry) = find(&context, voice_name, model_version) else {
         return Ok(None);
     };
+    if let Some(path) = &entry.session_file {
+        return super::session::resolve_imported_identity(voice_name, model_version, path).map(Some);
+    }
     if let Some(fingerprint) = &entry.machine_fingerprint {
         #[cfg(not(windows))]
         {
@@ -71,11 +74,17 @@ pub(super) fn save_bound(voice_name: &str, model_version: u8, identity: u64) -> 
         model_version,
         identity,
         Some(machine_fingerprint()?),
+        None,
     )
 }
 
 pub(super) fn save_manual(voice_name: &str, model_version: u8, identity: u64) -> Result<PathBuf> {
-    save(voice_name, model_version, identity, None)
+    save(voice_name, model_version, identity, None, None)
+}
+
+pub(super) fn save_session(voice_name: &str, model_version: u8, identity: u64, source: &Path) -> Result<PathBuf> {
+    let source = source.canonicalize()?;
+    save(voice_name, model_version, identity, None, Some(source))
 }
 
 fn save(
@@ -83,12 +92,14 @@ fn save(
     model_version: u8,
     identity: u64,
     machine_fingerprint: Option<String>,
+    session_file: Option<PathBuf>,
 ) -> Result<PathBuf> {
     let entry = VoiceContext {
         voice_name: voice_name.to_owned(),
         model_version,
         identity,
         machine_fingerprint,
+        session_file,
     };
     let path = context_path()?;
     storage::save(&path, entry)?;
@@ -107,7 +118,8 @@ fn validate(context: &Context) -> Result<()> {
         let invalid_fingerprint = entry.machine_fingerprint.as_ref().is_some_and(|value| {
             value.len() != 64 || !value.bytes().all(|byte| byte.is_ascii_hexdigit())
         });
-        if entry.voice_name.trim().is_empty()
+        if entry.session_file.as_ref().is_some_and(|path| !path.is_absolute())
+            || entry.voice_name.trim().is_empty()
             || !matches!(entry.model_version, 1 | 2)
             || invalid_fingerprint
             || context.voices[..index].iter().any(|previous| {

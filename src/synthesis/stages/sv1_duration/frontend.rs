@@ -48,14 +48,13 @@ pub(super) fn prepare(
             .normalize_scalar(0, (seconds + f64::from(0.01_f32)).ln() as f32, true)
             .map_err(|error| VoiceError::new(error.to_string()))?;
         for (left_index, phone) in record.phones.iter().enumerate() {
-            if phone.attributes.left_offset.is_some() {
+
+            if phone
+                .onset_offset_seconds
+                .is_some_and(|offset| offset != 0.0)
+            {
                 return Err(VoiceError::new(
                     "SV1 synthesis does not yet support phoneme onset offsets",
-                ));
-            }
-            if phone.attributes.strength.is_some_and(|value| value != 0.0) {
-                return Err(VoiceError::new(
-                    "SV1 synthesis does not yet support phoneme strength controls",
                 ));
             }
             let resolved = tree.resolve_phone(&phone.language, &phone.token)?;
@@ -89,8 +88,7 @@ pub(super) fn timing(record: &DurationRecord) -> Result<(f64, f64)> {
     {
         return Err(VoiceError::new("Invalid SV1 duration record timing"));
     }
-    // The old adapter keeps equal note partitions continuous. Frame rounding
-    // belongs to the later F0/acoustic adapters, each with its own rule.
+
     let seconds = record.linked_durations_seconds.iter().fold(
         record.note.duration_seconds / f64::from(record.parts),
         |sum, value| sum + value,

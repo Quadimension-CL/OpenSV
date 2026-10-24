@@ -1,9 +1,3 @@
-//! Projected multi-head attention.
-//!
-//! Children are ordered as Q, K, V affine projections, optional extra K/V
-//! vectors, output projection, and attention core. This implementation supports
-//! four projections and rejects extra bias/zero tokens.
-
 use std::fmt;
 
 use crate::synthesis::inference::affine::Affine;
@@ -14,7 +8,6 @@ pub const MULTI_HEAD_ATTENTION_TYPE_ID: [u8; 16] = [
     0x6e, 0xf1, 0xa8, 0x15, 0xba, 0x55, 0xa5, 0x27, 0x62, 0x77, 0x3c, 0xaf, 0x41, 0x1a, 0x0a, 0x42,
 ];
 
-/// Configuration encoded as eight little-endian u32 values.
 #[derive(Clone, Copy, Debug)]
 pub struct AttentionConfig {
     pub flags: u32,
@@ -80,8 +73,7 @@ impl AttentionConfig {
     }
 
     fn validate(self) -> Result<(), MultiHeadAttentionError> {
-        // Bits 3, 4, 5 and 6 enable Q/K/V/output projections. Bit 2 is
-        // preserved in the configuration but does not affect execution.
+
         if !matches!(self.flags, 0x78 | 0x7c) {
             return Err(MultiHeadAttentionError::UnsupportedFlags(self.flags));
         }
@@ -153,8 +145,6 @@ impl MultiHeadAttention {
         self.config
     }
 
-    /// Contiguous frames containing all heads. Queries may have a different
-    /// frame count from keys/values (the streaming wrapper uses this).
     pub fn execute(
         &self,
         queries: &[f32],

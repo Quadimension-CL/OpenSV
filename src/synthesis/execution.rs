@@ -1,6 +1,3 @@
-//! Cooperative cancellation for one render. Prepared weights are shared, but
-//! execution scopes and cancellation state belong to the captured render job.
-
 use super::voice::{Result, VoiceError};
 use std::{
     cell::RefCell,
@@ -21,8 +18,6 @@ impl Cancellation {
         Self { flag, parent: None }
     }
 
-    /// Cancel an execution cursor without cancelling its owner render. The
-    /// parent remains observable by kernels running on the cursor's worker.
     pub(crate) fn child(parent: Option<Self>) -> Self {
         Self {
             flag: Arc::new(AtomicBool::new(false)),
@@ -47,8 +42,6 @@ thread_local! {
     static CURRENT: RefCell<Option<Cancellation>> = const { RefCell::new(None) };
 }
 
-/// Parallel kernels must capture this on the calling thread and explicitly
-/// pass the token into their work items; thread locals do not follow tasks.
 pub fn current() -> Option<Cancellation> {
     CURRENT.with(|current| current.borrow().clone())
 }
@@ -67,7 +60,6 @@ pub fn checkpoint() -> Result<()> {
     }
 }
 
-/// Restore the caller's scope on both normal return and unwinding.
 pub fn scope<T>(cancellation: Cancellation, run: impl FnOnce() -> T) -> T {
     struct Restore(Option<Cancellation>);
     impl Drop for Restore {

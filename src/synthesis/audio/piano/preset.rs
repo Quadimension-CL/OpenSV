@@ -32,14 +32,14 @@ impl NotePreset {
         for harmonic in 1..=24 {
             let harmonic = f64::from(harmonic);
             let amplitude = (0.7 + 0.3 * (PI * harmonic * 0.16).sin().abs()) / harmonic.powf(1.55);
-            // Higher partials lose energy faster after the hammer strike.
+
             let lifetime = decay_seconds / (1.0 + 0.22 * (harmonic - 1.0).powf(1.15));
             let decay = (-6.907_755 / (sample_rate * lifetime)).exp();
             let stretched =
                 frequency * harmonic * (1.0 + inharmonicity * harmonic * harmonic).sqrt();
             for cents in [-0.9, 0.9] {
                 let frequency = stretched * 2.0_f64.powf(cents / 1200.0);
-                // Do not alias upper strings/partials at lower device rates.
+
                 if frequency >= sample_rate * 0.47 {
                     continue;
                 }

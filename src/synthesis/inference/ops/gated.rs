@@ -1,10 +1,3 @@
-//! Conditional convolution gate.
-//!
-//! Each projected frame contains two contiguous channel blocks. The gate
-//! adds the optional projected condition, splits the frame, applies tanh to the
-//! first half and sigmoid to the second, then multiplies the halves. Temporal
-//! convolution and its condition queue belong to the caller.
-
 mod parallel;
 
 use crate::synthesis::{
@@ -44,20 +37,24 @@ impl GatedConfig {
     }
 }
 
-/// Consumes aligned, frame-major outputs from the main and optional condition
-/// convolutions. Each input frame has `2 * channels` values; each output frame
-/// has `channels`. The condition has already been projected, so its size is
-/// independent of the condition input width in `GatedConfig`.
-///
-/// The optional condition is added before both nonlinearities. Input buffers
-/// are preserved and every shape is checked before writing output. The tanh
-/// calculation uses platform libm, so rounding can differ across platforms.
 pub fn activate_projected(
     projected: &[f32],
     condition: Option<&[f32]>,
     output: &mut [f32],
     channels: usize,
 ) -> Result<(), MatrixError> {
+    activate_projected_execution(projected,condition,output,channels,false)
+}
+
+pub(crate) fn activate_projected_legacy(
+    projected:&[f32],condition:Option<&[f32]>,output:&mut[f32],channels:usize,
+)->Result<(),MatrixError> {
+    activate_projected_execution(projected,condition,output,channels,true)
+}
+
+fn activate_projected_execution(
+    projected:&[f32],condition:Option<&[f32]>,output:&mut[f32],channels:usize,legacy:bool,
+)->Result<(),MatrixError> {
     let projected_channels = channels
         .checked_mul(2)
         .filter(|&width| width != 0)
@@ -74,9 +71,6 @@ pub fn activate_projected(
         )?;
     }
 
-    // Frame boundaries also preserve the activation's SSE/scalar-tail split.
-    // Capture cancellation before dispatch: worker thread locals do not carry
-    // the active render's execution scope.
     let cancellation = execution::current();
     parallel::for_frames(output, channels, |first, target| {
         let start = first * projected_channels;
@@ -87,6 +81,7 @@ pub fn activate_projected(
             target,
             channels,
             cancellation.as_ref(),
+            legacy,
         )
     })
 }
@@ -97,16 +92,16 @@ fn activate_frames(
     output: &mut [f32],
     channels: usize,
     cancellation: Option<&Cancellation>,
+    legacy:bool,
 ) -> Result<(), MatrixError> {
     let projected_channels = channels * 2;
-    // Each task reuses one condition workspace for its complete frames. The
-    // sigmoid is written straight into output, then multiplied in place, so an
-    // unconditional gate needs no temporary allocation.
+
     let mut combined = if condition.is_some() {
         vec![0.0; projected_channels]
     } else {
         Vec::new()
     };
+    let mut legacy_signal=if legacy {vec![0.0;channels]}else{Vec::new()};
     for (frame, (projected, output)) in projected
         .chunks_exact(projected_channels)
         .zip(output.chunks_exact_mut(channels))
@@ -129,11 +124,17 @@ fn activate_frames(
             projected
         };
         let (signal, gate_input) = projected.split_at(channels);
+        if legacy {
+            super::super::legacy_activation::sigmoid(gate_input,output);
+            super::super::legacy_activation::tanh(signal,&mut legacy_signal);
+            for (target,&signal) in output.iter_mut().zip(&legacy_signal) {*target*=signal;}
+            continue;
+        }
         #[cfg(target_arch = "x86_64")]
         let result = ActivationOperator::Sigmoid.execute_baseline(gate_input, output);
         #[cfg(not(target_arch = "x86_64"))]
         let result = ActivationOperator::Sigmoid.execute_reference(gate_input, output);
-        // Both slices are exactly `channels` elements after the shape checks.
+
         debug_assert!(result.is_ok());
         for (target, &signal) in output.iter_mut().zip(signal) {
             let gate = *target;

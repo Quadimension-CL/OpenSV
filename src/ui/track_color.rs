@@ -27,7 +27,6 @@ fn color32(color: TrackColor) -> Color32 {
     Color32::from_rgba_unmultiplied(r, g, b, a)
 }
 
-/// Bright greens/yellows use dark ink; red, blue and violet use light ink.
 pub fn foreground(color: Color32) -> Color32 {
     let linear = |value: u8| {
         let value = value as f32 / 255.0;
@@ -49,7 +48,7 @@ pub fn foreground(color: Color32) -> Color32 {
 pub fn picker(ui: &mut Ui, current: TrackColor) -> Option<TrackColor> {
     let mut picked = None;
     ui.scope(|ui| {
-        ui.label(RichText::new("音轨颜色").size(11.0).color(TEXT));
+        ui.label(RichText::new(crate::i18n::t("音轨颜色")).size(11.0).color(TEXT));
         ui.add_space(5.0);
         ui.spacing_mut().item_spacing = vec2(3.0, 3.0);
         for row in TrackColor::PALETTE.chunks(6) {
@@ -63,7 +62,7 @@ pub fn picker(ui: &mut Ui, current: TrackColor) -> Option<TrackColor> {
                             WidgetType::SelectableLabel,
                             ui.is_enabled(),
                             selected,
-                            name,
+                            crate::i18n::t(name),
                         )
                     });
                     ui.painter()
@@ -78,7 +77,7 @@ pub fn picker(ui: &mut Ui, current: TrackColor) -> Option<TrackColor> {
                     }
                     if response
                         .on_hover_cursor(CursorIcon::Default)
-                        .on_hover_text(name)
+                        .on_hover_text(crate::i18n::t(name))
                         .clicked()
                     {
                         picked = Some(color);

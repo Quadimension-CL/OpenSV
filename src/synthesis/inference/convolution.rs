@@ -1,5 +1,3 @@
-//! Temporal convolution with ordered matrix taps, stride and zero padding.
-
 mod kernel;
 mod packing;
 mod stream;
@@ -28,7 +26,7 @@ pub struct ConvolutionConfig {
 }
 
 impl ConvolutionConfig {
-    /// The payload excludes the resource's 16-byte module type prefix.
+
     pub fn parse(payload: &[u8]) -> Result<Self, ConvolutionError> {
         if payload.len() != 20 {
             return Err(ConvolutionError::InvalidConfig("expected five u32 words"));
@@ -56,7 +54,7 @@ impl ConvolutionConfig {
                 "zero kernel, stride or dilation",
             ));
         }
-        // The queue consumer needs overlapping or adjacent windows.
+
         if self.stride > self.receptive_frames()? {
             return Err(ConvolutionError::InvalidConfig(
                 "stride exceeds receptive window",
@@ -112,8 +110,6 @@ impl fmt::Display for ConvolutionError {
 
 impl std::error::Error for ConvolutionError {}
 
-/// Immutable, shared CPU weights, packed once across independent output channels.
-/// Every output accumulates taps in order, then input channels within each tap.
 #[derive(Clone)]
 pub struct Convolution {
     config: ConvolutionConfig,
@@ -174,7 +170,6 @@ impl Convolution {
         ConvolutionStream::new(self.clone())
     }
 
-    /// Execute one complete sequence. Input/output are contiguous frames.
     pub fn execute(&self, input: &[f32]) -> Result<Vec<f32>, ConvolutionError> {
         self.stream()?.process(input, true)
     }
@@ -186,7 +181,6 @@ impl Convolution {
         Ok(input.len() / self.input_channels())
     }
 
-    /// Queue already contains the left padding. Missing trailing rows are zero.
     fn execute_pending(
         &self,
         pending: &[f32],
@@ -198,8 +192,7 @@ impl Convolution {
         let length = frames
             .checked_mul(output_channels)
             .ok_or(MatrixError::InvalidShape)?;
-        // Establish the source-address bound before the packed kernel derives
-        // any per-frame slices, including logical trailing zero-padding rows.
+
         if frames != 0 {
             (frames - 1)
                 .checked_mul(self.config.stride)

@@ -1,14 +1,6 @@
-//! Arbitrary-frequency Fourier synthesis used by the harmonic excitation.
-//!
-//! Computes `sum(x[n] * exp(-i * angle * n * k))`.
-//! Bluestein convolution removes the FFT's scale only: there is no
-//! division by the coefficient count and no one-sided-spectrum doubling.
-
 use super::fourier::{Complex, fft, multiply};
 use crate::synthesis::voice::{Result, VoiceError};
 
-/// Scratch and FFT roots persist across frames; chirps depend on each frame's
-/// frequency.
 #[derive(Debug)]
 pub struct ChirpSynthesizer {
     chirp: Vec<Complex>,
@@ -42,9 +34,6 @@ impl ChirpSynthesizer {
         })
     }
 
-    /// Writes exactly `sample_count` real output samples. The coefficient
-    /// arrays may include the caller's spare element at index `sample_count`;
-    /// the transform does not read that element.
     pub fn synthesize(
         &mut self,
         angle: f32,
@@ -70,8 +59,7 @@ impl ChirpSynthesizer {
         self.kernel.fill([0.0; 2]);
         let fft_count = self.input.len();
         for (index, chirp) in self.chirp.iter_mut().enumerate() {
-            // Evaluate -angle*n*n/2 in f64,
-            // round the argument to f32, then call the f64 sin/cos routine.
+
             let phase = (index as f64 * index as f64 * (angle as f64 * -0.5)) as f32;
             if !phase.is_finite() {
                 return Err(VoiceError::new("Excitation Fourier chirp angle overflows"));

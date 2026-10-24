@@ -1,4 +1,3 @@
-//! Offline, band-limited rate conversion. Preview retains native PCM.
 use super::{AudioError, ChannelLayout, RenderedAudio};
 
 pub(crate) fn convert(

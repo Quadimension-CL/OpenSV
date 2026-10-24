@@ -1,8 +1,3 @@
-//! Stored phone vocabulary and explicit language-to-unified lookup.
-//!
-//! The third array maps local symbols to unified symbols. In `multiphone` it
-//! includes an extra terminal empty string, which is retained without indexing it.
-
 use serde::Serialize;
 
 use super::{Result, VoiceError, array, range, sum, u32_at};
@@ -11,7 +6,6 @@ pub const PHONE_SET_TYPE_ID: [u8; 16] = [
     0x4f, 0x0a, 0xa7, 0x7c, 0x74, 0xf4, 0xea, 0x4f, 0x14, 0x5d, 0xf4, 0x36, 0xab, 0xa8, 0xcb, 0x04,
 ];
 
-/// Four stored string arrays, in their original order. No normalization is done.
 #[derive(Clone, Debug, Serialize)]
 pub struct PhoneSet {
     pub name: String,
@@ -21,7 +15,6 @@ pub struct PhoneSet {
     pub classes: Vec<String>,
 }
 
-/// Exact token lookup within a stored table, not a prepared neural feature.
 #[derive(Clone, Copy, Debug, Serialize)]
 pub struct PhoneLookup<'a> {
     pub stored_index: usize,
@@ -31,22 +24,18 @@ pub struct PhoneLookup<'a> {
     pub mapped_symbol: Option<&'a str>,
 }
 
-/// The two categorical indexes consumed by the duration frontend.
 #[derive(Clone, Copy, Debug, Serialize)]
 pub struct ResolvedPhone<'a> {
     pub language_index: usize,
     pub selected_phone_set: &'a str,
     pub local_stored_index: Option<usize>,
-    /// Class from the selected language table, before unified-symbol mapping.
-    /// None when the symbol is absent from the selected table.
+
     pub source_class: Option<&'a str>,
     pub unified_phone_index: usize,
     pub unified_symbol: &'a str,
     pub used_silence_fallback: bool,
 }
 
-/// `languages` must keep the frontend's child order and `unified` must be its
-/// separate default table. This performs no lyric splitting or pronunciation.
 pub fn resolve_explicit<'a>(
     languages: &[&'a PhoneSet],
     unified: &'a PhoneSet,
@@ -62,7 +51,7 @@ pub fn resolve_explicit<'a>(
         .flatten();
     let source = selected.map_or(unified, |index| languages[index]);
     let local = source.lookup(token);
-    // The local mapper passes an unknown token through unchanged.
+
     let mapped = local.and_then(|phone| phone.mapped_symbol).unwrap_or(token);
     let found = unified.lookup(mapped);
     let output = found.or_else(|| unified.lookup("sil")).ok_or_else(|| {
@@ -80,7 +69,7 @@ pub fn resolve_explicit<'a>(
 }
 
 impl PhoneSet {
-    /// Parse the complete resource, including its 16-byte type prefix.
+
     pub(crate) fn parse(bytes: &[u8]) -> Result<Self> {
         if array::<16>(bytes, 0)? != PHONE_SET_TYPE_ID {
             return Err(VoiceError::new("Resource is not a phone set"));
@@ -115,8 +104,7 @@ impl PhoneSet {
         if mapped_symbols.len() < symbols.len() {
             return Err(VoiceError::new("Phone set is missing mapped symbols"));
         }
-        // Do not impose equal length on mapped_symbols: the shared multiphone
-        // table stores 111 symbols and 112 entries in this array.
+
         Ok(Self {
             name,
             symbols,
@@ -178,7 +166,7 @@ impl Reader<'_> {
                 "Phone set string count exceeds remaining bytes",
             ));
         }
-        // Read each bounded string before growing, not from an unchecked count.
+
         let mut values = Vec::new();
         for _ in 0..count {
             values.push(self.string()?);

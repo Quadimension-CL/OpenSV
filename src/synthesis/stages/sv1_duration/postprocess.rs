@@ -33,8 +33,7 @@ pub(super) fn execute(
             record_seconds.push(borrow_onset(seconds, &[], &[], &mut carry));
             continue;
         }
-        // Evaluate the exponential and sum in f32, then scale by f64 record
-        // seconds. Round the duration to f32 before storing it as f64.
+
         for value in predictions.iter_mut() {
             *value = value.exp();
         }
@@ -95,8 +94,7 @@ pub(super) fn execute(
 }
 
 fn borrow_onset(seconds: f64, phones: &[f64], classes: &[Option<&str>], carry: &mut f64) -> f64 {
-    // Extend records ending stop→semivowel and borrow the extra time from
-    // following records, retaining at least 75% of each record.
+
     let mut target = seconds;
     if *carry > 0.0 {
         if seconds <= *carry * 4.0 {
@@ -144,8 +142,7 @@ fn redistribute(phones: &mut [f64], classes: &[Option<&str>], target: f64) -> Re
     }
     let pairs = phones.len() & !1;
     for (index, seconds) in phones.iter_mut().enumerate() {
-        // Preserve the pairwise arithmetic and odd scalar tail operation order
-        // before these continuous values reach the boundary quantizers.
+
         *seconds = if index < pairs {
             *seconds * (target / sum)
         } else {

@@ -4,7 +4,6 @@ use crate::synthesis::{
     voice::{Result, VoiceError},
 };
 
-/// No row is stable until the backward recurrence has received the final input.
 #[derive(Clone)]
 pub(super) struct BidirectionalState {
     input: Vec<f32>,

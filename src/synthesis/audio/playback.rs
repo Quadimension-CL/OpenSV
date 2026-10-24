@@ -15,8 +15,6 @@ pub struct OutputFormat {
     pub channels: u16,
 }
 
-/// Atomics belonging to one installed project revision. An old handle cannot
-/// change playback after a replacement source is installed.
 #[derive(Clone)]
 pub struct PlaybackControl {
     controls: Arc<Controls>,
@@ -30,8 +28,7 @@ impl PlaybackControl {
 
     pub fn request(&self, playing: bool, seek: Option<f64>) -> Result<(), AudioError> {
         if !playing {
-            // Stop before changing the serial/cursor, so a callback cannot
-            // start at the newly requested pause target and advance it.
+
             self.pause();
         }
         if let Some(seconds) = seek {
@@ -63,10 +60,8 @@ struct Session {
 
 type SharedSource = RwLock<Option<Session>>;
 
-/// One default-device stream for the player's lifetime. Source replacement,
-/// seeking and newly published PCM blocks never recreate or restart the device.
 pub struct Player {
-    // Stop/join callbacks before destroying their source owner.
+
     stream: Option<cpal::Stream>,
     source: Arc<SharedSource>,
     state: Arc<DeviceState>,
@@ -146,7 +141,6 @@ impl Player {
         self.piano.clone()
     }
 
-    /// Complete CLI output enters the same sparse source and device callback.
     pub fn load(&mut self, audio: Arc<RenderedAudio>) -> Result<(), AudioError> {
         self.load_source(Arc::new(LiveAudio::from_rendered(&audio)?))
     }
@@ -175,14 +169,11 @@ impl Player {
                 .map_err(|_| AudioError::Device("Playback source lock poisoned".into()))?;
             source.replace(Session { audio, controls })
         };
-        // The write guard excluded callbacks using this old source. Reclaim on
-        // the control thread after unlocking so the new source can play now.
+
         drop(previous);
         Ok(())
     }
 
-    /// Start the device without installing project PCM or changing transport.
-    /// Keyboard audition uses the same stream before any project is rendered.
     pub fn start_output(&mut self) -> Result<(), AudioError> {
         if let Some(error) = self.state.error() {
             return Err(error);
@@ -237,7 +228,6 @@ impl Player {
         }
     }
 
-    /// Clamp only to the true project end, never to the completed PCM prefix.
     pub fn seek(&self, seconds: f64) -> Result<(), AudioError> {
         let control = self
             .control()
@@ -271,8 +261,6 @@ impl Player {
         })
     }
 
-    /// Submitted source position, excluding hardware latency, also while a
-    /// seek waits for a block that has not been generated yet.
     pub fn position_seconds(&self) -> Option<f64> {
         self.control()
             .map(|control| control.controls.position_seconds())
@@ -285,7 +273,6 @@ impl Player {
         self.state.underruns.load(Ordering::Relaxed)
     }
 
-    /// Retire the source on the control thread but keep the device stream.
     pub fn clear(&mut self) {
         self.pause();
         let previous = self

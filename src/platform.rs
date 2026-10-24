@@ -1,11 +1,8 @@
-//! Platform-specific locations for RynthV's persistent user configuration.
-
 use std::path::PathBuf;
 
 #[cfg(windows)]
 mod windows;
 
-/// RynthV's saved model contexts use the user's roaming directory on Windows.
 pub fn context_directory() -> Result<PathBuf, String> {
     #[cfg(windows)]
     {
@@ -17,8 +14,6 @@ pub fn context_directory() -> Result<PathBuf, String> {
     }
 }
 
-/// The current user's configuration directory. Resource libraries are selected
-/// separately and are never inferred from another platform's environment.
 pub fn config_directory() -> Result<PathBuf, String> {
     config_root().map(|root| root.join("RynthV"))
 }
@@ -33,7 +28,7 @@ fn config_root() -> Result<PathBuf, String> {
 
 #[cfg(target_os = "linux")]
 fn config_root() -> Result<PathBuf, String> {
-    // XDG specifies that unset, empty, and relative values use $HOME/.config.
+
     if let Some(root) = std::env::var_os("XDG_CONFIG_HOME")
         .map(PathBuf::from)
         .filter(|path| path.is_absolute())

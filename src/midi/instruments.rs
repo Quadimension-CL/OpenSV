@@ -1,4 +1,3 @@
-// General MIDI Level 1 program order (zero based).
 const PROGRAMS: [&str; 128] = [
     "Acoustic Grand Piano",
     "Bright Acoustic Piano",

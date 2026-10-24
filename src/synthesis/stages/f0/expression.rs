@@ -1,8 +1,3 @@
-//! Editor-side expression conditioning, before the F0 model defaults.
-//!
-//! Absent `expValueX/Y` coordinates default to zero and blend nine control
-//! points. Leaving engine fields unspecified selects different model defaults.
-
 #[derive(Clone, Copy, Debug)]
 pub struct ExpressionControls {
     pub expression: f32,
@@ -11,15 +6,11 @@ pub struct ExpressionControls {
     pub accent: f32,
 }
 
-/// Ordinary records blend their performance position independently of the
-/// musical mode. Other record kinds leave these controls absent.
 pub fn expression_controls(kind: u32, x: f64, y: f64) -> Option<ExpressionControls> {
     if kind != 0 {
         return None;
     }
-    // Blend in order: center, right, upper-right, up, upper-left, left,
-    // lower-left, down, lower-right. Accumulate in f64 before converting
-    // to f32. Position B is also used for timbre conditioning.
+
     let points: [(f64, f64); 9] = [
         (0.0, 0.0),
         (1.0, 0.0),

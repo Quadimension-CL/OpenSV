@@ -1,5 +1,3 @@
-//! 64-byte, eight-round additive stream transform (not standard XOR).
-
 use super::{Result, VoiceError, array};
 
 pub(super) fn decode(

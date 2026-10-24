@@ -1,8 +1,7 @@
-//! Voice-specific spectral vocoder and its streaming CPU signal processors.
-
 pub mod condition;
 pub mod configuration;
 pub mod excitation;
+pub mod effects;
 mod excitation_fourier;
 mod excitation_spectrum;
 mod filter_kernel;
@@ -11,6 +10,7 @@ mod fourier;
 pub mod gain_filter;
 pub mod interpolation;
 pub mod metadata;
+pub mod noise_seeds;
 pub mod output;
 pub mod postfilter;
 mod render;
@@ -19,12 +19,11 @@ pub mod source;
 pub mod spectral_heads;
 mod stage;
 mod stream;
+mod sv2_packets;
+mod compatible_dispatch;
 mod stream_parameters;
 mod stream_queue;
 mod stream_signals;
-mod voice_control;
-mod voice_control_tension;
 pub use render::VocoderOutput;
 pub use stage::{VocoderParameters, VocoderStage};
 pub use stream::VocoderStream;
-pub use voice_control::VoiceControl;

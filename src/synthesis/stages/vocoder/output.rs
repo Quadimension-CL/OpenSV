@@ -1,15 +1,8 @@
-//! CPU readback of the two vocoder outputs and renderer latency trimming.
-//!
-//! Both tensors are sliced into fixed-size frames, removing a prefix
-//! configured by the timbre processor.
-//! These are two internal synthesis components, not left/right stereo audio.
-
 use std::{collections::VecDeque, fmt};
 
 pub const SAMPLE_RATE: u32 = 48_000;
 pub const FRAME_SAMPLES: usize = 240;
 
-/// Metadata carried alongside the source frames, not inferred from the PCM.
 #[derive(Clone, Copy, Debug)]
 pub struct FrameMetadata {
     pub values: [f32; 2],
@@ -25,7 +18,7 @@ impl Default for FrameMetadata {
 
 #[derive(Clone, Debug)]
 pub struct OutputFrame {
-    /// Consecutive public output index, after the processor's warm-up prefix.
+
     pub index: u64,
     pub primary: [f32; FRAME_SAMPLES],
     pub secondary: [f32; FRAME_SAMPLES],
@@ -33,10 +26,7 @@ pub struct OutputFrame {
 }
 
 impl OutputFrame {
-    /// Unity-gain mono downmix of the two internal synthesis components.
-    /// Both are added into the same destination for mono output.
-    /// There is no division by two, peak normalization or limiter at
-    /// this boundary. Track gain and stereo panning belong to the mixer.
+
     pub fn mono(&self) -> Result<[f32; FRAME_SAMPLES], OutputError> {
         let mut samples = [0.0; FRAME_SAMPLES];
         for (sample, target) in samples.iter_mut().enumerate() {
@@ -99,9 +89,6 @@ impl fmt::Display for OutputError {
 
 impl std::error::Error for OutputError {}
 
-/// Stateful adapter shared by synchronous and queued vocoder execution.
-/// The caller queues metadata when accepting input, then supplies completed
-/// tensor batches in the same order. Only the explicit final batch closes it.
 #[derive(Debug)]
 pub struct OutputAssembler {
     metadata: VecDeque<FrameMetadata>,
@@ -111,8 +98,7 @@ pub struct OutputAssembler {
 }
 
 impl OutputAssembler {
-    /// `warmup_frames` comes from the prepared processor's output latency.
-    /// It is not a hardcoded edit-context radius or an audio fade duration.
+
     pub fn new(warmup_frames: usize) -> Self {
         Self {
             metadata: VecDeque::new(),
@@ -133,9 +119,6 @@ impl OutputAssembler {
         Ok(())
     }
 
-    /// No normalization, clipping, stereo mapping, tail padding or filtering is
-    /// applied here.
-    /// Validation and allocation finish before persistent state is modified.
     pub fn accept(
         &mut self,
         primary: &[f32],

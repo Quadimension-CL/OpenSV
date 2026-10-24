@@ -1,7 +1,3 @@
-//! Streaming and dense transformer encoders used by duration and F0.
-//!
-//! Their child layouts differ, while their post-normalization equations coincide.
-
 use crate::synthesis::voice::{PreparedTree, Result, VoiceError};
 
 const STREAMING_ENCODER: [u8; 16] = [
@@ -11,8 +7,6 @@ const DENSE_ENCODER: [u8; 16] = [
     0x46, 0xd3, 0x17, 0x2c, 0x00, 0xf5, 0x24, 0x7e, 0xfa, 0x34, 0x42, 0x3a, 0x9a, 0x98, 0x99, 0xfa,
 ];
 
-/// Encode a complete sequence of contiguous frames with one context block.
-/// Attention windowing belongs to the streaming attention child, not this block.
 pub(crate) fn encode(
     tree: &PreparedTree,
     node: usize,
@@ -39,7 +33,7 @@ pub(crate) fn encode(
                     "Streaming context block requires four children",
                 ));
             };
-            // The flag controls the attention query window, not norm placement.
+
             let attended = super::attention::execute(tree, *attention, input, features, flag)?;
             let residual = add(input, &attended)?;
             let hidden = tree.execute_node(*first_norm, &residual)?;
@@ -59,8 +53,7 @@ pub(crate) fn encode(
             else {
                 return Err(VoiceError::new("Dense context block requires six children"));
             };
-            // Only post-normalized dense blocks are supported. The supplied
-            // models disable pre-normalization.
+
             if flag {
                 return Err(VoiceError::new(
                     "Pre-normalized dense context is not recovered",
@@ -69,8 +62,7 @@ pub(crate) fn encode(
             let attended = tree.execute_node(*attention, input)?;
             let residual = add(input, &attended)?;
             let hidden = tree.execute_node(*first_norm, &residual)?;
-            // Apply the sixth child explicitly after the first affine; the
-            // immutable tree retains these as separate operations.
+
             let projected = tree.execute_node(*linear_in, &hidden)?;
             let activated = tree.execute_node(*activation, &projected)?;
             let transformed = tree.execute_node(*linear_out, &activated)?;

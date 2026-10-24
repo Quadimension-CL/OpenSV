@@ -10,6 +10,9 @@ pub enum PerformanceParameter {
     Vibrato,
     RapTone,
     RapIntonation,
+    ChoirOnset,
+    ChoirTail,
+    ChoirPitch,
 }
 
 pub struct PerformanceSelection {
@@ -17,10 +20,11 @@ pub struct PerformanceSelection {
     pub expression_x: Option<f64>,
     pub expression_y: Option<f64>,
     pub vibrato: Option<f64>,
-    /// Outer None represents a mixed selection; inner None means automatic.
+    pub choir_spread: [Option<f64>; 3],
+
     pub r_tone: Option<Option<f32>>,
     pub r_intonation: Option<Option<f32>>,
-    /// The empty string selects the automatically determined accent.
+
     pub accent: Option<String>,
 }
 
@@ -49,6 +53,11 @@ impl Editor {
             expression_x: common_value(&values, |value| value.expression_x),
             expression_y: common_value(&values, |value| value.expression_y),
             vibrato: common_value(&values, |value| value.vibrato),
+            choir_spread: [
+                common_value(&values, |v| f64::from(v.choir_onset)),
+                common_value(&values, |v| f64::from(v.choir_tail)),
+                common_value(&values, |v| f64::from(v.choir_pitch)),
+            ],
             r_tone: common_optional(&values, |value| value.r_tone),
             r_intonation: common_optional(&values, |value| value.r_intonation),
             accent: rap::common_accent(&notes),
@@ -108,6 +117,9 @@ impl Editor {
             PerformanceParameter::Vibrato => "调整颤音调制",
             PerformanceParameter::RapTone => "调整说唱音调",
             PerformanceParameter::RapIntonation => "调整说唱语调",
+            PerformanceParameter::ChoirOnset => "调整合唱音符开头扩散",
+            PerformanceParameter::ChoirTail => "调整合唱乐句结尾扩散",
+            PerformanceParameter::ChoirPitch => "调整合唱音高扩散",
         });
         self.performance_edit = Some(PerformanceEdit {
             parameter,
@@ -138,6 +150,17 @@ impl Editor {
 
     pub fn has_performance_edit(&self) -> bool {
         self.performance_edit.is_some()
+    }
+
+    pub fn update_choir_spread(&mut self, parameter: PerformanceParameter, value: f64) -> bool {
+        if !value.is_finite() || !(0.0..=2.0).contains(&value) { return false; }
+        let key = match parameter {
+            PerformanceParameter::ChoirOnset => "cTimeDispersion",
+            PerformanceParameter::ChoirTail => "cPhraseTailDispersion",
+            PerformanceParameter::ChoirPitch => "cPitchDispersion",
+            _ => return false,
+        };
+        self.update_performance(parameter, |note| NotePerformance::write_choir_spread(note, key, value as f32))
     }
 
     pub fn performance_edit_matches_selection(&self) -> bool {

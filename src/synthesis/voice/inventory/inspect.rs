@@ -71,7 +71,7 @@ pub(super) fn file(path: &Path, archive: &Archive) -> Result<(VoiceFile, Vec<Loa
         if !tree_candidate && !known_graph {
             continue;
         }
-        // Shape only selects candidates; full tree validation must succeed.
+
         let tree = match ModuleTree::parse(&archive.read(index, None)?, archive) {
             Ok(tree) => tree,
             Err(error) if known_graph => return Err(error),
@@ -139,8 +139,6 @@ pub(super) fn count_tensor(
     Ok(())
 }
 
-// Resource identities identify synthesis stages. Compatibility packages store
-// F0/timbre as nested DNNI v1/v2 containers.
 fn embedded_role(id: ResourceId) -> Option<&'static str> {
     match u128::from_le_bytes(id.0) {
         0xf82b01e4d6811e3929adc88975d18bdd => Some("f0"),

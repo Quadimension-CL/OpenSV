@@ -36,8 +36,7 @@ impl PcmStore {
                 break None;
             }
             let stop = self.first_block + stop_index as i64;
-            // Carry an extra block after a head join, then match the
-            // remaining three of the four lookahead blocks.
+
             let tail_begin = (stop + i64::from(has_head)) * BLOCK;
             let tail_end = (stop + 4) * BLOCK;
             if tail_end + LOOKAHEAD > self.clock.end {
@@ -46,8 +45,7 @@ impl PcmStore {
             if (stop..stop + 4).all(|block| self.block_ready(block)) {
                 break Some((tail_begin, tail_end));
             }
-            // A shorter ready island cannot support a phase match. Regenerate
-            // through it and join the next sufficiently long complete island.
+
             while stop_index < self.ready.len() && self.ready[stop_index] {
                 stop_index += 1;
             }

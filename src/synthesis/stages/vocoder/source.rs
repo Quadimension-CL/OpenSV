@@ -1,5 +1,3 @@
-//! Physical LF excitation inputs, separate from learned spectral parameters.
-
 use crate::synthesis::{
     inference::Sequence,
     voice::{Result, VoiceError},
@@ -7,9 +5,6 @@ use crate::synthesis::{
 
 use super::{condition::CHANNELS, excitation::ExcitationFrame};
 
-/// The root's optional one-channel network predicts the LF shape logit.
-/// It is mapped to [0.1, 3] before applying the frame control.
-/// F0 and voicing come directly from physical features, before normalization.
 pub fn excitation_frames(
     physical: &Sequence,
     shape_logits: &Sequence,

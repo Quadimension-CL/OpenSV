@@ -10,7 +10,7 @@ use symphonia::core::{
     io::MediaSourceStream,
 };
 
-pub(super) fn load(path: &Path) -> Result<AudioAsset, String> {
+pub(crate) fn load(path: &Path) -> Result<AudioAsset, String> {
     let file = File::open(path).map_err(|e| format!("无法打开音频文件：{e}"))?;
     let stream = MediaSourceStream::new(Box::new(file), Default::default());
     let mut hint = Hint::new();

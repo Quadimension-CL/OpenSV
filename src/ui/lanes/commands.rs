@@ -4,6 +4,27 @@ use crate::{app::App, model::QUARTER};
 use eframe::egui::{Context, ViewportCommand};
 use std::collections::{BTreeMap, BTreeSet};
 
+pub fn parameter_keyboard(app: &mut App, ctx: &Context) -> bool {
+    if !parameter_has_selection(app) || app.gesture.is_some() || app.editor.is_editing() {
+        return false;
+    }
+    use eframe::egui::{Key, Modifiers};
+    let target = &app.parameter_lane.owner.as_ref().unwrap().target;
+    let (low, high) = target.range();
+    for (key, time, value) in [
+        (Key::ArrowLeft, -crate::model::ticks(app.view.step()), 0.0),
+        (Key::ArrowRight, crate::model::ticks(app.view.step()), 0.0),
+        (Key::ArrowDown, 0, -(high - low) * 0.01),
+        (Key::ArrowUp, 0, (high - low) * 0.01),
+    ] {
+        if ctx.input_mut(|i| i.consume_key(Modifiers::NONE, key)) {
+            shift_selected(app, time, value);
+            return true;
+        }
+    }
+    false
+}
+
 pub fn parameter_active(app: &App) -> bool {
     let Some(owner) = &app.parameter_lane.owner else {
         return false;
@@ -32,8 +53,11 @@ pub fn parameter_can_paste(app: &App) -> bool {
 }
 
 pub fn parameter_deactivate(app: &mut App) {
-    if matches!(app.gesture, Some(crate::ui::piano::Gesture::Parameter(_))) {
-        super::gesture::finish_without_context(app, false);
+    if matches!(
+        app.gesture,
+        Some(crate::ui::piano::Gesture::Parameter { .. })
+    ) {
+        super::selection::finish_drag(app, false);
     }
     app.parameter_lane.focused = false;
 }

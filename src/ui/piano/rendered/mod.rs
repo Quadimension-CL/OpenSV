@@ -1,11 +1,7 @@
-//! Read-only overlays of completed synthesis. Painting never scans whole PCM
-//! buffers or changes note interaction regions.
-mod phonemes;
 mod pitch;
+mod pitch_band;
 mod waveform;
 mod waveform_flash;
-
-pub use phonemes::draw as phonemes;
 
 use std::{
     ops::Range,
@@ -28,15 +24,14 @@ pub fn waveforms(app: &App, ui: &Ui, canvas: Rect, groups: &[SceneGroup]) {
     let now = Instant::now();
     let mut animating = false;
     for group in groups {
-        let Some(visuals) = app.synthesis.visuals(OwnerId(group.reference.id)) else {
-            continue;
-        };
+        for visuals in app.synthesis.visuals(OwnerId::new(group.reference.id)) {
         for piece in visuals.pieces() {
             let painter = painter(ui, canvas, app, &piece.snapshot.input, &piece.range);
             if painter.clip_rect().is_positive() {
                 animating |=
                     waveform::draw(app, &painter, canvas, group, &piece.snapshot, visuals, now);
             }
+        }
         }
     }
     if animating {
@@ -49,10 +44,7 @@ pub fn pitch(app: &App, ui: &Ui, canvas: Rect, groups: &[SceneGroup]) {
         return;
     }
     for group in groups {
-        let Some(visuals) = app.synthesis.visuals(OwnerId(group.reference.id)) else {
-            continue;
-        };
-        for piece in visuals.pieces() {
+        for piece in app.synthesis.visuals(OwnerId::new(group.reference.id)).flat_map(|v|v.pieces()) {
             let painter = painter(ui, canvas, app, &piece.snapshot.input, &piece.range);
             if painter.clip_rect().is_positive() {
                 pitch::draw(app, &painter, canvas, group, &piece.snapshot);
@@ -62,15 +54,14 @@ pub fn pitch(app: &App, ui: &Ui, canvas: Rect, groups: &[SceneGroup]) {
 }
 
 fn painter(ui: &Ui, canvas: Rect, app: &App, input: &OwnerInput, range: &Range<i64>) -> Painter {
-    // A completed block retains its own placement while later blocks are still
-    // rendering. In particular, moving notes must not move their old overlays.
+
+    let (publication_begin,publication_end) = input.publication_bounds();
     let left = timeline::x_at(
         canvas,
         &app.view.piano,
-        beats(input.visible_begin.0.max(range.start)),
+        beats(publication_begin.0.max(range.start)),
     );
-    let right = input
-        .visible_end
+    let right = publication_end
         .map_or(canvas.right(), |end| {
             timeline::x_at(canvas, &app.view.piano, beats(end.0))
         })

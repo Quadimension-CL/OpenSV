@@ -1,5 +1,3 @@
-//! Explicit pitch controls weighted against the preliminary prediction.
-
 use super::super::Contract;
 
 use crate::synthesis::{
@@ -87,7 +85,7 @@ fn spread(
             }
             let left = (-(relative as f64)).exp();
             let right = (-((frames - relative) as f64)).exp();
-            // The adapters use different f64 multiplication/division orders.
+
             let envelope = match contract {
                 Contract::Compatible => (1.0 / (left + 1.0)) * (1.0 / (right + 1.0)),
                 Contract::Native { .. } => 1.0 / ((left + 1.0) * (right + 1.0)),

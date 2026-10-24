@@ -9,6 +9,10 @@ use crate::{
 use std::collections::{BTreeMap, BTreeSet};
 
 impl Runtime {
+    pub fn voice_not_installed(&self,track:&Track,reference:&GroupRef)->bool {
+        !track.is_instrumental() && self.library.catalog().and_then(|catalog|
+            catalog.is_bank_installed(&track.main_ref.database,&reference.database))==Some(false)
+    }
     pub fn resolve_voice(
         &self,
         track: &Track,
@@ -54,7 +58,7 @@ impl Runtime {
                 match self.resolve_voice(track, reference) {
                     Ok(Some(key)) => {
                         required.insert(key.clone());
-                        self.routes.insert(OwnerId(reference.id), key);
+                        self.routes.insert(OwnerId::new(reference.id), key);
                     }
                     Ok(None) => {
                         let database = crate::model::singer_database(
@@ -67,17 +71,17 @@ impl Runtime {
                                 .and_then(serde_json::Value::as_str)
                                 .is_some_and(|s| !s.is_empty())
                         }) {
-                            self.pending_voices.insert(OwnerId(reference.id));
+                            self.pending_voices.insert(OwnerId::new(reference.id));
                         }
                     }
                     Err(error) => {
                         self.binding_errors
-                            .insert(OwnerId(reference.id), format!("{}：{error}", track.name));
+                            .insert(OwnerId::new(reference.id), format!("{}：{error}", track.name));
                     }
                 }
             }
         }
-        // Models are shared across tracks, but only while referenced by this project.
+
         self.voices.retain(|key, _| required.contains(key));
         for key in required {
             if self.voices.contains_key(&key) {
@@ -92,6 +96,7 @@ impl Runtime {
                 worker::Worker::spawn(
                     entry.directory.clone(),
                     dictionaries.to_owned(),
+                    self.library.settings.duration_key_override_for(&key),
                     self.repaint.clone(),
                 )
             })();
@@ -127,7 +132,6 @@ impl Runtime {
         self.planner
             .update(project, revision, |owner| identities.get(&owner).cloned());
         self.sync_visuals();
-        self.sync_phonemes();
         let solo = crate::synthesis::mixing_options::validate_project_mixer(
             project.extra.get("projectMixer"),
         )
@@ -186,7 +190,7 @@ impl Runtime {
             let requests: BTreeMap<_, _> = plan
                 .requests
                 .iter()
-                .filter(|(id, _)| self.routes.get(id) == Some(key))
+                .filter(|(id, _)| self.routes.get(&id.reference()) == Some(key))
                 .map(|(&id, r)| (id, r.clone()))
                 .collect();
             let output_controls = plan
@@ -238,7 +242,7 @@ impl Runtime {
             if voice.ready {
                 voice.error = None;
             }
-            // Dispatch only after the inventory supplies a model identity.
+
             if let Some(worker) = &voice.worker
                 && !matches!(voice.state, super::VoiceState::Loading)
             {

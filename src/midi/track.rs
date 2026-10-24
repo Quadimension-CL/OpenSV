@@ -88,7 +88,7 @@ pub(super) fn parse(
                 }
                 MetaMessage::Lyric(value) => {
                     let lyric = track.text(value)?;
-                    // Karaoke line/paragraph markers are layout, not sung text.
+
                     let lyric = lyric.trim_start_matches(['/', '\\']).trim();
                     if !lyric.is_empty() {
                         track.lyrics.entry(position).or_default().push(lyric.into());
@@ -146,7 +146,7 @@ impl Track {
                 if let Some(active) = self.active.get_mut(&key)
                     && let Some(note) = active.pop_front()
                 {
-                    // Repeated same-pitch notes pair with note-offs in FIFO order.
+
                     self.notes[note].end = Some(position);
                 } else {
                     self.diagnostics.unmatched_off += 1;
@@ -159,7 +159,7 @@ impl Track {
             | MidiMessage::PitchBend { .. }
             | MidiMessage::Aftertouch { .. }
             | MidiMessage::ChannelAftertouch { .. } => {
-                // Singing notes retain literal note-off times, including with sustain held.
+
                 self.diagnostics.performance = true;
             }
         }

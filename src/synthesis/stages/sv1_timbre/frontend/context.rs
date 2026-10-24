@@ -21,8 +21,8 @@ pub struct ContextInput<'a> {
     pub normalized_pitch: &'a [f32],
     pub bank: &'a [f32],
     pub style: &'a [f32],
-    pub frame_styles: Option<&'a Sequence>,
-    pub frame_factors: Option<&'a [f32]>,
+    pub style_rows:Option<&'a Sequence>,
+    pub phone_factors: Option<&'a [f32]>,
 }
 
 pub struct ContextOutput {
@@ -64,29 +64,18 @@ impl<'a> Context<'a> {
             .iter()
             .try_fold(0_usize, |sum, phone| sum.checked_add(phone.frames))
             .ok_or_else(|| VoiceError::new("SV1 acoustic frame count overflows"))?;
-        if let Some(styles) = input.frame_styles {
-            styles.validate()?;
-            if styles.frames != frames
-                || styles.channels != input.style.len()
-                || styles.values.iter().any(|value| !value.is_finite())
-            {
-                return Err(VoiceError::new(
-                    "SV1 acoustic frame styles are not aligned with the context",
-                ));
-            }
-        }
         if input.linguistic.normalized.frames != input.phones.len()
             || input.linguistic.language_ids.len() != input.phones.len()
             || input.normalized_pitch.len() != frames
             || input
-                .frame_factors
-                .is_some_and(|values| values.len() != frames)
+                .phone_factors
+                .is_some_and(|values| values.len() != input.phones.len())
             || input
                 .normalized_pitch
                 .iter()
                 .chain(input.bank)
                 .chain(input.style)
-                .chain(input.frame_factors.into_iter().flatten())
+                .chain(input.phone_factors.into_iter().flatten())
                 .any(|value| !value.is_finite())
         {
             return Err(VoiceError::new(
@@ -125,18 +114,24 @@ impl<'a> Context<'a> {
             .and_then(|width| width.checked_add(input.style.len()))
             .ok_or_else(|| VoiceError::new("SV1 acoustic conditioning width overflows"))?;
         let mut expanded = Sequence::zeros(frames, channels)?;
+        if let Some(styles)=input.style_rows {
+            styles.validate()?;
+            if styles.frames!=frames || styles.channels!=input.style.len() || styles.values.iter().any(|v|!v.is_finite()) {
+                return Err(VoiceError::new("Compatible style frames are not aligned"));
+            }
+        }
         let mut frame_index = 0;
         for (phone_index, phone) in input.phones.iter().enumerate() {
             let projection = projected.frame(phone_index)?;
+            let factor = input
+                .phone_factors
+                .map_or(1.0, |values| values[phone_index]);
             let language = language
                 .as_ref()
                 .map(|values| values.frame(phone_index))
                 .transpose()?
                 .unwrap_or(&[]);
             for position in 0..phone.frames {
-                let factor = input
-                    .frame_factors
-                    .map_or(1.0, |values| values[frame_index]);
                 let row =
                     &mut expanded.values[frame_index * channels..(frame_index + 1) * channels];
                 for (target, &value) in row.iter_mut().zip(projection) {
@@ -144,19 +139,18 @@ impl<'a> Context<'a> {
                 }
                 let fraction = if phone.frames == 1 {
                     0.5
+                } else if self.tree.legacy_numeric() {
+                    position as f32 / (phone.frames-1) as f32
                 } else {
                     position as f32 * (1.0 / (phone.frames - 1) as f32)
                 };
                 let mut cursor = projected.channels;
                 for scalar in [fraction, input.normalized_pitch[frame_index]] {
-                    row[cursor..cursor + 4].copy_from_slice(&cosine_bank(scalar));
+                    let bank=if self.tree.legacy_numeric() {compatible_cosine_bank(scalar)}else{cosine_bank(scalar)};
+                    row[cursor..cursor + 4].copy_from_slice(&bank);
                     cursor += 4;
                 }
-                let style = input
-                    .frame_styles
-                    .map(|styles| styles.frame(frame_index))
-                    .transpose()?
-                    .unwrap_or(input.style);
+                let style=input.style_rows.map(|rows|rows.frame(frame_index)).transpose()?.unwrap_or(input.style);
                 for values in [input.bank, language, style] {
                     row[cursor..cursor + values.len()].copy_from_slice(values);
                     cursor += values.len();
@@ -173,9 +167,7 @@ impl<'a> Context<'a> {
         expanded: &Sequence,
         flush: bool,
     ) -> Result<ContextOutput> {
-        // Execute child slot 2 before slot 1. The convolution head retains its
-        // right context between batches, so the caller aligns these
-        // independently emitted branches by frame.
+
         let convolution = runtime.execute(self.convolution, expanded, flush)?;
         let pointwise = runtime.execute(self.pointwise, expanded, flush)?;
         Ok(ContextOutput {
@@ -194,4 +186,11 @@ fn cosine_bank(value: f32) -> [f32; 4] {
         -std::f32::consts::PI,
     ]
     .map(|phase| (f64::from((angle + phase).cos()) * 0.5 + 0.5) as f32)
+}
+
+fn compatible_cosine_bank(value:f32)->[f32;4] {
+    [0.25,0.0,-0.25,-0.5].map(|phase|{
+        let angle=(value+phase)*std::f32::consts::TAU;
+        (f64::from(angle.cos())*0.5+0.5) as f32
+    })
 }

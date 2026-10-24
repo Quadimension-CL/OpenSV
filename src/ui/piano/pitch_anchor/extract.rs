@@ -1,6 +1,3 @@
-//! Derive editable candidates only from completed, current synthesis geometry.
-//! This runs once on box-selection release, never while moving the pointer.
-
 use crate::{
     app::App,
     model::{GroupRef, PitchControl, PitchPoint, QUARTER},
@@ -14,7 +11,7 @@ const VERTICAL_TOLERANCE: f64 = 0.2;
 const HORIZONTAL_TOLERANCE: i64 = QUARTER / 32;
 const COMPARISON_STEP: i64 = QUARTER / 512;
 const EXCLUSION_TIME: i64 = QUARTER / 16;
-// Bounded slices and subdivision depth avoid quadratic work on a long/noisy F0.
+
 const SAMPLE_BATCH: usize = 8192;
 const MAX_DEPTH: usize = 24;
 
@@ -39,7 +36,6 @@ impl Bounds {
     }
 }
 
-/// All arguments and returned points use group-local time and pitch.
 pub(super) fn extract(
     app: &App,
     reference: &GroupRef,
@@ -50,34 +46,20 @@ pub(super) fn extract(
     if time.0 > time.1 || !pitch.0.is_finite() || !pitch.1.is_finite() || pitch.0 > pitch.1 {
         return result;
     }
-    let owner = OwnerId(reference.id);
-    let Some(request) = app.synthesis.planner.plan().requests.get(&owner) else {
-        return result;
-    };
+    let owner = OwnerId::new(reference.id);
     let Some(group) = app.editor.project.group(&reference.group_id) else {
         return result;
     };
-    if app.editor.active_ref() != Some(reference)
-        || !request.input.matches_project(
-            &app.editor.project,
-            app.editor.current_track(),
-            reference,
-            group,
-        )
-    {
+    if app.editor.active_ref() != Some(reference) {
         return result;
     }
-    let Some(visuals) = app.synthesis.visuals(owner) else {
-        return result;
-    };
     let (Some(left), Some(right)) = (
         time.0.checked_add(reference.blick_offset),
         time.1.checked_add(reference.blick_offset),
     ) else {
         return result;
     };
-    // Keep neighboring shape when reducing the selected interval, rather than
-    // creating artificial points exactly on each edge of the selection box.
+
     let read_time = (
         left.saturating_sub(QUARTER)
             .max(reference.blick_absolute_begin),
@@ -85,10 +67,11 @@ pub(super) fn extract(
     );
     let bounds = Bounds { time, pitch };
     let exclusions: Vec<_> = super::controls(app).iter().filter_map(exclusion).collect();
-    for piece in visuals.pieces() {
-        // A timeline may retain old blocks while the new input is rendering.
-        // They are useful to display, but must never become editable points.
-        if *piece.snapshot.input != *request.input {
+    for piece in app.synthesis.visuals(owner).flat_map(|v|v.pieces()) {
+
+        if !app.synthesis.planner.plan().requests.iter().any(|(id,request)|
+            id.0==owner.0 && *piece.snapshot.input==*request.input
+                && request.input.matches_project(&app.editor.project,app.editor.current_track(),reference,group)) {
             continue;
         }
         let interval = (
@@ -156,8 +139,7 @@ fn collect(
         .min(track.values.len());
     let mut samples = Vec::with_capacity(SAMPLE_BATCH.min(to.saturating_sub(from)));
     for segment in &track.segments {
-        // Piece boundaries, unvoiced intervals and non-finite samples must
-        // remain separate; reducing across them invents contours over rests.
+
         for index in from.max(segment.start)..to.min(segment.end) {
             let seconds = track.start_seconds + index as f64 * track.frame_seconds;
             let position = input.tempo.position_at(seconds).0;
@@ -215,8 +197,7 @@ fn emit(
         }
         if let Some(index) = worst {
             if depth == MAX_DEPTH {
-                // Keep the source points at the work bound; never replace an
-                // unresolved oscillation with a fabricated straight contour.
+
                 keep[first + 1..last].fill(true);
             } else {
                 keep[index] = true;
@@ -236,8 +217,6 @@ fn emit(
     samples.clear();
 }
 
-// Reduce the curve linearly with a 0.2-semitone tolerance on the comparison
-// grid; the reduction does not depend on a separate curve interpolator.
 fn residual(left: Sample, right: Sample, point: Sample) -> f64 {
     let span = (i128::from(right.time) - i128::from(left.time)) as f64;
     let point_time = (i128::from(point.time) - i128::from(left.time)) as f64;
@@ -251,7 +230,7 @@ fn residual(left: Sample, right: Sample, point: Sample) -> f64 {
     let offset = ((point.pitch - at_point) / step_pitch)
         .round()
         .clamp(-limit, limit);
-    // Limit sampling to this span; its endpoint values extend beyond it.
+
     let time = (point_time + offset * COMPARISON_STEP as f64).clamp(0.0, span);
     (left.pitch + slope * time - point.pitch).abs()
 }

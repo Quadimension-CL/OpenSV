@@ -1,4 +1,3 @@
-//! Standard MIDI files are imported as editable notes, not instrument playback.
 mod instruments;
 mod time;
 mod track;
@@ -24,9 +23,9 @@ pub struct MidiFile {
 #[derive(Clone, Debug)]
 pub struct MidiTrack {
     pub name: String,
-    /// Zero-based index of the source SMF track.
+
     pub source_index: usize,
-    /// Zero-based MIDI channel; empty conductor tracks have no channel.
+
     pub channel: Option<u8>,
     pub instrument: String,
     pub notes: Vec<MidiNote>,

@@ -1,5 +1,3 @@
-//! Session and note controls expanded into frame-aligned F0 conditions.
-
 use crate::synthesis::{
     inference::noise::{
         NormalNoise,
@@ -27,7 +25,7 @@ pub struct PitchSession {
 
 impl Default for PitchSession {
     fn default() -> Self {
-        // Session defaults use concrete values for every control.
+
         Self {
             temperature: 1.0,
             note_flag_temperature: 1.0,
@@ -46,8 +44,6 @@ impl Default for PitchSession {
     }
 }
 
-/// Values from one prepared note record. Optional values represent absent
-/// controls without leaking NaNs into the neural feature matrix.
 #[derive(Clone, Debug, Default)]
 pub struct NoteModulation {
     pub frames: usize,
@@ -55,7 +51,7 @@ pub struct NoteModulation {
     pub kind: u32,
     pub flag: bool,
     pub pitch_seed: Option<u32>,
-    /// Missing pitch center and motion are computed by the sampler.
+
     pub pitch_center: Option<f32>,
     pub pitch_motion: Option<f32>,
     pub expression: Option<f32>,
@@ -81,8 +77,7 @@ pub struct FrameModulation {
 }
 
 impl PitchSession {
-    /// Shift the maximum ceiling pitch toward the configured upper bound.
-    /// Upward transposition is disabled by default.
+
     pub fn transposition(&self, pitches: impl IntoIterator<Item = f32>) -> Result<f32> {
         let mut maximum = 0_i32;
         for pitch in pitches {
@@ -99,8 +94,6 @@ impl PitchSession {
         } as f32)
     }
 
-    /// Phone durations and note lengths retain their own seed-event boundaries.
-    /// `normalize_pitch` is the shared frontend child 3's forward normalizer.
     pub fn condition(
         &self,
         notes: &[NoteModulation],
@@ -236,8 +229,7 @@ impl PitchSession {
         };
         let mut note_seed =
             SeedSource::new(&seeds, &lengths).map_err(|e| VoiceError::new(e.to_string()))?;
-        // Preserve this exact seed label; changing its spelling changes every
-        // context-derived seed.
+
         let mut text_seed =
             SeedSource::context(phone_tokens, phone_frames, "maigca cruva!", self.seed)
                 .map_err(|e| VoiceError::new(e.to_string()))?;
@@ -280,7 +272,6 @@ impl PitchSession {
     }
 }
 
-/// Two passes of y[n] = .95*x[n] + (1-.95)*y[n-1], then reverse direction.
 fn smooth(values: &mut [f32]) {
     for index in 1..values.len() {
         values[index] = values[index] * 0.95 + values[index - 1] * f32::from_bits(0x3d4c_ccd0);

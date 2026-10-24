@@ -16,6 +16,9 @@ impl Default for LoopRegion {
 }
 
 impl LoopRegion {
+    pub fn from_saved(start:i64,end:i64)->Option<Self> {
+        (start>=0 && end>start).then_some(Self{start,end})
+    }
     pub fn start(self) -> i64 {
         self.start
     }
@@ -42,8 +45,6 @@ impl LoopRegion {
         self.end = self.start + length;
     }
 
-    /// Place a boundary at the requested time, extending the opposite boundary
-    /// when needed. Drag resizing instead keeps the opposite boundary fixed.
     pub fn place_start(&mut self, position: i64) {
         self.start = position.clamp(0, i64::MAX - QUARTER);
         self.end = self.end.max(self.start + QUARTER);

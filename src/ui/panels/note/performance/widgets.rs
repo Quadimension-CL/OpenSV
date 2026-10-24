@@ -1,7 +1,6 @@
 use crate::ui::theme::*;
 use eframe::egui::*;
 
-/// Values are normalized so the controls share the same pointer and key handling.
 pub(super) fn expression(ui: &mut Ui, value: &mut [f64; 2], mixed: bool) -> Response {
     let (rect, mut response) =
         ui.allocate_exact_size(Vec2::splat(ui.available_width()), Sense::click_and_drag());
@@ -44,18 +43,18 @@ pub(super) fn expression(ui: &mut Ui, value: &mut [f64; 2], mixed: bool) -> Resp
     painter.hline(rect.x_range(), rect.center().y, Stroke::new(1.0, BUTTON));
     painter.vline(rect.center().x, rect.y_range(), Stroke::new(1.0, BUTTON));
     for (position, anchor, text) in [
-        (rect.min + vec2(8.0, 8.0), Align2::LEFT_TOP, "鲜活"),
+        (rect.min + vec2(8.0, 8.0), Align2::LEFT_TOP, crate::i18n::t("鲜活")),
         (
             rect.right_top() + vec2(-8.0, 8.0),
             Align2::RIGHT_TOP,
-            "精修",
+            crate::i18n::t("精修"),
         ),
         (
             rect.left_bottom() + vec2(8.0, -8.0),
             Align2::LEFT_BOTTOM,
-            "机械",
+            crate::i18n::t("机械"),
         ),
-        (rect.max - vec2(8.0, 8.0), Align2::RIGHT_BOTTOM, "原生"),
+        (rect.max - vec2(8.0, 8.0), Align2::RIGHT_BOTTOM, crate::i18n::t("原生")),
     ] {
         painter.text(position, anchor, text, FontId::proportional(12.0), MUTED);
     }
@@ -73,13 +72,13 @@ pub(super) fn expression(ui: &mut Ui, value: &mut [f64; 2], mixed: bool) -> Resp
         painter.text(
             rect.center() + vec2(0.0, 18.0),
             Align2::CENTER_TOP,
-            "多个值",
+            crate::i18n::t("多个值"),
             FontId::proportional(11.0),
             MUTED,
         );
     }
     response.on_hover_cursor(CursorIcon::Crosshair).on_hover_text(
-        "拖动调整所选音符的演绎；方向键微调，Shift 加方向键精细调整。双击或 Home 恢复默认，Esc 取消本次拖动。",
+        crate::i18n::t("拖动调整所选音符的演绎；方向键微调，Shift 加方向键精细调整。双击或 Home 恢复默认，Esc 取消本次拖动。"),
     )
 }
 
@@ -139,7 +138,7 @@ pub(super) fn slider(
     ui.painter().circle_filled(center, 3.0, TEXT);
     response
         .on_hover_cursor(CursorIcon::PointingHand)
-        .on_hover_text(format!(
+        .on_hover_text(crate::lformat!(
             "拖动调整所选音符的{label}；方向键微调，Shift 加方向键精细调整。双击或 Home 恢复默认，Esc 取消本次拖动。"
         ))
 }

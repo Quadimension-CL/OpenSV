@@ -4,8 +4,6 @@ use crate::ui::{
 };
 use eframe::egui::*;
 
-/// Transport switches indicate their state with the icon, keeping the same
-/// background as the adjacent tempo/time display in either state.
 pub(super) fn show(
     ui: &mut Ui,
     icon: Icon,

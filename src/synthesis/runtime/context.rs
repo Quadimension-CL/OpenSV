@@ -23,6 +23,8 @@ pub struct ContextImportDialog {
     pub session_path: Option<PathBuf>,
     pub file_path: Option<PathBuf>,
     pub manual_identity: String,
+    pub session_key_required: bool,
+    pub session_key: String,
     pub sources: Vec<OnlineContextSource>,
     pub selected_process: Option<u32>,
     pub phase: ContextImportPhase,
@@ -46,12 +48,13 @@ pub enum ContextImportPhase {
 
 enum ContextEvent {
     Sources(Result<Vec<OnlineContextSource>, String>),
-    Imported(Result<PathBuf, String>),
+    Imported(Result<PathBuf, crate::synthesis::voice::VoiceError>),
 }
 
 impl Drop for ContextImportDialog {
     fn drop(&mut self) {
         self.manual_identity.zeroize();
+        self.session_key.zeroize();
     }
 }
 
@@ -61,6 +64,7 @@ impl ContextImportDialog {
             && match self.source {
                 ContextImportSource::SessionFile => {
                     session_identity::supports_session_import() && self.session_path.is_some()
+                        && (!self.session_key_required || !self.session_key.trim().is_empty())
                 }
                 ContextImportSource::File => self.file_path.is_some(),
                 ContextImportSource::Manual => !self.manual_identity.trim().is_empty(),
@@ -101,7 +105,6 @@ impl Runtime {
                 .is_some_and(|voice| voice.context_required)
     }
 
-    /// Keep the failing singer as the import target even if the track changes.
     pub fn context_import_targets(&self) -> Vec<(VoiceSelection, String)> {
         self.voices
             .iter()
@@ -120,7 +123,6 @@ impl Runtime {
             .collect()
     }
 
-    /// Opening the dialog never reads another application's session or processes.
     pub fn open_context_import(&mut self, selection: VoiceSelection) {
         if !self.can_import_context(&selection) {
             return;
@@ -144,6 +146,8 @@ impl Runtime {
                 session_path: None,
                 file_path: None,
                 manual_identity: String::new(),
+                session_key_required: false,
+                session_key: String::new(),
                 sources: Vec::new(),
                 selected_process: None,
                 phase: ContextImportPhase::Ready,
@@ -166,10 +170,11 @@ impl Runtime {
         {
             return;
         }
-        // Dropping the receiver detaches the previous discovery, so its result
-        // can never overwrite the fields of a newly selected source.
+
         self.context_import.task = None;
         dialog.source = source;
+        dialog.session_key.zeroize();
+        dialog.session_key_required = false;
         dialog.phase = ContextImportPhase::Ready;
         self.clear_context_import_error();
         if source == ContextImportSource::Online {

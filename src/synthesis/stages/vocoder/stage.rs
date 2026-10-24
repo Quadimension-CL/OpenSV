@@ -1,5 +1,3 @@
-//! Voice-specific vocoder programs over shared prepared model weights.
-
 use crate::synthesis::{
     inference::Sequence,
     voice::{PreparedModule, PreparedTree, Result, VoiceError},
@@ -12,7 +10,6 @@ use super::{
     output::FrameMetadata,
     sampling::PositionalGru,
     stream_parameters::ParameterStream,
-    voice_control::{SpectralControl, VoiceControl},
 };
 
 #[derive(Clone)]
@@ -22,17 +19,20 @@ pub struct VocoderStage<'a> {
     pub(crate) modules: Modules,
     pub(crate) condition: VocoderCondition,
     pub(crate) positional: Option<PositionalGru>,
+    pub(crate) effects:Option<super::effects::EffectTimeline>,
+    pub(crate) compatible_dispatch:bool,
+    pub(crate) independent_branches:bool,
+    pub(crate) streamed_frame_noise:bool,
+    pub(crate) editor_seed_source:Option<std::sync::Arc<[u64]>>,
 }
 
-/// Independently materialized neural outputs used by the signal processors.
-/// These are not PCM and do not bypass the learned frequency responses.
 pub struct VocoderParameters {
     pub normalized: Sequence,
     pub spectra: [Sequence; 3],
     pub harmonic_parameters: Sequence,
     pub excitation: Vec<ExcitationFrame>,
     pub metadata: Vec<FrameMetadata>,
-    pub(crate) voice_controls: Vec<SpectralControl>,
+    pub effects:Vec<Option<super::effects::FrameEffect>>,
 }
 
 impl<'a> VocoderStage<'a> {
@@ -58,9 +58,7 @@ impl<'a> VocoderStage<'a> {
             .recurrent_sampler
             .map(|sampler| PositionalGru::prepare(tree, sampler))
             .transpose()?;
-        // SV1 executes its [72, 256, 0] main network
-        // directly. SV2's additional positional child supplies the real 192
-        // condition channels. A missing child must never become zero padding.
+
         let condition_channels = match &positional {
             None => 0,
             Some(positional) if positional.output_channels() == 192 => 192,
@@ -83,15 +81,28 @@ impl<'a> VocoderStage<'a> {
             modules,
             condition,
             positional,
+            effects:None,
+            compatible_dispatch:false,
+            independent_branches:false,
+            streamed_frame_noise:false,
+            editor_seed_source:None,
         })
+    }
+
+    pub fn set_editor_controls(&mut self,phrase:&crate::synthesis::score::PreparedPhrase,origin:f64) {
+        self.effects=Some(super::effects::EffectTimeline::new(phrase,origin));
+    }
+
+    pub fn set_compatible_dispatch(&mut self) {self.compatible_dispatch=true;self.independent_branches=true;}
+    pub fn set_editor_seed_source(&mut self,seeds:std::sync::Arc<[u64]>) {
+        self.editor_seed_source=Some(seeds);self.streamed_frame_noise=true;self.independent_branches=true;
     }
 
     pub fn parameters(
         &self,
         physical: &Sequence,
         controls: Option<&Sequence>,
-        voice_controls: Option<&[VoiceControl]>,
     ) -> Result<VocoderParameters> {
-        ParameterStream::new(self.clone())?.process(physical, controls, voice_controls, true)
+        ParameterStream::new(self.clone())?.process(physical, controls, true)
     }
 }

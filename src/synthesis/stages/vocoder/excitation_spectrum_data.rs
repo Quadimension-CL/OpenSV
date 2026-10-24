@@ -1,6 +1,3 @@
-//! Float32 shape-parameter lookup.
-//! Rows: shape, Te / T, Tp / T, Ta / T, ln(epsilon), ln(alpha).
-
 #[rustfmt::skip]
 pub(super) const SHAPE_TABLE: [[u32; 6]; 256] = [
     [0x3c23d70a, 0x3c7e723a, 0x3c4fae40, 0x358637bd, 0x4198e91f, 0x412fb18a],

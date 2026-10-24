@@ -1,5 +1,3 @@
-//! Channel affine and layer normalization CPU operations.
-
 use std::sync::Arc;
 
 use crate::synthesis::inference::matrix::{MatrixError, check_length};
@@ -11,7 +9,6 @@ pub const CHANNEL_AFFINE_TYPE_ID: [u8; 16] = [
     0xcb, 0xc1, 0x1d, 0x2c, 0x8b, 0x91, 0xf3, 0x57, 0xca, 0x73, 0x2c, 0xdb, 0x0f, 0x6c, 0xbf, 0x51,
 ];
 
-/// Configuration stores one normalized dimension as a u16.
 #[derive(Clone, Copy, Debug)]
 pub struct LayerNormConfig {
     pub channels: usize,
@@ -69,8 +66,6 @@ impl LayerNorm {
         self.channels
     }
 
-    /// Computes variance from the sum and squared sum rather than a second
-    /// centered pass. Input and output use separate buffers.
     pub fn execute_batch(
         &self,
         input: &[f32],
@@ -87,7 +82,7 @@ impl LayerNorm {
         {
             let (sum, squares) = baseline_moments(input);
             let mean = sum * reciprocal_channels;
-            // Preserve this order: scale squares, add epsilon, subtract mean squared, sqrt.
+
             let std = ((squares * reciprocal_channels + self.epsilon) - mean * mean).sqrt();
             let reciprocal_std = 1.0 / std;
             let vector_end = self.channels & !3;
@@ -96,7 +91,7 @@ impl LayerNorm {
                 let gain = self.gain.as_ref().map(|values| values[channel]);
                 let bias = self.bias.as_ref().map(|values| values[channel]);
                 let mut normalized = if channel < vector_end {
-                    // Multiply gain by reciprocal_std before applying the centered value.
+
                     gain.map_or(centered * reciprocal_std, |g| {
                         (g * reciprocal_std) * centered
                     })
@@ -121,8 +116,6 @@ impl LayerNorm {
     }
 }
 
-/// Applies y = x * gain + bias without computing statistics.
-/// The two parameter vectors are stored in gain/bias order.
 #[derive(Clone)]
 pub struct ChannelAffine {
     gain: Arc<[f32]>,

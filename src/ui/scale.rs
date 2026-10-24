@@ -126,18 +126,18 @@ impl Scale {
 
     pub fn label(self) -> &'static str {
         match self {
-            Self::Major => "大调音阶",
-            Self::NaturalMinor => "自然小调",
-            Self::HarmonicMinor => "和声小调",
-            Self::MelodicMinor => "旋律小调（上行）",
-            Self::Dorian => "多利亚调式",
-            Self::Phrygian => "弗里几亚调式",
-            Self::Lydian => "利底亚调式",
-            Self::Mixolydian => "混合利底亚调式",
-            Self::Locrian => "洛克里亚调式",
-            Self::MajorPentatonic => "大调五声音阶",
-            Self::MinorPentatonic => "小调五声音阶",
-            Self::Blues => "布鲁斯音阶",
+            Self::Major => crate::i18n::t("大调音阶"),
+            Self::NaturalMinor => crate::i18n::t("自然小调"),
+            Self::HarmonicMinor => crate::i18n::t("和声小调"),
+            Self::MelodicMinor => crate::i18n::t("旋律小调（上行）"),
+            Self::Dorian => crate::i18n::t("多利亚调式"),
+            Self::Phrygian => crate::i18n::t("弗里几亚调式"),
+            Self::Lydian => crate::i18n::t("利底亚调式"),
+            Self::Mixolydian => crate::i18n::t("混合利底亚调式"),
+            Self::Locrian => crate::i18n::t("洛克里亚调式"),
+            Self::MajorPentatonic => crate::i18n::t("大调五声音阶"),
+            Self::MinorPentatonic => crate::i18n::t("小调五声音阶"),
+            Self::Blues => crate::i18n::t("布鲁斯音阶"),
         }
     }
 
@@ -182,7 +182,6 @@ impl Scale {
     }
 }
 
-/// Only display visibility is shared across projects; groups own their scale.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ScaleDisplay {
     pub enabled: bool,

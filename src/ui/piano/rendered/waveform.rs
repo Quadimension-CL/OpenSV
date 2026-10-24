@@ -54,8 +54,7 @@ pub(super) fn draw(
         )
     };
     for (index, note) in notes.iter().enumerate() {
-        // Preserve real attack/tail PCM outside the nominal note bounds. A
-        // rest keeps the preceding note's display baseline until the next onset.
+
         let left = if index == 0 {
             audio_left
         } else {
@@ -95,7 +94,7 @@ pub(super) fn draw(
                 flash.gap(x);
                 continue;
             }
-            // A fixed 0 dBFS display range; drawing does not normalize audio.
+
             let top = center - maximum.clamp(-1.0, 1.0) * scale;
             let bottom = (center - minimum.clamp(-1.0, 1.0) * scale).max(top + pixel * 0.25);
             mesh.add_colored_rect(Rect::from_min_max(pos2(x, top), pos2(next, bottom)), color);

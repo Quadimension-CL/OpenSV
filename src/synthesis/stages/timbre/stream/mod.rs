@@ -1,9 +1,9 @@
-//! Incremental execution of the acoustic model with persistent temporal state.
 mod conditions;
 mod features;
 mod input;
 mod program;
 mod queue;
+mod sixteen;
 
 use std::sync::Arc;
 
@@ -16,7 +16,44 @@ use crate::synthesis::{
 };
 use features::Features;
 use input::Input;
-use program::Program;
+enum Program<'network, 'tree> {
+    Sixteen(Box<sixteen::Program16<'network, 'tree>>),
+    Nineteen(Box<program::Program<'network, 'tree>>),
+}
+
+impl<'network, 'tree> Program<'network, 'tree> {
+    fn new(network: &'network TimbreNetwork<'tree>, input: Input) -> Self {
+        match network.layout.architecture {
+            super::config::TimbreArchitecture::Sixteen => {
+                Self::Sixteen(Box::new(sixteen::Program16::new(network, input)))
+            }
+            super::config::TimbreArchitecture::Nineteen { .. } => {
+                Self::Nineteen(Box::new(program::Program::new(network, input)))
+            }
+        }
+    }
+
+    fn input(&self) -> &Input {
+        match self {
+            Self::Sixteen(value) => &value.input,
+            Self::Nineteen(value) => &value.input,
+        }
+    }
+
+    fn consumed(&self) -> usize {
+        match self {
+            Self::Sixteen(value) => value.consumed,
+            Self::Nineteen(value) => value.consumed,
+        }
+    }
+
+    fn advance(&mut self, frames: usize) -> Result<TimbreOutput> {
+        match self {
+            Self::Sixteen(value) => value.advance(frames),
+            Self::Nineteen(value) => value.advance(frames),
+        }
+    }
+}
 
 pub struct TimbreStream<'network, 'tree> {
     program: Program<'network, 'tree>,
@@ -31,7 +68,7 @@ impl<'network, 'tree> TimbreStream<'network, 'tree> {
         Ok(Self {
             program: Program::new(
                 network,
-                Input::from_records(network, Features::Dense(features), records, None, None)?,
+                Input::from_records(network, Features::Dense(features), records, None)?,
             ),
         })
     }
@@ -40,8 +77,7 @@ impl<'network, 'tree> TimbreStream<'network, 'tree> {
         network: &'network TimbreNetwork<'tree>,
         source: Arc<PreparedTimbreFrames>,
         records: &AcousticRecords,
-        primary_style_weights: Option<&Sequence>,
-        secondary_style_weights: Option<&Sequence>,
+        styles: Option<&super::styles::AcousticStyles>,
     ) -> Result<Self> {
         if records.first_frame > source.len() || records.total_frames != source.len() {
             return Err(VoiceError::new(
@@ -53,16 +89,7 @@ impl<'network, 'tree> TimbreStream<'network, 'tree> {
             first_frame: records.first_frame,
         };
         Ok(Self {
-            program: Program::new(
-                network,
-                Input::from_records(
-                    network,
-                    features,
-                    records,
-                    primary_style_weights,
-                    secondary_style_weights,
-                )?,
-            ),
+            program: Program::new(network, Input::from_records(network, features, records, styles)?),
         })
     }
 
@@ -75,27 +102,22 @@ impl<'network, 'tree> TimbreStream<'network, 'tree> {
         })
     }
 
-    /// Feed at most this many full-rate source rows. The output contains only
-    /// newly stable acoustic/control rows; it can be empty while kernels wait
-    /// for their right context. Final flush occurs only at the true source end.
     pub fn next(&mut self, max_input_frames: usize) -> Result<TimbreOutput> {
         self.program.advance(max_input_frames)
     }
 
     pub fn is_finished(&self) -> bool {
-        self.program.consumed == self.program.input.features.frames()
+        self.program.consumed() == self.program.input().features.frames()
     }
 
     pub fn first_frame(&self) -> usize {
-        self.program.input.first_frame
+        self.program.input().first_frame
     }
 
     pub fn total_frames(&self) -> usize {
-        self.program.input.first_frame + self.program.input.features.frames()
+        self.program.input().first_frame + self.program.input().features.frames()
     }
 
-    /// Materialize a requested prefix through the same streaming numerical
-    /// program. Stopping early drops state; it never fabricates a model ending.
     pub fn collect_until(mut self, end_frame: usize) -> Result<TimbreOutput> {
         let first_frame = self.first_frame();
         if end_frame <= first_frame || end_frame > self.total_frames() {

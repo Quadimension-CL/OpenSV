@@ -1,8 +1,3 @@
-//! Parallel vocoder spectral heads and linear overlap between frequency bands.
-//!
-//! Each branch predicts all heads in contiguous channel blocks. There is no
-//! sigmoid, exponential, or normalization at this boundary.
-
 use std::collections::VecDeque;
 
 use crate::synthesis::{
@@ -137,17 +132,12 @@ impl SpectralHeads {
         self.channels
     }
 
-    /// Clear these output queues together with the associated model runtime.
-    /// Calling only one reset would combine frames from unrelated segments.
     pub fn reset(&mut self) {
         for band in &mut self.bands {
             band.pending.clear();
         }
     }
 
-    /// Return one frame-major frequency sequence per head, in serialized order.
-    /// Branch outputs are queued across chunks. The common fresh output count
-    /// controls each emitted chunk.
     pub fn execute(
         &mut self,
         runtime: &mut ModelRuntime<'_>,

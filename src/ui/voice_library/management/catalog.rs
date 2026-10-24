@@ -51,17 +51,16 @@ pub(super) fn entries(app: &App, state: &State) -> Vec<VoiceCatalogEntry> {
     }
     let mut entries: Vec<_> = banks.into_values().cloned().collect();
     entries.sort_by(|a, b| {
+        let category=super::super::selector::category_of(a).cmp(&super::super::selector::category_of(b));
+        if !category.is_eq() {return category;}
         let names = || {
-            a.display_name
-                .cmp(&b.display_name)
+            a.display_name.to_lowercase()
+                .cmp(&b.display_name.to_lowercase())
+                .then_with(|| a.display_name.cmp(&b.display_name))
                 .then_with(|| a.database_id.cmp(&b.database_id))
         };
         match state.sort {
-            Sort::Default => b
-                .availability
-                .is_loadable()
-                .cmp(&a.availability.is_loadable())
-                .then_with(names),
+            Sort::Default => names(),
             Sort::Name => names(),
             Sort::NameReverse => names().reverse(),
             Sort::Version => b.revision.cmp(&a.revision).then_with(names),

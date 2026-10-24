@@ -14,15 +14,15 @@ pub fn show(app: &mut App, ui: &mut Ui, rect: Rect, track: &Track) {
         app.rename = Some(super::rename::Rename::track(track.id, &track.name));
     }
     response.context_menu(|ui| {
-        if ui.button("重命名音轨…").clicked() {
+        if ui.button(crate::i18n::t("重命名音轨…")).clicked() {
             app.rename = Some(super::rename::Rename::track(track.id, &track.name));
             ui.close();
         }
-        if ui.button("新增音轨").clicked() {
+        if ui.button(crate::i18n::t("新增音轨")).clicked() {
             app.editor.add_track();
             ui.close();
         }
-        if ui.button("新增伴奏轨…").clicked() {
+        if ui.button(crate::i18n::t("新增伴奏轨…")).clicked() {
             let id = app.editor.add_instrumental_track();
             ui.close();
             app.import_audio(Some(id), ui.ctx());
@@ -34,14 +34,14 @@ pub fn show(app: &mut App, ui: &mut Ui, rect: Rect, track: &Track) {
             .iter()
             .position(|t| t.id == track.id)
             .unwrap();
-        if ui.add_enabled(index > 0, Button::new("上移音轨")).clicked() {
+        if ui.add_enabled(index > 0, Button::new(crate::i18n::t("上移音轨"))).clicked() {
             app.editor.reorder_track(track.id, -1);
             ui.close();
         }
         if ui
             .add_enabled(
                 index + 1 < app.editor.project.tracks.len(),
-                Button::new("下移音轨"),
+                Button::new(crate::i18n::t("下移音轨")),
             )
             .clicked()
         {
@@ -50,7 +50,7 @@ pub fn show(app: &mut App, ui: &mut Ui, rect: Rect, track: &Track) {
         }
         ui.separator();
         if ui
-            .add_enabled(app.editor.project.tracks.len() > 1, Button::new("删除音轨"))
+            .add_enabled(app.editor.project.tracks.len() > 1, Button::new(crate::i18n::t("删除音轨")))
             .clicked()
         {
             app.commit_lyric();
@@ -85,7 +85,7 @@ pub fn show(app: &mut App, ui: &mut Ui, rect: Rect, track: &Track) {
     for (field, label, center, min, max, reset) in [
         (
             "gainDecibel",
-            "音量",
+            crate::i18n::t("音量"),
             pos2(rect.right() - 79.0, rect.top() + 23.0),
             -48.0,
             12.0,
@@ -93,7 +93,7 @@ pub fn show(app: &mut App, ui: &mut Ui, rect: Rect, track: &Track) {
         ),
         (
             "pan",
-            "声像",
+            crate::i18n::t("声像"),
             pos2(rect.right() - 49.0, rect.top() + 23.0),
             -1.0,
             1.0,
@@ -106,9 +106,9 @@ pub fn show(app: &mut App, ui: &mut Ui, rect: Rect, track: &Track) {
             .and_then(serde_json::Value::as_f64)
             .unwrap_or(reset);
         let (value, response) = knob(ui, (track.id, field), center, old, min, max, reset);
-        let response = response.on_hover_text(format!("{label}  {old:.2}\n拖动调整，双击复位"));
+        let response = response.on_hover_text(crate::lformat!("{label}  {old:.2}\n拖动调整，双击复位"));
         if response.drag_started() || response.double_clicked() {
-            app.editor.begin("调整混音");
+            app.editor.begin(crate::i18n::t("调整混音"));
         }
         if value != old {
             app.editor
@@ -168,13 +168,13 @@ pub fn show(app: &mut App, ui: &mut Ui, rect: Rect, track: &Track) {
         );
         if response
             .on_hover_text(if field == "mute" {
-                "音轨静音"
+                crate::i18n::t("音轨静音")
             } else {
-                "音轨独奏"
+                crate::i18n::t("音轨独奏")
             })
             .clicked()
         {
-            app.editor.begin("音轨混音");
+            app.editor.begin(crate::i18n::t("音轨混音"));
             app.editor
                 .project
                 .tracks

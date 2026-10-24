@@ -106,11 +106,8 @@ impl TakeSet {
         if !ids.contains(&self.active_take_id) {
             return Err("当前重录采样不存在".into());
         }
-        let Some(default) = self.takes.iter().find(|take| take.id == 0) else {
+        if !ids.contains(&0) {
             return Err("重录采样缺少默认采样".into());
-        };
-        if default.seeds() != RetakeSeeds::default() {
-            return Err("默认采样的随机种子必须为零".into());
         }
         Ok(())
     }

@@ -15,7 +15,7 @@ pub(super) fn show(app: &mut App, ui: &mut Ui, rect: Rect, text_rect: Rect, trac
             Rect::from_center_size(rect.min + vec2(24.0, 39.0), Vec2::splat(12.0)),
             MUTED,
         );
-        let text = track.audio_clip().map_or("导入伴奏…", |clip| clip.name());
+        let text = track.audio_clip().map_or(crate::i18n::t("导入伴奏…"), |clip| clip.name());
         painter.text(
             rect.min + vec2(35.0, 39.0),
             Align2::LEFT_CENTER,
@@ -34,14 +34,15 @@ pub(super) fn show(app: &mut App, ui: &mut Ui, rect: Rect, text_rect: Rect, trac
                 Sense::click(),
             )
             .on_hover_cursor(CursorIcon::Default)
-            .on_hover_text("导入 / 替换伴奏音频")
+            .on_hover_text(crate::i18n::t("导入 / 替换伴奏音频"))
             .clicked()
         {
             app.import_audio(Some(track.id), ui.ctx());
         }
         return;
     }
-    Icon::Microphone.paint(
+    let missing=app.synthesis.voice_not_installed(track,&track.main_ref);
+    (if missing {Icon::Warning}else{Icon::Microphone}).paint(
         ui,
         Rect::from_center_size(rect.min + vec2(24.0, 39.0), vec2(12.0, 12.0)),
         MUTED,
@@ -52,7 +53,7 @@ pub(super) fn show(app: &mut App, ui: &mut Ui, rect: Rect, text_rect: Rect, trac
         .get("name")
         .and_then(serde_json::Value::as_str)
         .filter(|s| !s.is_empty())
-        .unwrap_or("未指定歌声");
+        .unwrap_or(crate::i18n::t("未指定歌声"));
     painter.text(
         rect.min + vec2(35.0, 39.0),
         Align2::LEFT_CENTER,
@@ -71,7 +72,7 @@ pub(super) fn show(app: &mut App, ui: &mut Ui, rect: Rect, text_rect: Rect, trac
             Sense::click(),
         )
         .on_hover_cursor(CursorIcon::Default)
-        .on_hover_text("选择歌声");
+        .on_hover_text(if missing {crate::i18n::t("未安装")}else{crate::i18n::t("选择歌声")});
     if voice_response.clicked() {
         app.commit_lyric();
         app.editor.select_track(track.id);

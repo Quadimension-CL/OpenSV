@@ -85,8 +85,7 @@ impl ConditionalState {
                 }
                 None => runtime.execute(self.gates[index], &state, flush)?,
             };
-            // Skip always sees the gate before its residual addition.
-            // Each sum releases only a matched prefix.
+
             let skip = runtime.execute(self.skips[index], &gated, flush)?;
             state = layer
                 .residual

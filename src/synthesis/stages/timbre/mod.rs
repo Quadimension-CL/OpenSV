@@ -1,6 +1,8 @@
-//! Typed program for the Mo Xu 201 acoustic tree, including both latent heads.
-
 mod config;
+#[cfg(feature = "acoustic-diagnostic")]
+pub mod diagnostic;
+#[cfg(feature = "acoustic-diagnostic")]
+pub mod probe;
 mod features;
 mod frames;
 mod frontend;
@@ -12,7 +14,7 @@ mod sampling;
 mod stream;
 mod styles;
 
-pub use config::{TIMBRE_ROOT_TYPE_ID, TimbreLayout};
+pub use config::{TIMBRE_ROOT_TYPE_ID, TIMBRE16_ROOT_TYPE_ID, TimbreArchitecture, TimbreLayout};
 pub use frames::PreparedTimbreFrames;
 pub use frontend::TimbreRequest;
 pub use pipeline::{TimbreConditions, TimbreNetwork, TimbreOutput};

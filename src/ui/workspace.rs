@@ -6,7 +6,7 @@ use super::{
 use crate::app::App;
 use eframe::egui::*;
 
-pub fn show(app: &mut App, ui: &mut Ui) {
+pub fn show(app: &mut App, ui: &mut Ui, seeked: bool) {
     let rect = ui.max_rect();
     let rail = Rect::from_min_max(
         pos2(rect.right() - super::tool_rail::WIDTH, rect.top()),
@@ -32,21 +32,21 @@ pub fn show(app: &mut App, ui: &mut Ui) {
         let r = Rect::from_min_size(pos2(x, main.top()), vec2(width, main.height()));
         let mut column_ui = child(ui, r, ("column", column));
         if *column == Column::Editor {
-            editor(app, &mut column_ui);
+            editor(app, &mut column_ui,seeked);
         } else {
             super::panels::show(app, &mut column_ui, *column);
         }
         if let Some(payload) = DragAndDrop::payload::<DragPayload>(ui.ctx())
             && let DragPayload::Column(source) = *payload
         {
-            let response = ui.interact(r, Id::new(("column-drop", column)), Sense::hover());
-            if response.contains_pointer() && source != *column {
+            if ui.input(|i|i.pointer.hover_pos().is_some_and(|p|r.contains(p))) && source != *column {
                 let before =
                     ui.input(|i| i.pointer.hover_pos().is_some_and(|p| p.x < r.center().x));
                 let target = if before { r.left() } else { r.right() };
                 ui.painter()
                     .vline(target, r.y_range(), Stroke::new(3.0, GREEN));
-                if response.dnd_release_payload::<DragPayload>().is_some() {
+                if ui.input(|i|i.pointer.any_released()) {
+                    DragAndDrop::take_payload::<DragPayload>(ui.ctx());
                     drop = Some((source, index + usize::from(!before)));
                 }
             }
@@ -72,9 +72,15 @@ pub fn show(app: &mut App, ui: &mut Ui) {
             index -= 1;
         }
         app.view.columns.insert(index, source);
+
+        app.view.panel_order.retain(|c|*c!=source);
+        let next=app.view.columns.get(index+1);
+        let at=next.and_then(|next|app.view.panel_order.iter().position(|c|c==next))
+            .unwrap_or(app.view.panel_order.len());
+        app.view.panel_order.insert(at,source);
     }
 }
-fn editor(app: &mut App, ui: &mut Ui) {
+fn editor(app: &mut App, ui: &mut Ui,seeked:bool) {
     let rect = ui.max_rect();
     let available = (rect.height() - 5.0).max(0.0);
     let arrangement_height = if app.view.arrangement_collapsed {
@@ -110,8 +116,23 @@ fn editor(app: &mut App, ui: &mut Ui) {
             Rect::from_min_size(pos2(rect.left(), y), vec2(rect.width(), 5.0)),
         )
     };
+    if seeked {
+        let gutter=250.0_f32.min(arrangement.width()*0.36);
+        super::timeline::reveal(&mut app.view.arrangement,arrangement.width()-gutter,app.editor.transport.position);
+        super::timeline::reveal(&mut app.view.piano,piano.width()-super::timeline::GUTTER,app.editor.transport.position);
+    }
+    let position=app.editor.transport.position;
     super::arrangement::show(app, &mut child(ui, arrangement, "arrangement"));
+    if position!=app.editor.transport.position {
+        super::timeline::reveal(&mut app.view.piano,piano.width()-super::timeline::GUTTER,app.editor.transport.position);
+    }
+    let position=app.editor.transport.position;
     piano_stack(app, &mut child(ui, piano, "piano-stack"));
+    if position!=app.editor.transport.position {
+        let gutter=250.0_f32.min(arrangement.width()*0.36);
+        super::timeline::reveal(&mut app.view.arrangement,arrangement.width()-gutter,app.editor.transport.position);
+        ui.ctx().request_repaint();
+    }
     if !app.view.arrangement_collapsed && !app.piano_collapsed {
         let response = ui
             .interact(divider, Id::new("main-divider"), Sense::drag())
@@ -166,19 +187,15 @@ fn piano_stack(app: &mut App, ui: &mut Ui) {
         .filter(|l| l.visible)
         .cloned()
         .collect();
-    let phonemes = if app.view.phonemes {
-        app.view.phonemes_height + 5.0
-    } else {
-        0.0
-    };
-    let desired: f32 = lanes.iter().map(|l| l.height + 5.0).sum::<f32>() + phonemes;
-    let available = (tabs.top() - toolbar.bottom() - 125.0).max(0.0);
+    let desired: f32 = lanes.iter().map(|l| l.height + 5.0).sum();
+    let phonemes = if app.view.phonemes { 100.0 } else { 0.0 };
+    let available = (tabs.top() - toolbar.bottom() - 125.0 - phonemes).max(0.0);
     let scale = if desired > available {
         available / desired.max(1.0)
     } else {
         1.0
     };
-    let mut y = tabs.top() - desired * scale;
+    let mut y = tabs.top() - desired * scale - phonemes;
     super::piano::show(
         app,
         &mut child(
@@ -188,29 +205,17 @@ fn piano_stack(app: &mut App, ui: &mut Ui) {
         ),
     );
     if app.view.phonemes {
-        let divider = Rect::from_min_size(pos2(rect.left(), y), vec2(rect.width(), 5.0 * scale));
-        let response = ui
-            .interact(divider, Id::new("phonemes-divider"), Sense::drag())
-            .on_hover_cursor(CursorIcon::ResizeVertical);
-        if response.dragged() {
-            app.view.phonemes_height = (app.view.phonemes_height
-                - response.drag_delta().y / scale.max(0.01))
-            .clamp(64.0, 500.0);
-        }
-        let p = Rect::from_min_size(
-            pos2(rect.left(), y + 5.0 * scale),
-            vec2(rect.width(), app.view.phonemes_height * scale),
-        );
-        super::phonemes::show(app, &mut child(ui, p, "phonemes"));
-        y += phonemes * scale;
+        let p = Rect::from_min_size(pos2(rect.left(), y), vec2(rect.width(), phonemes));
+        super::phonemes::show(app,&mut child(ui,p,"phonemes"));
+        y += phonemes;
     }
     let mut reorder = None;
     for lane in lanes {
         let r = Rect::from_min_size(
-            pos2(rect.left(), y + 5.0 * scale),
+            pos2(rect.left(), y + 5.0),
             vec2(rect.width(), lane.height * scale),
         );
-        let divider = Rect::from_min_size(pos2(rect.left(), y), vec2(rect.width(), 5.0 * scale));
+        let divider = Rect::from_min_size(pos2(rect.left(), y), vec2(rect.width(), 5.0));
         let response = ui
             .interact(divider, Id::new(("lane-divider", lane.id)), Sense::drag())
             .on_hover_cursor(CursorIcon::ResizeVertical);

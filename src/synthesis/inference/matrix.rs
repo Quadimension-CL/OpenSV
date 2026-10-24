@@ -1,8 +1,5 @@
-//! Prepared dense weights for CPU float execution.
-
 use std::{fmt, sync::Arc};
 
-/// Structural errors are reported before an operator writes its output.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum MatrixError {
     InvalidShape,
@@ -46,23 +43,28 @@ impl std::error::Error for MatrixError {}
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Quantization {
     pub bits: u32,
-    /// The signed fixed-point input exponent used by integer execution paths.
-    /// It does not enter the dense float weight conversion.
+
     pub input_exponent: i32,
 }
 
-/// The prepared representation is row-major: output channel, then input channel.
-/// Clones share immutable weights; execution performs no decoding or allocation.
 #[derive(Clone)]
 pub struct DenseMatrix {
     rows: usize,
     columns: usize,
     values: Arc<[f32]>,
     quantization: Option<Quantization>,
+    integer: Option<IntegerMatrix>,
+}
+
+#[derive(Clone)]
+struct IntegerMatrix {
+    weights: Arc<[i16]>,
+    factors: Arc<[f32]>,
+    input_scale: f32,
 }
 
 impl DenseMatrix {
-    /// Float matrix resources are already row-major.
+
     pub fn from_float(
         rows: usize,
         columns: usize,
@@ -74,14 +76,10 @@ impl DenseMatrix {
             columns,
             values,
             quantization: None,
+            integer: None,
         })
     }
 
-    /// Integer resources are column-major, unlike float resources.
-    ///
-    /// The dense float path first computes scale / 2^(bits-1),
-    /// then multiplies the signed stored integer. This conversion is cached
-    /// once; it is not an emulation of an integer dot-product backend.
     pub fn from_quantized(
         rows: usize,
         columns: usize,
@@ -90,6 +88,13 @@ impl DenseMatrix {
         scales: &[f32],
         values: &[u8],
     ) -> Result<Self, MatrixError> {
+        Self::from_quantized_execution(rows,columns,bits,input_exponent,scales,values,false)
+    }
+
+    pub fn from_quantized_execution(
+        rows:usize, columns:usize, bits:u32, input_exponent:i32,
+        scales:&[f32], values:&[u8], integer_execution:bool,
+    )->Result<Self,MatrixError> {
         let count = elements(rows, columns)?;
         let (bytes, divisor) = match bits {
             8 => (1, 1.0 / 128.0),
@@ -118,6 +123,18 @@ impl DenseMatrix {
                 decoded[output * columns + input] = signed * factor;
             }
         }
+
+        let integer=if integer_execution && bits==16 {
+            if !(-30..=30).contains(&input_exponent) {return Err(MatrixError::InvalidScale);}
+            let input_scale=2.0_f32.powi(input_exponent);
+            let mut weights=vec![0_i16;count];
+            for output in 0..rows {for input in 0..columns {
+                let index=(input*rows+output)*bytes;
+                weights[output*columns+input]=i16::from_le_bytes([values[index],values[index+1]]);
+            }}
+            Some(IntegerMatrix {weights:weights.into(),input_scale,
+                factors:scales.iter().map(|scale| scale/input_scale).collect()})
+        } else {None};
         Ok(Self {
             rows,
             columns,
@@ -126,6 +143,7 @@ impl DenseMatrix {
                 bits,
                 input_exponent,
             }),
+            integer,
         })
     }
 
@@ -141,9 +159,37 @@ impl DenseMatrix {
         self.quantization
     }
 
+    pub(super) fn has_integer_execution(&self)->bool {self.integer.is_some()}
+
+    pub(super) fn integer_frame(&self,input:&[f32],output:&mut[f32],accumulate:bool)->bool {
+        let Some(integer)=&self.integer else{return false};
+        let quantized:Vec<i16>=input.iter().map(|value| {
+            quantize_input(*value,integer.input_scale)
+        }).collect();
+        for (channel,target) in output.iter_mut().enumerate() {
+            let weights=&integer.weights[channel*self.columns..(channel+1)*self.columns];
+            let mut sum=0_i16;
+            for (&weight,&value) in weights.iter().zip(&quantized) {
+                sum=sum.saturating_add(rounded_product(weight,value));
+            }
+
+            if accumulate {*target=(sum as f32).mul_add(integer.factors[channel],*target);}
+            else {*target=(sum as f32)*integer.factors[channel];}
+        }
+        true
+    }
+
     pub(super) fn row(&self, output: usize) -> &[f32] {
         &self.values[output * self.columns..(output + 1) * self.columns]
     }
+}
+
+fn quantize_input(value:f32,scale:f32)->i16 {
+    (value*scale).round_ties_even().clamp(-32768.0,32767.0) as i16
+}
+
+fn rounded_product(a:i16,b:i16)->i16 {
+    ((i32::from(a)*i32::from(b)+0x4000)>>15) as i16
 }
 
 pub(super) fn check_length(

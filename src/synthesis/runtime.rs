@@ -5,7 +5,6 @@ mod export;
 mod library;
 mod metronome;
 mod mixer;
-mod phonemes;
 mod playback;
 mod recordings;
 mod routing;
@@ -13,11 +12,13 @@ mod transport;
 mod visuals;
 mod voices;
 mod worker;
+#[cfg(feature="acoustic-diagnostic")]
+pub use worker::scheduling_diagnostic;
 
 use super::{
     plan::{OwnerId, Planner},
     render_cache::{CacheStats, PublishedOwner},
-    rendered::{PhonemeSnapshot, VisualTimeline},
+    rendered::VisualTimeline,
     settings::VoiceSelection,
     voice::VoiceInventory,
 };
@@ -60,7 +61,7 @@ pub struct Runtime {
     playback: playback::Playback,
     export_owners: Vec<PublishedOwner>,
     visuals: BTreeMap<OwnerId, VisualTimeline>,
-    phonemes: BTreeMap<OwnerId, PhonemeSnapshot>,
+    phonemes: BTreeMap<OwnerId, crate::synthesis::rendered::PhonemeSnapshot>,
     export: Option<Receiver<Result<Vec<PathBuf>, String>>>,
     last_revision: Option<u64>,
     request_serial: u64,
@@ -151,11 +152,9 @@ impl Runtime {
     }
     pub fn reload_voice(&mut self, key: &VoiceSelection) {
         self.voices.remove(key);
-        self.phonemes
-            .retain(|owner, _| self.routes.get(owner) != Some(key));
         self.last_revision = None;
         self.export_owners
-            .retain(|owner| self.routes.get(&owner.owner) != Some(key));
+            .retain(|owner| self.routes.get(&owner.owner.reference()) != Some(key));
         self.refresh_playback();
     }
     pub fn reset_project(&mut self) {
@@ -220,11 +219,14 @@ impl Runtime {
     pub fn has_audio(&self) -> bool {
         self.voices.values().any(|v| v.audio.is_some()) || !self.recordings.layers.is_empty()
     }
-    pub fn visuals(&self, owner: OwnerId) -> Option<&VisualTimeline> {
-        self.visuals.get(&owner)
+    pub fn is_synthesizing(&self) -> bool {
+        self.voices.values().any(|voice|voice.ready && (voice.waiting || voice.stats.running>0 || voice.stats.queued>0))
     }
-    pub fn phonemes(&self, owner: OwnerId) -> Option<&PhonemeSnapshot> {
-        self.phonemes.get(&owner)
+    pub fn visuals(&self, owner: OwnerId) -> impl Iterator<Item = &VisualTimeline> {
+        self.visuals.iter().filter_map(move |(id,visuals)| (id.0==owner.0).then_some(visuals))
+    }
+    pub fn phonemes(&self, owner: OwnerId) -> impl Iterator<Item = &crate::synthesis::rendered::PhonemeSnapshot> {
+        self.phonemes.iter().filter_map(move |(id,phones)| (id.0==owner.0).then_some(phones))
     }
     pub fn is_exporting(&self) -> bool {
         self.export.is_some()

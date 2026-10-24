@@ -1,5 +1,3 @@
-//! Persistent vocoder feature inference with branch-latency alignment.
-
 use std::collections::VecDeque;
 
 use crate::synthesis::{
@@ -16,11 +14,8 @@ use super::{
     spectral_heads::SpectralHeads,
     stage::{VocoderParameters, VocoderStage},
     stream_queue::FrameQueue,
-    voice_control::{SpectralControl, VoiceControl},
 };
 
-/// All queues share input-frame zero. A branch may get ahead of another, but
-/// neither its local batch length nor its latency can change frame pairing.
 pub(crate) struct ParameterStream<'a> {
     pub(crate) stage: VocoderStage<'a>,
     pub(crate) runtime: ModelRuntime<'a>,
@@ -35,8 +30,8 @@ pub(crate) struct ParameterStream<'a> {
     spectra: [FrameQueue; 3],
     harmonic: FrameQueue,
     excitation: VecDeque<ExcitationFrame>,
+    reference_shapes:VecDeque<f32>,
     metadata: VecDeque<FrameMetadata>,
-    voice_controls: VecDeque<SpectralControl>,
 }
 
 impl<'a> ParameterStream<'a> {
@@ -63,19 +58,15 @@ impl<'a> ParameterStream<'a> {
             spectra: std::array::from_fn(|_| FrameQueue::new(512)),
             harmonic: FrameQueue::new(10),
             excitation: VecDeque::new(),
+            reference_shapes:VecDeque::new(),
             metadata: VecDeque::new(),
-            voice_controls: VecDeque::new(),
         })
     }
 
-    /// Accept consecutive physical and metadata frames. Position conditioning
-    /// and the GRU remain continuous even when downstream convolutions delay
-    /// output. Only a final batch flushes right context and closes the stream.
     pub(crate) fn process(
         &mut self,
         physical: &Sequence,
         controls: Option<&Sequence>,
-        voice_controls: Option<&[VoiceControl]>,
         final_batch: bool,
     ) -> Result<VocoderParameters> {
         #[cfg(feature = "synth-profile")]
@@ -88,35 +79,18 @@ impl<'a> ParameterStream<'a> {
         physical.validate()?;
         let metadata = metadata::from_timbre(controls, physical.frames)?;
         let normalized = self.stage.condition.normalize(physical)?;
-        if voice_controls.is_some_and(|values| values.len() != physical.frames) {
-            return Err(VoiceError::new(
-                "Vocoder voice controls do not align with acoustic frames",
-            ));
-        }
-        for frame in 0..physical.frames {
-            let voice = voice_controls.map_or_else(VoiceControl::default, |values| values[frame]);
-            voice.validate()?;
-            let row = physical.frame(frame)?;
-            if !row[2].is_finite() {
-                return Err(VoiceError::new("Invalid vocoder physical source shape"));
-            }
-            self.voice_controls.push_back(SpectralControl {
-                voice,
-                f0_hz: row[1],
-                shape: row[2],
-            });
-        }
         let input_frames = self
             .input_frames
             .checked_add(physical.frames)
             .ok_or_else(|| VoiceError::new("Vocoder frame count overflows"))?;
-        // An empty initial stream has no model context to flush. Likewise an
-        // empty non-final batch cannot make any pending future context ready.
+
         if physical.frames == 0 && (!final_batch || self.input_frames == 0) {
             self.finished = final_batch;
             return self.take_ready(final_batch);
         }
         self.metadata.extend(metadata);
+
+        self.reference_shapes.extend(physical.values.chunks_exact(CHANNELS).map(|frame|frame[2]));
         self.physical.push(physical.clone())?;
         self.normalized.push(normalized.clone())?;
         let features = {
@@ -141,7 +115,7 @@ impl<'a> ParameterStream<'a> {
                     final_batch,
                 )?
             } else {
-                // The SV1 network streams without a condition tensor.
+
                 self.runtime.execute(
                     self.stage.modules.conditioned_network,
                     &normalized,
@@ -190,6 +164,7 @@ impl<'a> ParameterStream<'a> {
     }
 
     fn take_ready(&mut self, final_batch: bool) -> Result<VocoderParameters> {
+        if self.stage.independent_branches {return self.take_independent(final_batch);}
         let frames = self
             .spectra
             .iter()
@@ -198,8 +173,8 @@ impl<'a> ParameterStream<'a> {
                 self.normalized.frames(),
                 self.harmonic.frames(),
                 self.excitation.len(),
+                self.reference_shapes.len(),
                 self.metadata.len(),
-                self.voice_controls.len(),
             ])
             .min()
             .expect("vocoder has output branches");
@@ -220,8 +195,8 @@ impl<'a> ParameterStream<'a> {
                 || self.normalized.frames() != frames
                 || self.harmonic.frames() != frames
                 || self.excitation.len() != frames
-                || self.metadata.len() != frames
-                || self.voice_controls.len() != frames)
+                || self.reference_shapes.len()!=frames
+                || self.metadata.len() != frames)
         {
             return Err(VoiceError::new(
                 "Vocoder parameter branches ended with unaligned frame counts",
@@ -234,9 +209,11 @@ impl<'a> ParameterStream<'a> {
             self.spectra[2].take(frames)?,
         ];
         let harmonic_parameters = self.harmonic.take(frames)?;
-        let excitation = self.excitation.drain(..frames).collect();
+        let excitation:Vec<_> = self.excitation.drain(..frames).collect();
+        let reference_shapes:Vec<_>=self.reference_shapes.drain(..frames).collect();
+        let effects=excitation.iter().enumerate().map(|(i,&e)|self.stage.effects.as_ref()
+            .map(|timeline|timeline.frame(self.output_frames+i,e,reference_shapes[i]))).collect();
         let metadata = self.metadata.drain(..frames).collect();
-        let voice_controls = self.voice_controls.drain(..frames).collect();
         self.output_frames = output_frames;
         Ok(VocoderParameters {
             normalized,
@@ -244,7 +221,30 @@ impl<'a> ParameterStream<'a> {
             harmonic_parameters,
             excitation,
             metadata,
-            voice_controls,
+            effects,
         })
+    }
+
+    fn take_independent(&mut self,end:bool)->Result<VocoderParameters> {
+        let frames=self.excitation.len();
+        if self.normalized.frames()<frames||self.reference_shapes.len()<frames||self.metadata.len()<frames {
+            return Err(VoiceError::new("Compatible vocoder source branches are not aligned"));
+        }
+        let output_frames=self.output_frames.checked_add(frames).ok_or_else(||VoiceError::new("Vocoder source count overflows"))?;
+        if output_frames>self.input_frames||(end&&(output_frames!=self.input_frames||self.physical.frames()!=0||self.logits.frames()!=0
+            ||self.normalized.frames()!=frames||self.reference_shapes.len()!=frames||self.metadata.len()!=frames)) {
+            return Err(VoiceError::new("Compatible vocoder source did not cover its input timeline"));
+        }
+        let normalized=self.normalized.take(frames)?;
+        let excitation:Vec<_>=self.excitation.drain(..frames).collect();
+        let shapes:Vec<_>=self.reference_shapes.drain(..frames).collect();
+        let effects=excitation.iter().enumerate().map(|(i,&e)|self.stage.effects.as_ref()
+            .map(|timeline|timeline.frame(self.output_frames+i,e,shapes[i]))).collect();
+        let metadata=self.metadata.drain(..frames).collect();
+        let counts=self.spectra.each_ref().map(FrameQueue::frames);
+        let spectra=[self.spectra[0].take(counts[0])?,self.spectra[1].take(counts[1])?,self.spectra[2].take(counts[2])?];
+        let count=self.harmonic.frames();let harmonic_parameters=self.harmonic.take(count)?;
+        self.output_frames=output_frames;
+        Ok(VocoderParameters{normalized,spectra,harmonic_parameters,excitation,metadata,effects})
     }
 }

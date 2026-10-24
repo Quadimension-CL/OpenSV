@@ -1,5 +1,3 @@
-//! Prepared per-note/phone context and transposition shared by F0 requests.
-
 use super::{
     F0Stage, TimedPhone,
     features::{FeatureEncoding, FeatureInputs},
@@ -67,8 +65,7 @@ impl F0Stage<'_> {
             notes: &input.normalized_notes,
             style: Some(&input.fixed_style),
             phone_to_note: &input.phone_to_note,
-            phone_ids: &input.phone_ids,
-            language_ids: &input.language_ids,
+            phones: &input.phone_features,
         })?;
         Ok(PreparedPitchFeatures {
             encoding,

@@ -4,8 +4,10 @@ mod canvas;
 mod gestures;
 mod keyboard;
 mod lyrics;
+mod phonemes;
 mod pitch_anchor;
 mod pitch_edit;
+mod portrait;
 mod rendered;
 mod retakes;
 mod scale_guide;
@@ -43,6 +45,7 @@ pub struct LyricEdit {
     pub id: EntityId,
     pub text: String,
     pub focus: bool,
+    pub phonemes: bool,
 }
 #[derive(Clone, Copy)]
 pub enum NoteDrag {
@@ -51,6 +54,9 @@ pub enum NoteDrag {
     Right,
 }
 pub enum Gesture {
+    Rap(Box<crate::ui::lanes::RapGesture>),
+    Phoneme(Box<crate::ui::phonemes::PhonemeGesture>),
+    Curve(Box<crate::ui::lanes::CurveGesture>),
     Anchor(Box<pitch_anchor::AnchorGesture>),
     Pitch(Box<pitch_edit::PitchGesture>),
     Notes {
@@ -68,5 +74,8 @@ pub enum Gesture {
         origin: Pos2,
         initial: BTreeSet<EntityId>,
     },
-    Parameter(Box<crate::ui::lanes::ParameterGesture>),
+    Parameter {
+        lane: u64,
+        time: i64,
+    },
 }

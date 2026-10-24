@@ -50,8 +50,7 @@ impl KeyboardLayout {
             let y = canvas.top() + (top_pitch - pitch as f32) * row_height;
             let index = white_index(pitch);
             let key = if let Some(index) = index {
-                // Equal-height white keys share their octave anchor for both
-                // painting and audition, and meet the canvas without a gap.
+
                 let octave_c = pitch.div_euclid(12) * 12;
                 let bottom = canvas.top() + (top_pitch - octave_c as f32 + 1.0) * row_height
                     - index as f32 * white_height;

@@ -8,9 +8,6 @@ use crate::synthesis::{
 };
 use std::time::Instant;
 
-/// Persistent timbre/vocoder state for one contiguous forward render. It owns
-/// its execution data and borrows only the immutable timbre model network.
-/// A bounded worker owns the vocoder state and shared immutable weights.
 pub struct Cursor<'network, 'tree> {
     timbre: Stream<'network, 'tree>,
     vocoder: pipeline::Pipeline,
@@ -33,8 +30,7 @@ impl Cursor<'_, '_> {
 }
 
 impl PreparedRender {
-    /// Start near demand, or pick the next missing interval if demand is ready.
-    /// Cursor replacement is a seek, never a synthetic model final boundary.
+
     pub fn start<'network, 'tree>(
         &self,
         network: &'network Network<'tree>,
@@ -51,7 +47,7 @@ impl PreparedRender {
             .floor()
             .max(0.0) as usize;
         if self.timbre_frames.get().is_none() {
-            let frames = network.prepare_frames(&self.acoustic, voice)?;
+            let frames = network.prepare_frames(&self.acoustic)?;
             let _ = self.timbre_frames.set(frames);
         }
         let timbre = network.start(
@@ -63,7 +59,13 @@ impl PreparedRender {
         )?;
         let pcm_origin = phrase.start_seconds + timbre.first_frame() as f64 * FRAME_SECONDS;
         let setup_timbre_ms = started.elapsed().as_secs_f64() * 1000.0;
-        let vocoder = pipeline::Pipeline::new(voice.shared_model("vocoder")?)?;
+        let effects=(voice.family==crate::synthesis::voice::VoiceFamily::Sv2)
+            .then(||crate::synthesis::stages::vocoder::effects::EffectTimeline::new(phrase,pcm_origin));
+        let seeds=if voice.family==crate::synthesis::voice::VoiceFamily::Sv2 {
+            Some(crate::synthesis::stages::vocoder::noise_seeds::for_phrase(phrase,timbre.first_frame())?.into())
+        }else{None};
+        let vocoder = pipeline::Pipeline::new(voice.shared_model("vocoder")?,effects,
+            voice.family==crate::synthesis::voice::VoiceFamily::Sv2Compatible,seeds)?;
         Ok(Some(Cursor {
             timbre,
             vocoder,
@@ -76,9 +78,6 @@ impl PreparedRender {
         }))
     }
 
-    /// Publish an already ready output before producing at most one bounded
-    /// input batch. A full pipeline waits at most 10 ms so the caller can handle
-    /// edits/seeks; no join with a slow future timbre batch delays ready PCM.
     pub fn advance(
         &mut self,
         cursor: &mut Cursor<'_, '_>,
@@ -112,8 +111,7 @@ impl PreparedRender {
             self.acoustic.timings.timbre_ms += started.elapsed().as_secs_f64() * 1000.0;
         }
         checkpoint(RenderStage::Vocoder)?;
-        // A final acoustic flush can release seconds of right context at once.
-        // Keep it queued so PCM still arrives in small, interruptible batches.
+
         let pending = cursor
             .pending
             .as_ref()
@@ -128,23 +126,7 @@ impl PreparedRender {
             .transpose()?;
         let drained = end == pending.acoustics.frames;
         let natural_final = drained && cursor.timbre.is_finished();
-        let phrase = &self.acoustic.prepared.phrase;
-        let voice_controls = phrase
-            .voice_controls
-            .as_ref()
-            .map(|controls| {
-                controls.sample_vocoder_controls(
-                    phrase.start_seconds
-                        + (pending.first_frame + cursor.pending_offset) as f64 * FRAME_SECONDS,
-                    FRAME_SECONDS,
-                    acoustics.frames,
-                )
-            })
-            .transpose()?
-            .flatten();
-        cursor
-            .vocoder
-            .submit(acoustics, controls, voice_controls, natural_final)?;
+        cursor.vocoder.submit(acoustics, controls, natural_final)?;
         cursor.pending_offset = end;
         if drained {
             cursor.pending = None;
@@ -171,8 +153,7 @@ impl PreparedRender {
             .pcm
             .push(&mut cursor.segment, &fresh, output.natural_final)?;
         if cursor.segment.is_finished() {
-            // A tail seam can finish before the true model end. Stop any
-            // prefetched successor batches without flushing a fabricated end.
+
             cursor.vocoder.stop();
         }
         Ok(chunks)

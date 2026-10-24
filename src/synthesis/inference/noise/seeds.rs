@@ -1,8 +1,3 @@
-//! Frame-boundary seed events for acoustic noise streams.
-//!
-//! Equal adjacent seeds are distinct reset events. A zero-length segment also
-//! remains an event: the source advances at most one segment per output frame.
-
 use std::fmt;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -38,8 +33,6 @@ impl fmt::Display for SeedError {
 
 impl std::error::Error for SeedError {}
 
-/// State can be cloned with a stage checkpoint; restarting only the RNG is not
-/// enough to resume the same noise sequence.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SeedSource {
     seeds: Vec<u32>,
@@ -49,7 +42,7 @@ pub struct SeedSource {
 }
 
 impl SeedSource {
-    /// Boundaries contain segment starts, not ends.
+
     pub fn new(seeds: &[u32], lengths: &[usize]) -> Result<Self, SeedError> {
         validate_lengths(seeds.len(), lengths)?;
         let mut accumulated = 0;
@@ -69,9 +62,6 @@ impl SeedSource {
         })
     }
 
-    /// Hashes the concatenation
-    /// `prefix + previous + "_" + current + "_" + next + "_" + parameter`.
-    /// The parameter uses signed decimal.
     pub fn context<S: AsRef<str>>(
         strings: &[S],
         lengths: &[usize],
@@ -94,10 +84,8 @@ impl SeedSource {
         Self::new(&seeds, lengths)
     }
 
-    /// Call exactly once for every output frame, including frames without a
-    /// reset. `Some(0)` is an event, and must not be treated as `None`.
     pub fn next_event(&mut self) -> Option<u32> {
-        // The signed counter starts at -1 so the first call visits frame zero.
+
         self.frame = self.frame.wrapping_add(1);
         if self.next >= self.boundaries.len() || self.frame < self.boundaries[self.next] {
             return None;
@@ -108,7 +96,6 @@ impl SeedSource {
     }
 }
 
-/// FNV-1a with signed byte extension. A zero hash is replaced by the hash of " ".
 pub fn context_hash(bytes: &[u8]) -> u32 {
     fn hash(bytes: &[u8]) -> u32 {
         bytes.iter().fold(0x811c_9dc5_u32, |state, &byte| {
@@ -119,11 +106,6 @@ pub fn context_hash(bytes: &[u8]) -> u32 {
     if value == 0 { hash(b" ") } else { value }
 }
 
-/// Redistribute masked segment frames to neighbouring unmasked seed events.
-///
-/// Keeps a separate reset at the unmasked segment's initial start after its
-/// newly borrowed prefix. It does not merge equal seeds or change the total
-/// number of frames.
 pub fn spread(
     seeds: &[u32],
     lengths: &[usize],
@@ -155,7 +137,7 @@ pub fn spread(
         }
         let total: usize = lengths[start..end].iter().sum();
         let (left, right) = match (start > 0, end < mask.len()) {
-            // Give an odd leftover frame to the left neighbour.
+
             (true, true) if total < radius * 2 => (total.div_ceil(2), total / 2),
             (true, true) => (radius, radius),
             (true, false) => (total.min(radius), 0),

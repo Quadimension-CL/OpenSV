@@ -1,6 +1,3 @@
-//! Pitch controls on a prepared owner's model clock. Curves reserve
-//! their frames before anchors; an anchor fills only an unspecified frame.
-
 use crate::{
     model::pitch::PitchControl,
     synthesis::{
@@ -14,19 +11,18 @@ pub struct PreparedPitchControls {
     controls: Vec<PitchControl>,
     tempo: TempoMapping,
     content_offset: GlobalBlick,
-    pitch_offset: i32,
-    tuning_semitones: f64,
+    pitch_offset: f32,
 }
 
 impl PreparedPitchControls {
-    pub(super) fn new(input: &OwnerInput, tuning_semitones: f64) -> Option<Self> {
-        (!input.pitch_controls.is_empty()).then(|| Self {
+    pub(super) fn new(input: &OwnerInput) -> Result<Option<Self>> {
+        let transpose=crate::synthesis::parameters::transpose(&input.voice)?;
+        Ok((!input.pitch_controls.is_empty()).then(|| Self {
             controls: input.pitch_controls.clone(),
             tempo: input.tempo.clone(),
             content_offset: input.content_offset,
-            pitch_offset: input.pitch_offset,
-            tuning_semitones,
-        })
+            pitch_offset: input.pitch_offset as f32+transpose,
+        }))
     }
 
     pub fn sample(&self, origin: f64, step: f64, count: usize) -> Result<Vec<f32>> {
@@ -34,8 +30,7 @@ impl PreparedPitchControls {
             return Err(VoiceError::new("Invalid pitch control frame clock"));
         }
         let mut result = vec![f32::NAN; count];
-        // Apply curves first; later overlapping curves win. Points may
-        // never overwrite a curve or a prior point.
+
         for control in &self.controls {
             let PitchControl::Curve(curve) = control else {
                 continue;
@@ -51,8 +46,7 @@ impl PreparedPitchControls {
             for (frame, value) in result.iter_mut().enumerate().take(stop).skip(first) {
                 let global = self.tempo.position_at(origin + frame as f64 * step).0;
                 let local = (i128::from(global) - i128::from(self.content_offset.0)) as f64;
-                // Curve coverage is half-open. An anchor exactly at
-                // its end remains eligible to condition that model frame.
+
                 if local < begin as f64 || local >= end as f64 {
                     continue;
                 }
@@ -96,10 +90,6 @@ impl PreparedPitchControls {
         if !pitch.is_finite() || !(0.0..=127.0).contains(&pitch) {
             return Err(VoiceError::new("Pitch control is outside MIDI range"));
         }
-        let tuned = pitch + self.tuning_semitones;
-        if !tuned.is_finite() {
-            return Err(VoiceError::new("Pitch control tuning is not finite"));
-        }
-        Ok(tuned as f32)
+        Ok(pitch as f32)
     }
 }

@@ -1,14 +1,14 @@
-//! Seek only the public voice configuration, never tensor or session resources.
-
 use std::{
     collections::{BTreeMap, HashSet},
     fs::{self, File},
-    io::{Read, Seek, SeekFrom},
+    io::Read,
     path::Path,
 };
 
 use num_bigint::BigUint;
 use xxhash_rust::xxh3::{Xxh3, xxh3_128};
+use super::{VoiceArtwork,artwork::{ICON_ID,PORTRAIT_ID,PRERELEASE_ICON_ID,PRERELEASE_PORTRAIT_ID}};
+mod payload;
 
 use super::super::{
     Result, VoiceError, array, config::CONFIGURATION_ID, format::FormatContext, stream, u32_at,
@@ -19,12 +19,15 @@ const MAX_INDEX_BYTES: usize = 16 * 1024 * 1024;
 const MAX_CONFIGURATION_BYTES: usize = 64 * 1024;
 
 pub(super) struct Configuration {
+    pub metadata: super::super::config::VoiceConfiguration,
     pub model_version: u8,
     pub name: String,
     pub vendor: String,
     pub version: String,
     pub languages: Vec<String>,
     pub models: ModelPresence,
+    pub icon: Option<VoiceArtwork>,
+    pub portrait: Option<VoiceArtwork>,
 }
 
 #[derive(Default)]
@@ -79,8 +82,13 @@ pub(super) fn configuration(directory: &Path, context: &FormatContext) -> Result
     }
     let mut configuration = None;
     let mut models = ModelPresence::default();
+    let mut icon = None;
+    let mut portrait = None;
     for path in files {
-        if let Some(bytes) = read_configuration(&path, context, &mut models)? {
+        let metadata = read_metadata(&path, context, &mut models)?;
+        if metadata.icon.is_some() {icon=metadata.icon;}
+        if metadata.portrait.is_some() {portrait=metadata.portrait;}
+        if let Some(bytes) = metadata.configuration {
             if configuration.is_some() {
                 return Err(VoiceError::new("声库含有多个配置资源，需要明确模型路由"));
             }
@@ -89,6 +97,8 @@ pub(super) fn configuration(directory: &Path, context: &FormatContext) -> Result
     }
     let mut configuration = configuration.ok_or_else(|| VoiceError::new("声库缺少名称配置资源"))?;
     configuration.models = models;
+    configuration.icon = icon;
+    configuration.portrait = portrait;
     Ok(configuration)
 }
 
@@ -98,7 +108,7 @@ fn parse_configuration(bytes: &[u8]) -> Result<Configuration> {
     for line in text.lines() {
         let (key, value) = line
             .split_once(' ')
-            .filter(|(key, value)| !key.is_empty() && !value.is_empty())
+            .filter(|(key, value)| !key.is_empty() && (!value.is_empty() || *key == "style_config"))
             .ok_or_else(|| VoiceError::new("不支持的声库配置行格式"))?;
         if fields.insert(key, value).is_some() {
             return Err(VoiceError::new("声库配置包含重复字段"));
@@ -111,6 +121,7 @@ fn parse_configuration(bytes: &[u8]) -> Result<Configuration> {
             .ok_or_else(|| VoiceError::new(format!("声库配置缺少 {key}")))
     };
     Ok(Configuration {
+        metadata: super::super::config::VoiceConfiguration::parse(bytes)?,
         model_version: match fields.get("model-version").copied() {
             None | Some("1") => 1,
             Some("2") => 2,
@@ -125,14 +136,23 @@ fn parse_configuration(bytes: &[u8]) -> Result<Configuration> {
             .map(|value| (*value).to_owned())
             .collect(),
         models: ModelPresence::default(),
+        icon: None,
+        portrait: None,
     })
 }
 
-fn read_configuration(
+#[derive(Default)]
+struct FileMetadata {
+    configuration:Option<Vec<u8>>,
+    icon:Option<VoiceArtwork>,
+    portrait:Option<VoiceArtwork>,
+}
+
+fn read_metadata(
     path: &Path,
     context: &FormatContext,
     models: &mut ModelPresence,
-) -> Result<Option<Vec<u8>>> {
+) -> Result<FileMetadata> {
     let mut file = File::open(path)?;
     let file_length = file.metadata()?.len();
     let mut header = [0u8; HEADER_BYTES];
@@ -169,7 +189,7 @@ fn read_configuration(
     digest.update(&(checked_length as u32).to_le_bytes());
     digest.update(&nonce);
     digest.update(&material);
-    // The format deliberately ends its index digest 0x18 bytes before table end.
+
     let header_tail = &header[0x18..];
     digest.update(&header_tail[..checked_length.min(header_tail.len())]);
     if checked_length > header_tail.len() {
@@ -182,7 +202,7 @@ fn read_configuration(
     }
     let table = stream::decode(&table, &context.constants, &material, &nonce, 4)?;
     let mut identities = HashSet::with_capacity(count);
-    let mut selected = None;
+    let mut metadata = FileMetadata::default();
     for record in table.as_chunks::<56>().0 {
         let id: [u8; 16] = array(record, 16)?;
         let flag = u32_at(record, 32)?;
@@ -192,38 +212,14 @@ fn read_configuration(
             return Err(VoiceError::new("声库资源索引内容无效"));
         }
         if id == CONFIGURATION_ID.0 {
-            selected = Some(record);
+            metadata.configuration=Some(payload::read(&mut file,record,&material,context,MAX_CONFIGURATION_BYTES)?);
+        } else if [ICON_ID,PORTRAIT_ID,PRERELEASE_ICON_ID,PRERELEASE_PORTRAIT_ID].contains(&id) {
+            let image=VoiceArtwork::embedded(payload::read(&mut file,record,&material,context,8*1024*1024)?)?;
+            if id==ICON_ID || id==PRERELEASE_ICON_ID {metadata.icon=Some(image);} else {metadata.portrait=Some(image);}
         }
         models.record(id);
     }
-    let Some(record) = selected else {
-        return Ok(None);
-    };
-    let length = u32_at(record, 52)? as usize;
-    if length > MAX_CONFIGURATION_BYTES {
-        return Err(VoiceError::new("声库名称配置超过扫描大小限制"));
-    }
-    file.seek(SeekFrom::Start(u32_at(record, 48)? as u64))?;
-    let mut source = vec![0u8; length];
-    file.read_exact(&mut source)?;
-    let resource_nonce: [u8; 12] = array(record, 36)?;
-    let flag = u32_at(record, 32)?;
-    let mut digest = Xxh3::new();
-    digest.update(&((length + 20) as u32).to_le_bytes());
-    digest.update(&resource_nonce);
-    digest.update(&material);
-    digest.update(&CONFIGURATION_ID.0);
-    digest.update(&flag.to_le_bytes());
-    digest.update(&source);
-    digest.update(&material);
-    digest.update(&resource_nonce);
-    if digest.digest128().to_le_bytes() != record[..16] {
-        return Err(VoiceError::new("声库名称配置校验失败"));
-    }
-    if flag == 1 {
-        source = stream::decode(&source, &context.constants, &material, &resource_nonce, 0)?;
-    }
-    Ok(Some(source))
+    Ok(metadata)
 }
 
 fn verify_signature(header: &[u8], context: &FormatContext) -> Result<()> {

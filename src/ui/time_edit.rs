@@ -39,7 +39,7 @@ impl TimeEdit {
                     .value
                     .trim()
                     .parse::<f64>()
-                    .map_err(|_| "请输入有效的 BPM 数值")?;
+                    .map_err(|_| crate::i18n::t("请输入有效的 BPM 数值"))?;
                 editor.set_tempo(position, bpm)
             }
             Target::Meter(index) => {
@@ -47,7 +47,7 @@ impl TimeEdit {
                     .value
                     .trim()
                     .parse::<u32>()
-                    .map_err(|_| "拍号分子须为 1–64 的整数")?;
+                    .map_err(|_| crate::i18n::t("拍号分子须为 1–64 的整数"))?;
                 editor.set_meter(index, numerator, self.denominator)
             }
         }
@@ -80,8 +80,8 @@ pub fn show(app: &mut App, ctx: &Context) {
             ui.set_width(WIDTH);
             ui.spacing_mut().item_spacing.y = 8.0;
             let (title, label) = match edit.target {
-                Target::Meter(_) => ("编辑拍号", "分子"),
-                Target::Tempo(_) => ("编辑曲速标记", "每分钟节拍数 (BPM)"),
+                Target::Meter(_) => (crate::i18n::t("编辑拍号"), crate::i18n::t("分子")),
+                Target::Tempo(_) => (crate::i18n::t("编辑曲速标记"), crate::i18n::t("每分钟节拍数 (BPM)")),
             };
             ui.label(
                 RichText::new(title)
@@ -109,7 +109,7 @@ pub fn show(app: &mut App, ctx: &Context) {
             }
             if matches!(edit.target, Target::Meter(_)) {
                 ui.add_space(4.0);
-                ui.label(RichText::new("分母").color(MUTED));
+                ui.label(RichText::new(crate::i18n::t("分母")).color(MUTED));
                 ComboBox::from_id_salt("time-event-denominator")
                     .width(WIDTH)
                     .selected_text(edit.denominator.to_string())
@@ -120,19 +120,19 @@ pub fn show(app: &mut App, ctx: &Context) {
                     });
             }
             if let Some(error) = &edit.error {
-                ui.label(RichText::new(error).color(Color32::from_rgb(230, 139, 122)));
+                ui.label(RichText::new(crate::i18n::message(error)).color(Color32::from_rgb(230, 139, 122)));
             }
             ui.add_space(12.0);
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 8.0;
                 let size = vec2((WIDTH - 8.0) / 2.0, 32.0);
                 cancel = ui
-                    .add_sized(size, Button::new("取消").fill(BUTTON_HOVER))
+                    .add_sized(size, Button::new(crate::i18n::t("取消")).fill(BUTTON_HOVER))
                     .clicked();
                 submit |= ui
                     .add_sized(
                         size,
-                        Button::new(RichText::new("确定").color(CANVAS)).fill(GREEN),
+                        Button::new(RichText::new(crate::i18n::t("确定")).color(CANVAS)).fill(GREEN),
                     )
                     .clicked();
             });

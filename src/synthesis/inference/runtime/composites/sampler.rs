@@ -1,5 +1,3 @@
-//! Persistent two-rate sampler queues.
-
 use super::queue::FrameQueue;
 use crate::synthesis::{
     inference::{Sequence, runtime::ModelRuntime},
@@ -84,8 +82,6 @@ impl SamplerState {
             return Sequence::zeros(0, CHANNELS);
         }
 
-        // Each downsampling branch has its own lookahead and may release a
-        // different number of frames. The conditioned child aligns its queues.
         let down_main = runtime.execute(children[0], input, flush)?;
         count_output(&mut self.totals.down_main, &down_main)?;
         let down_condition = runtime.execute(children[1], condition, flush)?;
@@ -111,8 +107,7 @@ impl SamplerState {
                     "Sampler branches have invalid final frame counts",
                 ));
             }
-            // Retain the last released upsampled row,
-            // including when this final call itself released no new rows.
+
             let remainder = self.totals.main % RATE;
             if remainder != 0 {
                 let last = self.last_upsampled.as_ref().ok_or_else(|| {

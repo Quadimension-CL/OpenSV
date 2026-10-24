@@ -74,8 +74,7 @@ impl ImportPlan {
             return Err("所选 MIDI 音轨没有可导入的音符".into());
         }
         summary.tracks = planned.len();
-        // All tracks and overlaps must fit before allocating editor notes and
-        // their parameter maps. A rejected import never mutates the project.
+
         Ok(Self {
             lanes: planned.into_iter().map(PlannedLane::materialize).collect(),
             summary,
@@ -83,8 +82,6 @@ impl ImportPlan {
     }
 }
 
-/// Greedy interval partitioning yields the minimum number of monophonic
-/// lanes. Equal-time notes and lane reuse have a deterministic ordering.
 fn partition(notes: &[MidiNote], budget: usize) -> Result<Vec<PlannedLane<'_>>, String> {
     if budget == 0 {
         return Err(TRACK_LIMIT_ERROR.into());

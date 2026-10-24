@@ -26,11 +26,6 @@ pub fn note_rect(note: &Note, offset: i64, pitch_offset: i32, rect: Rect, app: &
 }
 pub fn show(app: &mut App, ui: &mut Ui) {
     let all = ui.max_rect();
-    if ui.rect_contains_pointer(all) && ui.input(|input| input.pointer.any_pressed()) {
-        crate::ui::lanes::parameter_deactivate(app);
-        crate::ui::phonemes::phoneme_deactivate(app);
-    }
-    let phoneme_dragging = crate::ui::phonemes::phoneme_dragging(app);
     ui.painter().rect_filled(all, 0, PANEL);
     let ruler = Rect::from_min_max(
         pos2(all.left() + GUTTER, all.top()),
@@ -47,19 +42,21 @@ pub fn show(app: &mut App, ui: &mut Ui) {
         ui,
         crate::ui::view_pan::Target::Piano,
         Rect::from_min_max(all.min, canvas.max - vec2(6.0, 0.0)),
-        app.gesture.is_none() && app.group_gesture.is_none() && !phoneme_dragging,
+        app.gesture.is_none() && app.group_gesture.is_none(),
     );
     app.view.piano.start =
         (app.view.piano.start - pan.x as f64 / app.view.piano.beat_width as f64).max(0.0);
     let response = ui.interact(canvas, Id::new("piano-canvas"), Sense::click_and_drag());
-    let vertical = if phoneme_dragging
-        || matches!(app.gesture, Some(Gesture::Pitch(_) | Gesture::Anchor(_)))
-    {
+    if response.clicked() || response.drag_started() {
+        crate::ui::lanes::parameter_deactivate(app);
+        crate::ui::phonemes::phoneme_deactivate(app);
+    }
+    let vertical = if matches!(app.gesture, Some(Gesture::Pitch(_) | Gesture::Anchor(_))) {
         0.0
     } else if app.view_pan.is_active() {
         pan.y
     } else {
-        scroll(ui, &response, canvas, &mut app.view.piano)
+        scroll(ui, &response, canvas, &mut app.view.piano,10.0..=500.0)
     };
     app.view.top_pitch = (app.view.top_pitch + vertical / app.view.row_height).clamp(12.0, 127.0);
     follow_playhead(
@@ -71,10 +68,10 @@ pub fn show(app: &mut App, ui: &mut Ui) {
             && app.gesture.is_none()
             && app.group_gesture.is_none()
             && app.audio_drag.is_none()
-            && !phoneme_dragging
             && !app.view_pan.is_active(),
     );
     super::background::draw(app, ui, canvas);
+    super::portrait::paint(app, ui, canvas);
     super::keyboard::show(app, ui, all, canvas);
     super::scale_guide::draw_tonic_lines(app, ui, canvas);
     grid(
@@ -84,7 +81,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
         &app.editor.project.time,
         app.view.step(),
     );
-    loop_region::show(
+    let hover_position = loop_region::show(
         ui,
         Id::new("piano-ruler"),
         ruler,
@@ -96,8 +93,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
             enabled: !app.view_pan.is_active()
                 && app.gesture.is_none()
                 && app.group_gesture.is_none()
-                && app.audio_drag.is_none()
-                && !phoneme_dragging,
+                && app.audio_drag.is_none(),
         },
     );
     draw_ruler(
@@ -111,7 +107,6 @@ pub fn show(app: &mut App, ui: &mut Ui) {
     if !app.editor.current_track().is_instrumental()
         && app.group_gesture.is_none()
         && !app.view_pan.is_active()
-        && !phoneme_dragging
     {
         if app.piano_tool == super::Tool::PitchDraw {
             super::pitch_edit::interaction(app, ui, &response, canvas);
@@ -125,7 +120,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
     super::background_notes::draw(app, ui, canvas);
     super::rendered::waveforms(app, ui, canvas, &groups);
     scene::draw_notes(app, ui, canvas, &groups);
-    super::rendered::phonemes(app, ui, canvas, &groups);
+    super::phonemes::draw(app,ui,canvas,&groups);
     super::rendered::pitch(app, ui, canvas, &groups);
     super::pitch_edit::draw(app, ui, canvas, &groups);
     super::pitch_anchor::draw(app, ui, canvas);
@@ -138,6 +133,9 @@ pub fn show(app: &mut App, ui: &mut Ui) {
         ui.painter().rect_filled(r, 0, GREEN.gamma_multiply(0.12));
         ui.painter()
             .rect_stroke(r, 0, Stroke::new(1.0, GREEN), StrokeKind::Inside);
+    }
+    if let Some(position) = hover_position {
+        hover_playhead(ui,Rect::from_min_max(ruler.min,canvas.max),ruler.bottom(),&app.view.piano,position);
     }
     playhead(
         ui,
@@ -192,19 +190,24 @@ fn interaction(
         && let Some(p) = response.interact_pointer_pos()
     {
         app.commit_lyric();
-        if let Some((reference, note)) = hit {
+        if let Some((reference,note))=super::phonemes::hit(app,groups,canvas,p) {
+            let text=super::phonemes::text(app,&reference,&note);
+            app.editor.select_reference(app.editor.track,reference.id);
+            app.editor.selected=BTreeSet::from([note.id]);
+            app.lyric=Some(super::LyricEdit {id:note.id,text,focus:true,phonemes:true});
+        } else if let Some((reference, note)) = hit {
             app.editor.select_reference(app.editor.track, reference.id);
             app.editor.selected = BTreeSet::from([note.id]);
             app.edit_lyric();
         } else {
-            app.editor.begin("创建音符");
+            app.editor.begin(crate::i18n::t("创建音符"));
             let at = ticks(app.view.snap_beat(beat_at(canvas, &app.view.piano, p.x))).max(0);
             if app
                 .editor
                 .add_note(at, QUARTER, pitch_at(app, canvas, p.y))
                 .is_none()
             {
-                app.status = "请在音符组范围内创建音符，或在编排中插入新的音符组".into();
+                app.status = crate::i18n::t("请在音符组范围内创建音符，或在编排中插入新的音符组").into();
             }
             app.editor.finish();
         }
@@ -244,13 +247,13 @@ fn interaction(
     response.context_menu(|ui| {
         let selected = !app.editor.selected.is_empty();
         if ui
-            .add_enabled(selected, Button::new("填入歌词…").shortcut_text("Ctrl+L"))
+            .add_enabled(selected, Button::new(crate::i18n::t("填入歌词…")).shortcut_text("Ctrl+L"))
             .clicked()
         {
             crate::ui::fill_lyrics::open(app);
             ui.close();
         }
-        if ui.add_enabled(selected, Button::new("静音音符")).clicked() {
+        if ui.add_enabled(selected, Button::new(crate::i18n::t("静音音符"))).clicked() {
             app.editor.mute_selected();
             ui.close();
         }
@@ -258,14 +261,14 @@ fn interaction(
         crate::ui::retakes::commands(app, ui);
         ui.separator();
         if ui
-            .add_enabled(selected, Button::new("复制").shortcut_text("Ctrl+C"))
+            .add_enabled(selected, Button::new(crate::i18n::t("复制")).shortcut_text("Ctrl+C"))
             .clicked()
         {
             crate::ui::chrome::edit::copy(app, ui.ctx());
             ui.close();
         }
         if ui
-            .add_enabled(selected, Button::new("剪切").shortcut_text("Ctrl+X"))
+            .add_enabled(selected, Button::new(crate::i18n::t("剪切")).shortcut_text("Ctrl+X"))
             .clicked()
         {
             crate::ui::chrome::edit::cut(app, ui.ctx());
@@ -274,16 +277,16 @@ fn interaction(
         if ui
             .add_enabled(
                 crate::ui::chrome::edit::can_paste(app),
-                Button::new("粘贴").shortcut_text("Ctrl+V"),
+                Button::new(crate::i18n::t("粘贴")).shortcut_text("Ctrl+V"),
             )
-            .on_hover_text("在播放游标处粘贴音符")
+            .on_hover_text(crate::i18n::t("在播放游标处粘贴音符"))
             .clicked()
         {
             crate::ui::chrome::edit::paste(app, ui.ctx());
             ui.close();
         }
         if ui
-            .add_enabled(selected, Button::new("删除所选音符"))
+            .add_enabled(selected, Button::new(crate::i18n::t("删除所选音符")))
             .clicked()
         {
             app.editor.delete_selected();

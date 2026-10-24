@@ -8,8 +8,6 @@ use crate::synthesis::{
     voice::{Result, VoiceError},
 };
 
-/// New rows outside the calculation interval map to immutable baseline rows.
-/// Work rows remain None, so changed phone/parts counts need no index identity.
 pub(super) struct Mapping {
     pub note_rows: Vec<Option<usize>>,
     pub record_frames: Vec<usize>,
@@ -117,9 +115,7 @@ fn same_record(now: &DurationRecord, old: &DurationRecord) -> bool {
         && now.phones.iter().zip(&old.phones).all(|(a, b)| {
             a.language == b.language
                 && a.token == b.token
-                && a.source == b.source
-                && a.attributes == b.attributes
-                && a.source_note_onset_seconds == b.source_note_onset_seconds
+                && a.onset_offset_seconds == b.onset_offset_seconds
         })
 }
 

@@ -17,9 +17,12 @@ pub(super) fn prepare(
     contract: Contract,
     log_hz: Vec<f32>,
 ) -> Result<Records> {
-    if input.notes.len() != input.note_modulation.len() || input.phone_impulses.is_some() {
+    if input.notes.len() != input.note_modulation.len()
+        || input.phone_impulses.is_some()
+        || input.frame_controls.is_some()
+    {
         return Err(VoiceError::new(
-            "DDS acoustics requires aligned note modulation and no phone impulses",
+            "Compatible acoustics requires unmodified frame conditions",
         ));
     }
     let mut note_frames = vec![0_usize; input.notes.len()];
@@ -54,8 +57,7 @@ pub(super) fn prepare(
         }
         let (seed, controls) = match contract {
             Contract::Compatible => {
-                // Forward the note seed unchanged and use fixed frame controls
-                // for the SV2 compatibility input contract.
+
                 (note.timbre_seed.unwrap_or(0) as i32, [1.0, 1.0, 0.0])
             }
             Contract::Native => {
@@ -65,7 +67,7 @@ pub(super) fn prepare(
                 } else {
                     [0.995, 1.0, 0.2]
                 };
-                // Preserve the full seed bit pattern for signed noise labels.
+
                 (seed as i32, controls)
             }
         };

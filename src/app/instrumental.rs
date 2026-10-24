@@ -11,10 +11,9 @@ pub struct AudioImport {
 
 impl App {
     pub fn import_audio(&mut self, target: Option<EntityId>, ctx: &Context) {
-        crate::ui::phonemes::phoneme_deactivate(self);
         let Some(path) = rfd::FileDialog::new()
-            .set_title("导入伴奏")
-            .add_filter("音频文件", &["wav", "mp3", "flac", "ogg", "aif", "aiff"])
+            .set_title(crate::i18n::t("导入伴奏"))
+            .add_filter(crate::i18n::t("音频文件"), &["wav", "mp3", "flac", "ogg", "aif", "aiff"])
             .pick_file()
         else {
             return;
@@ -50,7 +49,7 @@ impl App {
             .map_or(0.0, |c| c.onset_seconds);
         self.synthesis.instrumentals.begin_import(path.clone(), ctx);
         self.audio_import = Some(AudioImport { track, path, onset });
-        self.status = "正在导入伴奏…".into();
+        self.status = crate::i18n::t("正在导入伴奏…").into();
     }
 
     pub(super) fn poll_audio_import(&mut self) {
@@ -73,13 +72,13 @@ impl App {
             self.error = Some(error.to_owned());
             self.audio_import = None;
             self.synthesis.instrumentals.finish_import();
-            self.status = "伴奏导入失败".into();
+            self.status = crate::i18n::t("伴奏导入失败").into();
             return;
         }
         let Some(asset) = self.synthesis.instrumentals.asset(&import.path) else {
             return;
         };
-        // Never combine completion with an unrelated in-progress gesture.
+
         if self.editor.is_editing() {
             return;
         }
@@ -91,9 +90,11 @@ impl App {
                 path: import.path,
                 onset_seconds: import.onset,
                 duration_seconds: duration,
+                trim_begin_seconds: None,
+                trim_end_seconds: None,
             }),
         );
         self.synthesis.instrumentals.finish_import();
-        self.status = "伴奏已导入，可拖动片段调整位置".into();
+        self.status = crate::i18n::t("伴奏已导入，可拖动片段调整位置").into();
     }
 }

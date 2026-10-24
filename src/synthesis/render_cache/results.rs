@@ -8,9 +8,7 @@ use std::{
 };
 
 impl RenderCache {
-    /// Stale results never enter the cache or publication, even if a worker
-    /// finished without observing cancellation. Failure requires explicit retry
-    /// or a changed input; normal UI updates cannot create a busy retry loop.
+
     pub fn finish(
         &mut self,
         job: &RenderJob,
@@ -64,8 +62,6 @@ impl RenderCache {
         }
     }
 
-    /// Ready unmuted owners with current placement/control metadata. Track
-    /// mute/solo/pan/gain are still handled by the playback mixer.
     pub fn snapshot(&self) -> Vec<PublishedOwner> {
         self.owners
             .iter()
@@ -82,9 +78,6 @@ impl RenderCache {
             .collect()
     }
 
-    /// Publish only completed data together with its original input geometry,
-    /// independent of instance mute and mixer controls. Runtime retains the
-    /// previous completed snapshot for owners omitted while they render.
     pub fn visual_snapshot(&self) -> BTreeMap<OwnerId, VisualSnapshot> {
         self.owners
             .iter()

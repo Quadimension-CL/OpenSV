@@ -1,5 +1,3 @@
-//! Preview clicks use the same sample position as vocals and accompaniment.
-//! Only the current/next beat is located; no project-length click PCM is built.
 use super::live::LIVE_SAMPLE_RATE;
 use crate::model::{QUARTER, TimeAxis};
 use std::sync::{
@@ -24,8 +22,7 @@ impl Metronome {
     }
 
     fn beat_at(&self, position: f64) -> Beat {
-        // Quantize beat onsets to the native sample grid. Looking half a sample
-        // ahead prevents a rounded-down onset from being missed until next tick.
+
         let tick = self
             .time
             .position_at((position + 0.5) / f64::from(LIVE_SAMPLE_RATE));

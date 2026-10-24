@@ -1,7 +1,3 @@
-//! Per-channel min/max transforms used at acoustic stage boundaries.
-//!
-//! The inverse deliberately excludes the forward denominator epsilon.
-
 use std::{fmt, sync::Arc};
 
 pub const RANGE_NORMALIZER_TYPE_ID: [u8; 16] = [
@@ -38,7 +34,7 @@ impl fmt::Display for RangeError {
 impl std::error::Error for RangeError {}
 
 impl RangeNormalizer {
-    /// Prepare three source vector children: minimum, maximum and two output bounds.
+
     pub fn new(
         minimum: Arc<[f32]>,
         maximum: Arc<[f32]>,
@@ -68,7 +64,6 @@ impl RangeNormalizer {
         self.minimum.len()
     }
 
-    /// `clip` clamps the normalized ratio to [-1, 1], before the output mapping.
     pub fn normalize_scalar(
         &self,
         channel: usize,
@@ -84,8 +79,6 @@ impl RangeNormalizer {
         Ok(self.denormalize_value(channel, value))
     }
 
-    /// Process contiguous complete frames; use scalar methods for an individual
-    /// channel slice such as the duration frontend's log-duration feature.
     pub fn normalize(
         &self,
         input: &[f32],
@@ -111,7 +104,7 @@ impl RangeNormalizer {
         let minimum = self.minimum[channel];
         let mut ratio = (value - minimum) / ((self.maximum[channel] - minimum) + 1.0e-5);
         if clip {
-            // Preserve comparison order so NaN maps to the upper clamp bound.
+
             ratio = if ratio < -1.0 {
                 -1.0
             } else if ratio <= 1.0 {

@@ -27,8 +27,7 @@ pub(super) fn build<T: SizedSample + FromSample<f32>>(
                 return;
             }
             piano.begin_buffer();
-            // The control thread installs/reclaims complete source revisions.
-            // This guard avoids Arc disposal and blocking on source replacement.
+
             let guard = source.try_read().ok();
             let session = guard
                 .as_ref()
@@ -74,8 +73,7 @@ pub(super) fn build<T: SizedSample + FromSample<f32>>(
                             cursor = range.wrap(cursor);
                         }
                     } else {
-                        // A PCM hole freezes only project playback. Audition
-                        // continues independently while its next block loads.
+
                         buffering = true;
                         project_active = false;
                     }
@@ -90,7 +88,7 @@ pub(super) fn build<T: SizedSample + FromSample<f32>>(
                     *sample = T::from_sample(value.clamp(-1.0, 1.0));
                 }
             }
-            // A simultaneous seek wins over this old callback's progress.
+
             if let Some(controls) = controls
                 && controls
                     .position

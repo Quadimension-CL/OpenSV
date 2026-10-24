@@ -8,14 +8,14 @@ use crate::synthesis::{
     voice::{PreparedModule, PreparedTree, Result, TensorStorage, VoiceError},
 };
 
-use super::{EMPTY_SLOT_TYPE_ID, FEATURE_TYPE_ID, FeatureConfiguration, FeatureNetwork};
+use super::{EMPTY_SLOT_TYPE_ID, FEATURE_TYPE_ID, PHONETIC_FEATURE_TYPE_ID, FeatureConfiguration, FeatureNetwork,phones::PhoneEncoder};
 
 impl<'a> FeatureNetwork<'a> {
     pub fn prepare(tree: &'a PreparedTree, index: usize) -> Result<Self> {
         #[cfg(feature = "synth-profile")]
         let _profile = crate::synthesis::profiling::span("features.prepare");
         let node = tree.node(index)?;
-        if node.type_id != FEATURE_TYPE_ID {
+        if node.type_id != FEATURE_TYPE_ID && node.type_id!=PHONETIC_FEATURE_TYPE_ID {
             return Err(VoiceError::new(
                 "Expected the shared note/phone feature module",
             ));
@@ -39,6 +39,9 @@ impl<'a> FeatureNetwork<'a> {
             .collect();
         if words[2..].contains(&0) {
             return Err(VoiceError::new("Feature dimensions must be nonzero"));
+        }
+        if node.type_id==PHONETIC_FEATURE_TYPE_ID {
+            return super::phonetic_prepare::prepare(tree,children,&words);
         }
         let configuration = FeatureConfiguration {
             style_channels: words[0],
@@ -91,7 +94,7 @@ impl<'a> FeatureNetwork<'a> {
             children,
             configuration,
             note_input_channels,
-            phone_embedding,
+            phone_encoder:PhoneEncoder::Categorical(phone_embedding),
             language_embedding,
         })
     }
@@ -110,7 +113,7 @@ pub(super) fn is_empty_slot(tree: &PreparedTree, index: usize) -> Result<bool> {
     Ok(true)
 }
 
-fn affine_shape(tree: &PreparedTree, index: usize) -> Result<(usize, usize)> {
+pub(super) fn affine_shape(tree: &PreparedTree, index: usize) -> Result<(usize, usize)> {
     if let PreparedModule::Affine(affine) = &tree.node(index)?.module {
         Ok((affine.input_features, affine.output_features))
     } else {
@@ -120,7 +123,7 @@ fn affine_shape(tree: &PreparedTree, index: usize) -> Result<(usize, usize)> {
     }
 }
 
-fn prepare_embedding(tree: &PreparedTree, index: usize) -> Result<Embedding> {
+pub(super) fn prepare_embedding(tree: &PreparedTree, index: usize) -> Result<Embedding> {
     let node = tree.node(index)?;
     if node.type_id != EMBEDDING_TYPE_ID || node.children.len() != 1 {
         return Err(VoiceError::new(
@@ -132,6 +135,7 @@ fn prepare_embedding(tree: &PreparedTree, index: usize) -> Result<Embedding> {
             rows,
             columns,
             values,
+            ..
         } => DenseMatrix::from_float(*rows, *columns, Arc::clone(values)),
         TensorStorage::QuantizedMatrix {
             rows,
@@ -140,6 +144,7 @@ fn prepare_embedding(tree: &PreparedTree, index: usize) -> Result<Embedding> {
             input_exponent,
             scales,
             values,
+            ..
         } => DenseMatrix::from_quantized(*rows, *columns, *bits, *input_exponent, scales, values),
         _ => return Err(VoiceError::new("Feature vocabulary weight is not a matrix")),
     }

@@ -1,6 +1,5 @@
 use serde_json::Value;
 
-/// SVP language IDs and the corresponding voice configuration phone sets.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Language {
@@ -10,16 +9,22 @@ pub enum Language {
     Spanish,
     Cantonese,
     Korean,
+    French,
+    German,
+    Portuguese,
 }
 
 impl Language {
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 9] = [
         Self::English,
         Self::Mandarin,
         Self::Japanese,
         Self::Spanish,
         Self::Cantonese,
         Self::Korean,
+        Self::French,
+        Self::German,
+        Self::Portuguese,
     ];
 
     pub fn id(self) -> &'static str {
@@ -30,6 +35,9 @@ impl Language {
             Self::Spanish => "spanish",
             Self::Cantonese => "cantonese",
             Self::Korean => "korean",
+            Self::French => "french",
+            Self::German => "german",
+            Self::Portuguese => "portuguese",
         }
     }
 
@@ -41,15 +49,18 @@ impl Language {
             Self::Spanish => "spanish-xsampa",
             Self::Cantonese => "cantonese-xsampa",
             Self::Korean => "korean-xsampa",
+            Self::French => "french-xsampa",
+            Self::German => "german-xsampa",
+            Self::Portuguese => "portuguese-xsampa",
         }
     }
 
-    /// SVP stores the phonetic alphabet separately from the language ID.
     pub fn phoneme_alphabet(self) -> &'static str {
         match self {
             Self::English => "arpabet",
             Self::Japanese => "romaji",
-            Self::Mandarin | Self::Spanish | Self::Cantonese | Self::Korean => "xsampa",
+            Self::Mandarin | Self::Spanish | Self::Cantonese | Self::Korean
+                | Self::French | Self::German | Self::Portuguese => "xsampa",
         }
     }
 
@@ -61,6 +72,9 @@ impl Language {
             Self::Spanish => "西班牙语",
             Self::Cantonese => "汉语广东话",
             Self::Korean => "韩语",
+            Self::French => "法语",
+            Self::German => "德语",
+            Self::Portuguese => "葡萄牙语",
         }
     }
 
@@ -71,8 +85,6 @@ impl Language {
     }
 }
 
-/// Apply one database scope over its inherited language. Both fields are SVP
-/// fields: `language` describes the bank, `languageOverride` selects cross-language singing.
 pub fn database_language(database: &Value, inherited: Language) -> Result<Language, String> {
     if !database.is_object() {
         return Err("歌声的 database 字段必须是对象".into());

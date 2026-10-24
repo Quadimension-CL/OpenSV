@@ -1,16 +1,9 @@
-//! Shared complex arithmetic for excitation chirps and spectral filtering.
-
 pub(super) type Complex = [f32; 2];
 
 pub(super) fn multiply([ar, ai]: Complex, [br, bi]: Complex) -> Complex {
     [ar * br - ai * bi, ar * bi + ai * br]
 }
 
-/// Unnormalized radix-2 FFT on a power-of-two complex buffer.
-///
-/// `roots[j] = exp(-i * TAU * j / count)` for `0 <= j < count/2`.
-/// The forward transform uses a negative exponent; inverse uses a positive
-/// exponent. Callers apply their own `1/count` normalization after inversion.
 pub(super) fn fft(values: &mut [Complex], roots: &[Complex], inverse: bool) {
     let count = values.len();
     debug_assert!(count.is_power_of_two());

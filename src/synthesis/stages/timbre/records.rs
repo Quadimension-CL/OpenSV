@@ -1,18 +1,12 @@
-//! Full-rate SV2 acoustic records.
-//!
-//! Neural phone features and style vectors remain the caller's responsibility.
-//! This module materializes the timing, deterministic noise and scalar fields
-//! using the same absolute frame timeline as those features.
-
 mod noise;
 
 use crate::synthesis::voice::{Result, VoiceError};
 
 #[derive(Clone, Copy, Debug)]
 pub struct PhoneImpulse {
-    /// Duration boundary head output.
+
     pub value: f64,
-    /// Duration transition head output, in [0, 1].
+
     pub position: f64,
 }
 
@@ -24,20 +18,20 @@ pub struct AcousticPhone<'a> {
 
 #[derive(Clone, Copy, Debug)]
 pub struct AcousticNote {
-    /// Final frame count of the source frontend record, including linked notes.
+
     pub frames: usize,
-    /// Optional timbre seed. Some(0) is an explicitly set seed.
+
     pub timbre_seed: Option<u32>,
-    /// Note kind, used only when seed spreading is enabled.
+
     pub kind: u32,
-    /// Acoustic intensity factor. Unset/NaN defaults to 1.
+
     pub factor: Option<f32>,
 }
 
 #[derive(Clone, Copy, Debug)]
 pub struct FrameControl {
     pub pitch_ratio: f32,
-    /// Two per-frame scalar conditions, with NaN treated as zero.
+
     pub scalars: [f32; 2],
 }
 
@@ -53,7 +47,7 @@ impl Default for FrameControl {
 pub struct RecordsInput<'a> {
     pub phones: &'a [AcousticPhone<'a>],
     pub notes: &'a [AcousticNote],
-    /// Full-rate absolute timeline; not cropped to requested_frame.
+
     pub midi_pitch: &'a [f32],
     pub controls: Option<&'a [FrameControl]>,
     pub requested_frame: usize,
@@ -73,6 +67,7 @@ pub struct RecordsConfig {
     pub minimum_midi: f32,
     pub maximum_midi: f32,
     pub spread_note_seeds: bool,
+    pub retained_noise_only: bool,
 }
 
 impl Default for RecordsConfig {
@@ -90,6 +85,7 @@ impl Default for RecordsConfig {
             minimum_midi: 0.0,
             maximum_midi: 127.0,
             spread_note_seeds: false,
+            retained_noise_only: false,
         }
     }
 }
@@ -101,7 +97,7 @@ pub struct AcousticFrame {
     pub raw_hz: f32,
     pub midi: f32,
     pub hz: f32,
-    /// Inputs of the voice's MIDI and log-Hz normalizers, respectively.
+
     pub clamped_midi: f32,
     pub clamped_log_hz: f32,
     pub scalars: [f32; 2],
@@ -114,7 +110,7 @@ pub struct AcousticRecords {
     pub total_frames: usize,
     pub stride: usize,
     pub frames: Vec<AcousticFrame>,
-    /// Absolute positions of retained Gaussian vectors, always stride ends.
+
     pub low_rate_positions: Vec<usize>,
     pub ppg_noise: Vec<f32>,
     pub timbre_noise: Vec<f32>,
@@ -140,8 +136,7 @@ impl RecordsConfig {
             ));
         }
         let first_frame = input.requested_frame.saturating_sub(32) / self.stride * self.stride;
-        // Retain the final partial stride, but require at least one complete
-        // low-rate frame. Do not pad the source timeline.
+
         if total - first_frame < self.stride {
             return Err(VoiceError::new(
                 "Acoustic preparation requires a complete stride",

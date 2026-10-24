@@ -1,10 +1,3 @@
-//! Input prefixes required for output prefixes of model programs.
-//!
-//! This is a dependency calculation, not a guessed acoustic context radius.
-//! A complete execution may flush a longer input prefix, then retain only the
-//! requested output prefix: none of those retained rows reads the artificial
-//! right padding at the temporary end. Stateful left boundaries are unchanged.
-
 use crate::synthesis::voice::{PreparedModule, PreparedTree, Result, VoiceError};
 
 pub mod local;
@@ -21,9 +14,6 @@ impl InputExtent {
     }
 }
 
-/// Return sufficient input rows for `output` stable rows, without a final flush.
-/// Conditional inputs are tracked separately so unrelated branches do not
-/// unnecessarily accumulate each other's lookahead.
 pub fn required_input(
     tree: &PreparedTree,
     index: usize,
@@ -41,6 +31,7 @@ pub fn required_input(
         | PreparedModule::Gru(_)
         | PreparedModule::Embedding(_)
         | PreparedModule::LayerNorm(_)
+        | PreparedModule::RmsNorm(_)
         | PreparedModule::ChannelAffine(_) => output,
         PreparedModule::Convolution(op) => convolution_input(
             output,
@@ -53,9 +44,7 @@ pub fn required_input(
             convolution_input(output, op.kernel, op.stride, op.dilation, op.left_padding)?
         }
         PreparedModule::TransposedConvolution(op) => {
-            // The stream publishes n*stride-2*padding stable rows.
-            // Use that frontier rather than assuming all overlap-add rows are
-            // already available when their first contributing input arrives.
+
             let padding = op.config.padding.checked_mul(2).ok_or_else(overflow)?;
             output
                 .checked_add(padding)
@@ -116,8 +105,7 @@ fn conditional(
             0
         },
     };
-    // output += skip(gate(state, condition));
-    // state = gate(state, condition) + residual(state).
+
     for layer in (0..layers).rev() {
         let skip = required_input(tree, lists[1][layer], output, false)?.main;
         let gate = required_input(tree, lists[0][layer], skip.max(needed.main), conditioned)?;

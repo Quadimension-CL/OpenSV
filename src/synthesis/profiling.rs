@@ -1,11 +1,3 @@
-//! Opt-in, thread-local wall-time attribution for native synthesis.
-//!
-//! Compiled only with `synth-profile`. Each span's self time excludes the
-//! complete durations of its direct children, so nested operators are not
-//! counted twice when summing self times. Timers do not measure CPU cycles.
-//! Parallel worker measurements are reported separately: their summed wall
-//! time may exceed the session's elapsed time and must not be added to it.
-
 mod parallel;
 
 pub use parallel::{ParallelTiming, ParallelWork};
@@ -53,11 +45,11 @@ struct ActiveSpan {
 #[derive(Debug, Serialize)]
 pub struct Report {
     pub elapsed_ms: f64,
-    /// Nonzero means `finish` cut short scopes which had not yet been dropped.
+
     pub open_spans_at_finish: usize,
-    /// Full call paths, sorted by descending self time.
+
     pub entries: Vec<SpanTiming>,
-    /// Worker task wall times, independent of main-thread span attribution.
+
     pub parallel_entries: Vec<ParallelTiming>,
 }
 
@@ -69,7 +61,6 @@ pub struct SpanTiming {
     pub self_ms: f64,
 }
 
-/// Begin a fresh session on the calling thread. Other threads are unaffected.
 pub fn start() {
     SESSION.with(|session| {
         let mut session = session.borrow_mut();
@@ -82,7 +73,6 @@ pub fn start() {
     });
 }
 
-/// Stop this thread's session and return its aggregated measurements.
 pub fn finish() -> Report {
     let now = Instant::now();
     SESSION.with(|session| {
@@ -118,14 +108,12 @@ pub fn finish() -> Report {
     })
 }
 
-/// Scope guard cannot move to another thread because sessions are thread-local.
 #[must_use = "keep the guard alive for the measured scope"]
 pub struct Span {
     identity: Option<(u64, u64)>,
     thread: PhantomData<Rc<()>>,
 }
 
-/// Open a scope. Calls outside an active session perform no clock reads.
 pub fn span(name: &'static str) -> Span {
     let identity = SESSION.with(|session| {
         let mut session = session.borrow_mut();
@@ -162,9 +150,6 @@ pub fn span(name: &'static str) -> Span {
     }
 }
 
-/// Capture the calling thread's current path for measurements on worker
-/// threads. No clock or cross-thread synchronization is used if this thread
-/// has no active session. The handle does not create a main-thread span.
 pub fn parallel_work(name: &'static str) -> ParallelWork {
     SESSION.with(|session| {
         let mut session = session.borrow_mut();
@@ -195,8 +180,7 @@ impl Drop for Span {
                 .iter()
                 .rposition(|active| active.token == token)
             {
-                // Normal lexical RAII closes exactly one scope. An explicitly
-                // dropped parent also ends its children at that same boundary.
+
                 while session.stack.len() > index {
                     session.close_top(now);
                 }

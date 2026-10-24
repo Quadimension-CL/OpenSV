@@ -6,7 +6,6 @@ use crate::synthesis::inference::convolution::{
 
 use super::{PreparedNode, Result, TensorStorage, VoiceError, convolution::PreparedConvolution};
 
-/// Uses the same K matrices plus optional bias as normal convolution.
 pub struct PreparedTransposedConvolution {
     pub weights: Vec<Arc<TensorStorage>>,
     pub bias: Option<Arc<TensorStorage>>,

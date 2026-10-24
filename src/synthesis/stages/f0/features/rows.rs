@@ -20,8 +20,6 @@ impl FeatureEncoding {
         Ok(())
     }
 
-    /// Keep this encoding's new shape and context for unmapped rows, while
-    /// reusing mapped rows from the last completed snapshot.
     pub fn reuse_rows_from(
         &self,
         previous: &Self,

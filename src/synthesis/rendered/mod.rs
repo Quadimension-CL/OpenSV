@@ -1,16 +1,11 @@
-//! Immutable synthesis output and the display data prepared alongside its PCM.
-//!
-//! Waveform queries share the rendered samples and use a peak pyramid. Neither
-//! painting nor owner-cache publication needs to scan or copy an entire clip.
-
 pub mod patch;
-mod phonemes;
 mod pitch;
+mod phonemes;
 mod snapshot;
 mod waveform;
 
-pub use phonemes::{PhonemeSnapshot, RenderedPhoneme, RenderedPhonemeTrack, SourcePhone};
-pub use pitch::PitchTrack;
+pub use pitch::{PitchTrack, RenderedRapControl};
+pub use phonemes::{PhonemeTrack,RenderedPhone,PhonemeSnapshot};
 pub use snapshot::{VisualFlash, VisualPatch, VisualPiece, VisualSnapshot, VisualTimeline};
 pub use waveform::Waveform;
 
@@ -25,8 +20,7 @@ pub struct RenderedClip {
 }
 
 impl RenderedClip {
-    /// Shared PCM is counted once, even though the waveform also retains it.
-    /// Prepared synthesis context is retained for the next completed edit.
+
     pub fn memory_bytes(&self) -> usize {
         std::mem::size_of_val(self.audio.samples())
             .saturating_add(self.visuals.memory_bytes())
@@ -37,16 +31,16 @@ impl RenderedClip {
 #[derive(Debug)]
 pub struct RenderVisuals {
     pub pitch: PitchTrack,
-    pub phonemes: RenderedPhonemeTrack,
     pub waveform: Waveform,
+    pub phonemes:PhonemeTrack,
 }
 
 impl RenderVisuals {
-    /// Additional display storage; the clip owns the shared PCM allocation.
+
     pub fn memory_bytes(&self) -> usize {
         self.pitch
             .memory_bytes()
-            .saturating_add(self.phonemes.memory_bytes())
             .saturating_add(self.waveform.memory_bytes())
+            .saturating_add(self.phonemes.memory_bytes())
     }
 }

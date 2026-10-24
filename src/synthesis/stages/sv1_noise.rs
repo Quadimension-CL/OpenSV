@@ -1,8 +1,3 @@
-//! MT19937 normal stream used by the version 1 F0 and acoustic programs.
-//!
-//! Twist one state word per draw. Reset the engine at semantic seed boundaries
-//! while retaining the normal distribution's spare value.
-
 const WORDS: usize = 624;
 const OFFSET: usize = 397;
 
@@ -32,7 +27,7 @@ impl Normal {
                 .wrapping_add(index as u32);
         }
         self.index = 0;
-        // Reseeding the engine preserves the normal distribution's spare value.
+
     }
 
     fn word(&mut self) -> u32 {

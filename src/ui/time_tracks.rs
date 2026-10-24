@@ -56,7 +56,7 @@ pub fn show(app: &mut App, ui: &mut Ui, rect: Rect) {
             && !app.view_pan.is_active()
             && let Some(pointer) = response.interact_pointer_pos()
         {
-            // Match the clipped visible marker before quantizing a blank-row click.
+
             let target = markers
                 .iter()
                 .rev()
@@ -111,8 +111,8 @@ fn marker(painter: &Painter, pos: Pos2, text: &str, flag: bool) -> Option<Rect> 
 
 fn event_menu(app: &mut App, ui: &mut Ui, target: Target) {
     let (edit_label, delete_label, can_delete) = match target {
-        Target::Meter(index) => ("编辑拍号…", "删除拍号标记", index > 0),
-        Target::Tempo(position) => ("编辑曲速…", "删除曲速标记", position > 0),
+        Target::Meter(index) => (crate::i18n::t("编辑拍号…"), crate::i18n::t("删除拍号标记"), index > 0),
+        Target::Tempo(position) => (crate::i18n::t("编辑曲速…"), crate::i18n::t("删除曲速标记"), position > 0),
     };
     if ui.button(edit_label).clicked() {
         time_edit::open(app, target);
@@ -121,7 +121,7 @@ fn event_menu(app: &mut App, ui: &mut Ui, target: Target) {
     ui.separator();
     if ui
         .add_enabled(can_delete, Button::new(delete_label))
-        .on_disabled_hover_text("初始拍号和曲速必须保留，可通过编辑修改其数值")
+        .on_disabled_hover_text(crate::i18n::t("初始拍号和曲速必须保留，可通过编辑修改其数值"))
         .clicked()
     {
         super::tempo_input::finish(app);

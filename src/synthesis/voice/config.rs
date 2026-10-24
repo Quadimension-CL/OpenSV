@@ -8,7 +8,7 @@ pub(super) const CONFIGURATION_ID: ResourceId = ResourceId([
     0x21, 0x19, 0x4a, 0xe9, 0x56, 0x77, 0x3e, 0x78, 0x8d, 0x0e, 0x8c, 0xe2, 0xd3, 0x26, 0xbc, 0x44,
 ]);
 
-#[derive(Serialize)]
+#[derive(Clone, Debug, Serialize)]
 pub struct VoiceConfiguration {
     pub family: VoiceFamily,
     pub model_version: u8,
@@ -19,6 +19,9 @@ pub struct VoiceConfiguration {
     pub default_language: String,
     pub supported_languages: Vec<String>,
     pub styles: Vec<String>,
+    #[serde(skip)]
+    styles_declared: bool,
+    pub speakers: Vec<super::Speaker>,
     pub additional_fields: usize,
     pub parser_scope: &'static str,
     #[serde(skip)]
@@ -26,16 +29,24 @@ pub struct VoiceConfiguration {
 }
 
 impl VoiceConfiguration {
+
+    pub fn additional_metadata(&self) -> &BTreeMap<String, String> { &self._uninterpreted }
+
+    pub fn has_declared_vocal_modes(&self) -> bool { self.styles_declared }
+
+    pub fn vocal_mode_names(&self) -> &[String] {
+        &self.styles
+    }
+
     pub(super) fn parse(bytes: &[u8]) -> Result<Self> {
         let text = std::str::from_utf8(bytes)
             .map_err(|_| VoiceError::new("Voice configuration is not UTF-8"))?;
         let mut fields = BTreeMap::new();
-        // Both model generations use `key value\n`. Values are kept literally;
-        // reject duplicate keys so configuration values remain unambiguous.
+
         for line in text.lines() {
             let (key, value) = line
                 .split_once(' ')
-                .filter(|(key, value)| !key.is_empty() && !value.is_empty())
+                .filter(|(key, value)| !key.is_empty() && (!value.is_empty() || *key == "style_config"))
                 .ok_or_else(|| VoiceError::new("Unsupported voice configuration line grammar"))?;
             if fields.insert(key.to_owned(), value.to_owned()).is_some() {
                 return Err(VoiceError::new(
@@ -56,10 +67,19 @@ impl VoiceConfiguration {
             .split_whitespace()
             .map(str::to_owned)
             .collect::<Vec<_>>();
-        let styles = take(&mut fields, "style_config")?
-            .split(',')
-            .map(str::to_owned)
-            .collect::<Vec<_>>();
+
+        let declared_styles = fields.remove("style_config");
+        let styles_declared = declared_styles.is_some();
+        let styles: Vec<String> = match declared_styles {
+            Some(styles) if model_version == 2 && styles.is_empty() => Vec::new(),
+            Some(styles) => styles.split(',').map(str::to_owned).collect(),
+            None => Vec::new(),
+        };
+        let speakers = fields
+            .remove("subspeaker_config")
+            .map(|text| super::Speaker::parse(&text))
+            .transpose()?
+            .unwrap_or_default();
         if !supported_languages.contains(&default_language) || styles.iter().any(String::is_empty) {
             return Err(VoiceError::new("Invalid voice language or style metadata"));
         }
@@ -67,6 +87,9 @@ impl VoiceConfiguration {
             return Err(VoiceError::new(
                 "Extended voice style configuration grammar is not implemented",
             ));
+        }
+        if model_version == 2 && styles.iter().enumerate().any(|(i, name)| styles[..i].contains(name)) {
+            return Err(VoiceError::new("Duplicate declared vocal-mode name"));
         }
         Ok(Self {
             family: if model_version == 1 {
@@ -82,10 +105,25 @@ impl VoiceConfiguration {
             default_language,
             supported_languages,
             styles,
+            styles_declared,
+            speakers,
             additional_fields: fields.len(),
             parser_scope: "observed model-version 1/2 key-space-value grammar; extended style grammar and duplicate policy not recovered",
             _uninterpreted: fields,
         })
+    }
+
+    pub(super) fn resolve_embedded_styles(&mut self, basis_names: &[String]) -> Result<()> {
+        if self.model_version != 2 {
+            return Err(VoiceError::new("Embedded catalogue resolution requires model-version 2"));
+        }
+
+        if !self.styles_declared {
+            self.styles = basis_names.to_vec();
+
+            self.styles.sort();
+        }
+        Ok(())
     }
 
     pub(super) fn from_nofs(mut fields: BTreeMap<String, String>) -> Result<Self> {
@@ -141,10 +179,68 @@ impl VoiceConfiguration {
             default_language,
             supported_languages,
             styles,
+            styles_declared: true,
+            speakers: Vec::new(),
             additional_fields: fields.len(),
             parser_scope: "SV1 AI NOFS public metadata; DDS model family",
             _uninterpreted: fields,
         })
+    }
+}
+
+#[cfg(test)]
+mod mode_catalog_tests {
+    use super::*;
+
+    fn configuration(version: u8, styles: Option<&str>) -> Result<VoiceConfiguration> {
+        let mut text = format!("model-version {version}\nname Test\nversion 1\nvendor Test\ndefault_language english\nsupported_languages english\n");
+        if let Some(styles) = styles { text.push_str(&format!("style_config {styles}\n")); }
+        VoiceConfiguration::parse(text.as_bytes())
+    }
+
+    fn basis() -> Vec<String> {
+        ["Soulful", "Powerful", "Breathy", "Soft", "Resonant"].map(String::from).to_vec()
+    }
+
+    #[test]
+    fn declared_catalogue_keeps_its_order_not_hidden_basis_rows() {
+        let mut config = configuration(2, Some("Breathy,Resonant,Soulful,Powerful")).unwrap();
+        config.resolve_embedded_styles(&basis()).unwrap();
+        assert_eq!(config.styles, ["Breathy", "Resonant", "Soulful", "Powerful"]);
+        assert!(!config.styles.iter().any(|name| name == "Soft"));
+    }
+
+    #[test]
+    fn explicit_empty_does_not_fall_back_but_absent_does() {
+        let mut empty = configuration(2, Some("")).unwrap();
+        empty.resolve_embedded_styles(&basis()).unwrap();
+        assert!(empty.styles.is_empty());
+        assert!(empty.vocal_mode_names().is_empty());
+        let mut absent = configuration(2, None).unwrap();
+        absent.resolve_embedded_styles(&basis()).unwrap();
+        assert_eq!(absent.styles, ["Breathy", "Powerful", "Resonant", "Soft", "Soulful"]);
+        assert_eq!(absent.vocal_mode_names(), absent.styles);
+    }
+
+    #[test]
+    fn duplicate_and_extended_declared_syntax_is_not_silently_accepted() {
+        assert!(configuration(2, Some("Soft,Soft")).is_err());
+        assert!(configuration(2, Some("Soft=")).is_err());
+    }
+
+    #[test]
+    fn declared_timbre_only_mode_is_not_rejected_by_f0_fallback() {
+        let mut config = configuration(2, Some("TimbreOnly,Breathy")).unwrap();
+        config.resolve_embedded_styles(&basis()).unwrap();
+        assert_eq!(config.styles, ["TimbreOnly", "Breathy"]);
+    }
+
+    #[test]
+    fn legacy_catalogue_does_not_acquire_sv2_fallback() {
+        let mut config = configuration(1, Some("Legacy")).unwrap();
+        assert!(config.resolve_embedded_styles(&basis()).is_err());
+        assert_eq!(config.styles, ["Legacy"]);
+        assert!(configuration(1, Some("")).is_err());
     }
 }
 

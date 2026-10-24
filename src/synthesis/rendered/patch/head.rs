@@ -3,13 +3,6 @@ use super::{
     validate_components,
 };
 
-/// Join the replacement to the preceding old block. Each fresh component starts
-/// at that preceding block, not the first changed block, and includes
-/// at least two blocks of new PCM. At project block zero the caller bypasses
-/// this function because there is no old preceding block.
-///
-/// Positive alignment shifts consume lookahead and shorten the valid
-/// result by that many samples. No padding or invented tail samples are added.
 pub fn splice_head(
     old_previous: [&[f32]; 2],
     fresh: [&[f32]; 2],

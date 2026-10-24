@@ -1,5 +1,3 @@
-//! Default sampler diagnostics from vowel-restricted syllable statistics.
-
 use super::Contract;
 
 use crate::synthesis::{

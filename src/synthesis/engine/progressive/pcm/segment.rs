@@ -27,8 +27,6 @@ impl Segment {
         self.finished
     }
 
-    /// Pending publication on this continuous forward cursor. Already emitted
-    /// samples and a later gap beyond the planned tail belong to another job.
     pub fn covers_demand(&self, seconds: f64) -> bool {
         if self.finished || !seconds.is_finite() {
             return false;
@@ -57,9 +55,7 @@ impl PcmStore {
             && (self.first_block..segment.plan.first_sample.div_euclid(BLOCK))
                 .all(|block| !self.block_ready(block))
         {
-            // A cursor initialized at the true model start already generated
-            // its negative/partial prefix correctly. Keep those samples too;
-            // another cursor must not be scheduled merely to regenerate them.
+
             segment.plan.first_sample = self.clock.origin;
             segment.next_sample = self.clock.origin;
         }
@@ -90,9 +86,7 @@ impl PcmStore {
         let shift = i64::from(segment.shift.unwrap_or(0));
         let body_end = segment.plan.tail.map_or_else(
             || {
-                // A natural-end replacement may also have an unchanged old
-                // suffix. Keep its final missing block until the verified
-                // model end, so cancellation cannot abandon that suffix.
+
                 if natural_final {
                     self.clock.end
                 } else {
@@ -100,8 +94,7 @@ impl PcmStore {
                 }
             },
             |(begin, _)| {
-                // Keep the final missing block unpublished until the tail
-                // join is ready, plus the ready carry after a head seam.
+
                 (begin - BLOCK * (1 + i64::from(segment.plan.has_head))).max(self.clock.origin)
             },
         );
@@ -183,7 +176,7 @@ impl PcmStore {
             fresh,
             PREVIEW_SAMPLE_RATE,
             PREVIEW_BLOCK_SAMPLES,
-            // AI PCM has no phase records; predicted F0 is not a substitute.
+
             0.0,
         )?;
         let pending = segment

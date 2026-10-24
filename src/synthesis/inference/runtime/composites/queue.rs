@@ -1,5 +1,3 @@
-//! Bounded-lag frame FIFOs. Consumed rows never participate in later batches.
-
 use crate::synthesis::{
     inference::Sequence,
     voice::{Result, VoiceError},
@@ -28,8 +26,7 @@ impl FrameQueue {
 
     pub(super) fn push(&mut self, sequence: &Sequence) -> Result<()> {
         sequence.validate()?;
-        // Layer branches acquire their immutable width from their first shaped
-        // output, including a zero-row output while its convolution warms up.
+
         if self.channels == 0 {
             self.channels = sequence.channels;
         }
@@ -79,8 +76,6 @@ impl FrameQueue {
     }
 }
 
-/// Preserve `left + right` order while projections with distinct receptive
-/// fields make different numbers of rows ready on each invocation.
 #[derive(Clone, Default)]
 pub(super) struct SumQueue {
     left: FrameQueue,

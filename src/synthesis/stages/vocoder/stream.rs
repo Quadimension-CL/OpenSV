@@ -1,9 +1,7 @@
-//! A single continuous vocoder execution, yielding only stable fresh PCM.
-
 use std::collections::VecDeque;
 
 use super::{
-    VoiceControl, output::FrameMetadata, render::VocoderOutput, stage::VocoderStage,
+    output::FrameMetadata, render::VocoderOutput, stage::VocoderStage,
     stream_parameters::ParameterStream, stream_signals::SignalStream,
 };
 use crate::synthesis::{
@@ -12,6 +10,12 @@ use crate::synthesis::{
 };
 
 pub struct VocoderStream<'a> {
+    neural:NeuralStream<'a>,
+    compatible:Option<super::compatible_dispatch::CompatibleDispatch>,
+    sv2:Option<super::sv2_packets::Sv2Packets>,
+}
+
+pub(super) struct NeuralStream<'a> {
     parameters: ParameterStream<'a>,
     signals: SignalStream,
     metadata: VecDeque<FrameMetadata>,
@@ -22,29 +26,38 @@ pub struct VocoderStream<'a> {
 
 impl<'a> VocoderStage<'a> {
     pub fn into_stream(self) -> Result<VocoderStream<'a>> {
+        if self.compatible_dispatch&&self.editor_seed_source.is_some() {return Err(VoiceError::new("Conflicting vocoder packet programs"));}
         let signals = SignalStream::new(&self)?;
-        Ok(VocoderStream {
+        let compatible=self.compatible_dispatch.then(super::compatible_dispatch::CompatibleDispatch::new);
+        let sv2=self.editor_seed_source.clone().map(super::sv2_packets::Sv2Packets::new);
+        Ok(VocoderStream {compatible,sv2,neural:NeuralStream {
             parameters: ParameterStream::new(self)?,
             signals,
             metadata: VecDeque::new(),
             input_frames: 0,
             output_frames: 0,
             finished: false,
-        })
+        }})
     }
 }
 
 impl VocoderStream<'_> {
-    /// Both inputs contain the next acoustic frames in order. Only a natural
-    /// end of this model context may set `final_batch`; chunk boundaries do
-    /// not reset phase, recurrent state, convolution history or overlap-add.
-    /// The returned rows follow prior output rows and may be empty while the
-    /// model accumulates its real right context.
+    pub fn process(&mut self,physical:&Sequence,controls:Option<&Sequence>,final_batch:bool)->Result<VocoderOutput> {
+        if let Some(packets)=&mut self.sv2 {return packets.process(&mut self.neural,physical,controls,final_batch);}
+        match &mut self.compatible {
+            Some(adapter)=>adapter.process(&mut self.neural,physical,controls,final_batch),
+            None=>self.neural.process(physical,controls,final_batch),
+        }
+    }
+}
+
+impl NeuralStream<'_> {
+    pub(crate) fn append_frame_noise_seeds(&mut self,seeds:&[u64])->Result<()> {self.signals.append_frame_noise_seeds(seeds)}
+
     pub fn process(
         &mut self,
         physical: &Sequence,
         controls: Option<&Sequence>,
-        voice_controls: Option<&[VoiceControl]>,
         final_batch: bool,
     ) -> Result<VocoderOutput> {
         #[cfg(feature = "synth-profile")]
@@ -52,15 +65,12 @@ impl VocoderStream<'_> {
         if self.finished {
             return Err(VoiceError::new("Vocoder stream has already finished"));
         }
-        let parameters =
-            self.parameters
-                .process(physical, controls, voice_controls, final_batch)?;
+        let parameters = self.parameters.process(physical, controls, final_batch)?;
         self.input_frames = self
             .input_frames
             .checked_add(physical.frames)
             .ok_or_else(|| VoiceError::new("Vocoder input frame count overflow"))?;
-        // The DSP source's first frame primes its overlap. There is no tail
-        // at all for an empty context, so do not flush an unstarted source.
+
         if self.input_frames == 0 {
             self.finished = final_batch;
             return Ok(VocoderOutput {

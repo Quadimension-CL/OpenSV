@@ -1,6 +1,6 @@
-//! Portable resource locations and the selected voice relative to its library.
-
-use super::voice::VoiceCatalog;
+use super::voice::{VoiceCatalog, VoiceRevision};
+mod duration_keys;
+pub use duration_keys::VoiceDurationKeyOverride;
 use serde::{Deserialize, Serialize};
 use std::{
     fs,
@@ -12,19 +12,43 @@ use std::{
 #[serde(deny_unknown_fields)]
 pub struct VoiceSelection {
     pub database_id: String,
-    pub revision: u32,
+    pub revision: VoiceRevision,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SynthesisSettings {
     pub databases: Option<PathBuf>,
     pub sv1_databases: Option<PathBuf>,
     pub dictionaries: Option<PathBuf>,
     pub selected_voice: Option<VoiceSelection>,
+    #[serde(default)]
+    pub duration_key_override_enabled: bool,
+    #[serde(default = "default_duration_key")]
+    pub duration_key_override_value: u64,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub voice_duration_key_overrides: Vec<VoiceDurationKeyOverride>,
+}
+
+fn default_duration_key() -> u64 {
+    0
+}
+
+impl Default for SynthesisSettings {
+    fn default() -> Self {
+        Self {
+            databases: None, sv1_databases: None, dictionaries: None, selected_voice: None,
+            duration_key_override_enabled: false, duration_key_override_value: default_duration_key(),
+            voice_duration_key_overrides: Vec::new(),
+        }
+    }
 }
 
 impl SynthesisSettings {
+    pub fn duration_key_override(&self) -> Option<u64> {
+        self.duration_key_override_enabled.then_some(self.duration_key_override_value)
+    }
+
     pub fn database_roots(&self) -> impl Iterator<Item = (&'static str, &Path)> {
         [
             ("SV2", self.databases.as_deref()),
@@ -54,8 +78,7 @@ impl SynthesisSettings {
 
     pub fn save(&self) -> Result<(), String> {
         let path = Self::path()?;
-        // A malformed existing file needs explicit repair, not replacement by
-        // defaults from a startup that could not deserialize it.
+
         Self::load()?;
         let parent = path.parent().expect("settings path has a parent");
         fs::create_dir_all(parent)

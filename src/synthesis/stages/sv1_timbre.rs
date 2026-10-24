@@ -1,5 +1,3 @@
-//! Shared DDS acoustic model with distinct SV1 and SV2-compatible adapters.
-
 mod decoder;
 mod frontend;
 mod noise;
@@ -8,8 +6,8 @@ mod prepared;
 mod queue;
 mod records;
 mod sampling;
+mod silence;
 mod stream;
-mod styles;
 
 use std::sync::Arc;
 
@@ -40,14 +38,11 @@ pub struct Sv1TimbreNetwork<'a> {
     sampler: Sampler,
     bank: Vec<f32>,
     styles: TimbreStyles,
+    style_node:usize,
     decoder: [usize; 4],
 }
 
 impl<'a> Sv1TimbreNetwork<'a> {
-    pub fn frame_seconds(&self) -> f64 {
-        f64::from(self.frontend.frame_seconds)
-    }
-
     pub fn prepare(tree: &'a PreparedTree) -> Result<Self> {
         Self::prepare_contract(tree, Contract::Compatible)
     }
@@ -89,12 +84,11 @@ impl<'a> Sv1TimbreNetwork<'a> {
             sampler: Sampler::prepare(tree, nodes[3])?,
             bank,
             styles: TimbreStyles::prepare(tree, root.children[1])?,
+            style_node:root.children[1],
             decoder: nodes[4..].try_into().unwrap(),
         })
     }
 
-    /// Phone projection uses the complete owner, as in SV2's duration pass.
-    /// Framewise context, latent and decoder networks run only when requested.
     pub fn prepare_frame_features(
         &self,
         request: &TimbreRequest<'_>,
@@ -111,7 +105,6 @@ impl<'a> Sv1TimbreNetwork<'a> {
         Sv1TimbreStream::new(self, &request, frames)
     }
 
-    /// Exports and preview share the same persistent numerical program.
     pub fn render(&self, request: &TimbreRequest<'_>, pitch: &PitchResult) -> Result<TimbreOutput> {
         let frames = Arc::new(self.prepare_frame_features(request, pitch)?);
         Sv1TimbreStream::new(self, request, frames)?.collect()

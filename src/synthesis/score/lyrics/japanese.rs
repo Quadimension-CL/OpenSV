@@ -128,7 +128,7 @@ fn romaji(directory: &Path) -> Result<PhoneTable> {
                 "stop" | "fricative" | "affricate" | "aspirate" | "liquid" | "nasal" | "semivowel"
             )
         {
-            // Syllable readings such as n -> N keep priority over literal consonants.
+
             table.include_literal(phone);
         }
     }

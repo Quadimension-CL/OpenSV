@@ -1,8 +1,3 @@
-//! Temporal refinement topology for acoustic child 13.
-//!
-//! Children are a conditional stack, temporal upsampling sequence, then a
-//! channel affine. The acoustic stream retains the queues joining these stages.
-
 use crate::synthesis::{
     inference::ops::{
         SEQUENTIAL_TYPE_ID,
@@ -12,11 +7,14 @@ use crate::synthesis::{
     voice::{PreparedTree, Result, TensorStorage, VoiceError},
 };
 
+mod sixteen;
+pub(super) use sixteen::Refinement16;
+
 pub const REFINEMENT_TYPE_ID: [u8; 16] = [
     0x03, 0x4c, 0x11, 0x4e, 0x23, 0x87, 0x8d, 0x3f, 0x57, 0x7f, 0x57, 0xeb, 0x57, 0x66, 0xb7, 0xb7,
 ];
 
-pub struct Refinement {
+pub struct Refinement19 {
     pub(super) conditional: usize,
     pub(super) upsample: usize,
     pub(super) channel_affine: usize,
@@ -25,7 +23,7 @@ pub struct Refinement {
     output_channels: usize,
 }
 
-impl Refinement {
+impl Refinement19 {
     pub fn prepare(tree: &PreparedTree, index: usize) -> Result<Self> {
         #[cfg(feature = "synth-profile")]
         let _profile = crate::synthesis::profiling::span("timbre.refinement.prepare");
@@ -82,5 +80,48 @@ impl Refinement {
 
     pub fn output_channels(&self) -> usize {
         self.output_channels
+    }
+}
+
+pub(super) enum Refinement {
+    Sixteen(Refinement16),
+    Nineteen(Refinement19),
+}
+
+impl Refinement {
+    pub fn prepare(tree: &PreparedTree, index: usize) -> Result<Self> {
+        match tree.node(index)?.type_id {
+            REFINEMENT_TYPE_ID => Ok(Self::Nineteen(Refinement19::prepare(tree, index)?)),
+            sixteen::TYPE_ID => Ok(Self::Sixteen(Refinement16::prepare(tree, index)?)),
+            _ => Err(VoiceError::new("Unsupported timbre refinement type")),
+        }
+    }
+
+    pub fn input_channels(&self) -> usize {
+        match self {
+            Self::Nineteen(value) => value.input_channels(),
+            Self::Sixteen(value) => value.input_channels,
+        }
+    }
+
+    pub fn latent_channels(&self) -> usize {
+        match self {
+            Self::Nineteen(value) => value.latent_channels(),
+            Self::Sixteen(value) => value.output_channels,
+        }
+    }
+
+    pub fn output_channels(&self) -> usize {
+        match self {
+            Self::Nineteen(value) => value.output_channels(),
+            Self::Sixteen(value) => value.output_channels,
+        }
+    }
+
+    pub fn pitch_channels(&self) -> usize {
+        match self {
+            Self::Nineteen(_) => 0,
+            Self::Sixteen(value) => value.pitch_channels,
+        }
     }
 }

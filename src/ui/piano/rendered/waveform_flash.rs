@@ -1,4 +1,3 @@
-//! A short-lived highlight on the waveform contour, never on block borders.
 use crate::ui::theme;
 use eframe::egui::*;
 
@@ -76,8 +75,7 @@ impl Flash {
         if !bounds.intersects(self.clip) {
             return;
         }
-        // A bright, fine contour with a two-pixel soft outer edge. Interpolate
-        // along the peaks; do not close the sides of each freshly rendered block.
+
         let bands = [(2.0, 0.0), (0.8, 0.22), (0.0, 0.85), (-0.65, 0.0)];
         for band in bands.windows(2) {
             let index = self.mesh.vertices.len() as u32;

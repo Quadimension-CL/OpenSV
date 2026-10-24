@@ -92,7 +92,7 @@ pub(super) fn hit(app: &App, canvas: Rect, reference: &GroupRef, pos: Pos2) -> O
         return None;
     }
     let controls = super::controls(app);
-    // A point is more precise than the curve underneath it.
+
     for control in controls
         .iter()
         .rev()

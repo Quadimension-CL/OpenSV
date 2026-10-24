@@ -1,8 +1,3 @@
-//! Identity conditioning from explicitly imported model contexts.
-//!
-//! This value is an acoustic model input, not a generated note seed. Raw session
-//! and platform identifiers must remain private and must never enter reports.
-
 mod imported;
 mod online;
 #[cfg(windows)]
@@ -21,9 +16,10 @@ use super::{Result, VoiceError};
 pub use online::{
     OnlineContextSource, import_online_context, online_context_sources, supports_online_import,
 };
-pub use session::{import_session_context, supports_session_import};
+pub use session::{import_session_context, supports_session_import, resolve_session_identity};
+pub use session::{SessionCondition, SessionProtection, resolve_session_condition};
+pub use session::{resolve_session_condition_with_key, import_session_context_with_key};
 
-/// Voice preparation only reads contexts explicitly saved in RynthV.
 pub fn saved_identity(voice_name: &str, model_version: u8) -> Result<u64> {
     validate_voice_name(voice_name)?;
     model_suffix(model_version)?;
@@ -35,10 +31,6 @@ pub fn saved_identity(voice_name: &str, model_version: u8) -> Result<u64> {
     )))
 }
 
-/// Explicitly stores a condition derived from a selected session file or a
-/// running session. Only the model value, voice name, model generation and a machine-
-/// condition fingerprint are saved. This function does not inspect or contact
-/// the original editor.
 pub fn save_imported_identity(
     voice_name: &str,
     model_version: u8,
@@ -49,25 +41,23 @@ pub fn save_imported_identity(
     imported::save_bound(voice_name, model_version, identity)
 }
 
-/// Explicitly copies only the selected voice and model generation from a context
-/// file. The saved condition is portable and does not retain a source-machine
-/// fingerprint. No identity is invented or derived from another record.
 pub fn import_context_file(voice_name: &str, model_version: u8, path: &Path) -> Result<PathBuf> {
+    save_manual_identity(voice_name, model_version, resolve_context_identity(voice_name, model_version, path)?)
+}
+
+pub fn resolve_context_identity(voice_name: &str, model_version: u8, path: &Path) -> Result<u64> {
     validate_voice_name(voice_name)?;
     model_suffix(model_version)?;
     let identity = imported::read_source(voice_name, model_version, path)?;
-    save_manual_identity(voice_name, model_version, identity)
+    Ok(identity)
 }
 
-/// Saves an explicitly supplied, already derived model condition for this voice.
 pub fn save_manual_identity(voice_name: &str, model_version: u8, identity: u64) -> Result<PathBuf> {
     validate_voice_name(voice_name)?;
     model_suffix(model_version)?;
     imported::save_manual(voice_name, model_version, identity)
 }
 
-/// Parses the complete unsigned model condition without rounding or truncation.
-/// Errors deliberately never include the input value.
 pub fn parse_identity(text: &str) -> Result<u64> {
     let text = text.trim();
     let (digits, radix) = text
@@ -88,6 +78,16 @@ pub fn parse_identity(text: &str) -> Result<u64> {
         .map_err(|_| VoiceError::new("模型 identity 超出无符号 64 位整数范围。"))
 }
 
+pub fn parse_session_key(text: &str) -> Result<u64> {
+    let text = text.trim();
+    let (digits, radix) = text.strip_prefix("0x").or_else(|| text.strip_prefix("0X"))
+        .map_or((text, 10), |digits| (digits, 16));
+    if digits.is_empty() || !digits.bytes().all(|b| if radix == 16 {b.is_ascii_hexdigit()} else {b.is_ascii_digit()}) {
+        return Err(VoiceError::new("session 解密密钥必须是完整的无符号 64 位整数，支持十进制或 0x 十六进制。"));
+    }
+    u64::from_str_radix(digits, radix).map_err(|_| VoiceError::new("session 解密密钥超出无符号 64 位整数范围。"))
+}
+
 fn validate_voice_name(voice_name: &str) -> Result<()> {
     if voice_name.trim().is_empty() {
         return Err(VoiceError::new(
@@ -97,11 +97,6 @@ fn validate_voice_name(voice_name: &str) -> Result<()> {
     Ok(())
 }
 
-/// Computes the model input from an existing local session field. This does not
-/// create, repair or validate a software license.
-///
-/// The field must be the original descriptor identity; a file path, voice UUID,
-/// display name, authentication token or invented fallback is not equivalent.
 #[cfg(windows)]
 fn derive_local_identity(session_field: &[u8], voice_name: &str, model_version: u8) -> Result<u64> {
     if session_field.is_empty() {
@@ -126,8 +121,7 @@ fn derive_local_identity(session_field: &[u8], voice_name: &str, model_version: 
 }
 
 fn model_suffix(model_version: u8) -> Result<&'static [u8]> {
-    // Compatibility models use ASCII v1 and second-generation models use v2
-    // before the same SHA-256 derivation.
+
     match model_version {
         1 => Ok(b"v1"),
         2 => Ok(b"v2"),

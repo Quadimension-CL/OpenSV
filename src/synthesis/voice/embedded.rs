@@ -1,8 +1,3 @@
-//! Inline DNNI v1/v2 containment records stored inside a voice resource.
-//!
-//! The reader establishes module identities and ownership only. Parent stages
-//! supply the forward programs; an arbitrary child list is not a DAG.
-
 mod common;
 mod neural;
 mod registry;
@@ -18,7 +13,7 @@ struct Entry {
 }
 
 pub(crate) struct Record {
-    /// Canonical type prefix followed by the original, unmodified payload.
+
     pub bytes: Vec<u8>,
     pub children: Vec<usize>,
 }
@@ -28,7 +23,6 @@ struct Frame {
     remaining: usize,
 }
 
-/// Read the canonical root identity without reading an entire embedded model.
 pub(crate) fn root_type(bytes: &[u8]) -> Result<[u8; 16]> {
     if u32_at(bytes, 0)? != 0x7fca00ff || !matches!(u32_at(bytes, 8)?, 0x7fca40ff | 0x7fca41ff) {
         return Err(VoiceError::new("Embedded DNNI root header is invalid"));
@@ -45,8 +39,6 @@ pub(crate) fn root_type(bytes: &[u8]) -> Result<[u8; 16]> {
     Ok(registry::resolve(alias))
 }
 
-/// Convert inline preorder records into the shared, checked postorder arena.
-/// Source tensors remain in memory and are never included in diagnostics.
 pub(crate) fn parse(bytes: &[u8]) -> Result<Vec<Record>> {
     if u32_at(bytes, 0)? != 0x7fca00ff {
         return Err(VoiceError::new("Embedded DNNI signature is invalid"));
@@ -112,7 +104,7 @@ fn open(bytes: &[u8], offset: &mut usize, version: u32) -> Result<Frame> {
     Ok(Frame {
         record: Record {
             bytes: record_bytes,
-            // Do not reserve memory from an untrusted child count.
+
             children: Vec::new(),
         },
         remaining: children,

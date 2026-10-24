@@ -18,15 +18,15 @@ pub(super) fn show(app: &mut App, ui: &mut Ui) {
         Ok(None) => {
             ui.add_enabled(
                 false,
-                Button::new("默认采样").min_size(vec2(ui.available_width(), 28.0)),
+                Button::new(crate::i18n::t("默认采样")).min_size(vec2(ui.available_width(), 28.0)),
             );
         }
         Err(error) => {
-            ui.weak(error);
+            ui.weak(crate::i18n::message(&error));
         }
     }
     if let Some(reason) = reason {
         ui.add_space(6.0);
-        ui.weak(reason);
+        ui.weak(crate::i18n::message(&reason));
     }
 }

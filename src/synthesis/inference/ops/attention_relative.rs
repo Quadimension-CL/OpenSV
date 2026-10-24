@@ -1,8 +1,3 @@
-//! Multi-head attention core and learned relative positions.
-//!
-//! This scalar implementation adds relative-key scores after QK scaling.
-//! Changing the accumulation order can change floating-point results.
-
 use std::{fmt, sync::Arc};
 
 use crate::synthesis::inference::matrix::DenseMatrix;
@@ -13,12 +8,14 @@ pub const RELATIVE_ATTENTION_TYPE_ID: [u8; 16] = [
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct AttentionOptions<'a> {
-    /// None or zero disables the local window entirely.
+
     pub window: Option<usize>,
-    /// Added to the query index before applying the window and relative index.
+
     pub position_offset: i32,
-    /// One float per key frame; values greater than 0.5 mark padding.
+
     pub key_padding_mask: Option<&'a [f32]>,
+
+    pub distance_penalty: f32,
 }
 
 #[derive(Clone)]
@@ -63,8 +60,7 @@ impl fmt::Display for AttentionError {
 impl std::error::Error for AttentionError {}
 
 impl RelativeAttention {
-    /// Matrix rows are channels and columns are relative positions. Preparation
-    /// transposes both matrices once into contiguous position vectors.
+
     pub fn new(
         key: Option<&DenseMatrix>,
         value: Option<&DenseMatrix>,
@@ -92,9 +88,6 @@ impl RelativeAttention {
         Ok(Self { positions })
     }
 
-    /// Inputs and output are frame-major with contiguous heads within a frame.
-    /// Key and value frame counts must match; an optional padding mask has one
-    /// float per key frame. Appended extra keys are handled by the calling stage.
     #[allow(clippy::too_many_arguments)]
     pub fn execute(
         &self,
@@ -109,6 +102,9 @@ impl RelativeAttention {
         #[cfg(feature = "synth-profile")]
         let _profile = crate::synthesis::profiling::span("kernel.relative_attention");
         let query_width = checked_width(heads, key_channels)?;
+        if !options.distance_penalty.is_finite() || options.distance_penalty<0.0 {
+            return Err(AttentionError::InvalidDimensions);
+        }
         let output_width = checked_width(heads, value_channels)?;
         if !query.len().is_multiple_of(query_width) {
             return Err(AttentionError::InvalidLength("query"));
@@ -164,6 +160,9 @@ impl RelativeAttention {
                     }
                     let distance =
                         query_index as i64 + i64::from(options.position_offset) - key_index as i64;
+                    if options.distance_penalty!=0.0 {
+                        *score-=distance.unsigned_abs() as f32*options.distance_penalty;
+                    }
                     if let Some(window) = options.window.filter(|&window| window != 0)
                         && distance.unsigned_abs() > window as u64
                     {
@@ -171,7 +170,7 @@ impl RelativeAttention {
                     }
                     if let Some(positions) = &self.positions {
                         let position = positions.index(distance) * key_channels;
-                        // The relative dot product is not multiplied by scale.
+
                         *score +=
                             relative_dot(query, &positions.key[position..position + key_channels]);
                     }
@@ -186,8 +185,7 @@ impl RelativeAttention {
                         *target += probability * value[value_start + channel];
                     }
                 }
-                // Keep the second accumulation separate to preserve rounding:
-                // first A*V finishes, then relative value terms are added.
+
                 if let Some(positions) = &self.positions {
                     for (key_index, &probability) in scores.iter().enumerate() {
                         let distance = query_index as i64 + i64::from(options.position_offset)
@@ -233,8 +231,6 @@ fn dot(left: &[f32], right: &[f32]) -> f32 {
         .fold(0.0, |sum, (&a, &b)| sum + a * b)
 }
 
-/// Accumulate eight lanes, reduce them in a fixed pairwise order, then add the
-/// scalar remainder. Preserve this order for consistent floating-point results.
 fn relative_dot(left: &[f32], right: &[f32]) -> f32 {
     let mut lanes = [0.0; 8];
     let blocks = left.len() / 8 * 8;

@@ -14,12 +14,12 @@ pub(super) fn status(
         VoiceState::Loading => {
             ui.horizontal(|ui| {
                 ui.spinner();
-                weak(ui, "正在准备歌声，请稍候…");
+                weak(ui, crate::i18n::t("正在准备歌声，请稍候…"));
             });
         }
         VoiceState::Loaded(_) if app.synthesis.voice_error(selection).is_none() => {
-            text(ui, RichText::new("已加载").color(GREEN));
-            weak(ui, "编辑音符后自动合成，按空格键试听。");
+            text(ui, RichText::new(crate::i18n::t("已加载")).color(GREEN));
+            weak(ui, crate::i18n::t("编辑音符后自动合成，按空格键试听。"));
         }
         _ => {}
     }
@@ -28,12 +28,12 @@ pub(super) fn status(
         error_label(
             ui,
             if matches!(app.synthesis.voice_state(selection), VoiceState::Failed(_)) {
-                "歌声加载失败"
+                crate::i18n::t("歌声加载失败")
             } else {
-                "合成环境准备失败"
+                crate::i18n::t("合成环境准备失败")
             },
         );
-        ui.collapsing("查看错误详情", |ui| error_label(ui, &error));
+        ui.collapsing(crate::i18n::t("查看错误详情"), |ui| error_label(ui, &error));
         if app
             .synthesis
             .inventory(selection)
@@ -45,12 +45,12 @@ pub(super) fn status(
 }
 
 pub(super) fn diagnostics(app: &App, ui: &mut Ui, entry: &VoiceCatalogEntry) {
-    weak(ui, "声库目录");
+    weak(ui, crate::i18n::t("声库目录"));
     text(ui, entry.directory.display().to_string());
     if let Some(voice) = app.synthesis.inventory(&entry.selection()) {
         weak(
             ui,
-            format!(
+            crate::lformat!(
                 "{} 个文件 · {} 个资源 · {} 棵模块树 · {} 个张量",
                 voice.files.len(),
                 voice.resource_count,
@@ -69,20 +69,20 @@ pub(super) fn diagnostics(app: &App, ui: &mut Ui, entry: &VoiceCatalogEntry) {
             }
             weak(
                 ui,
-                format!(
+                crate::lformat!(
                     "已装配 {affine} 个线性层、{unary} 个逐元素模块；{other} 个模块由阶段执行器处理或尚未装配"
                 ),
             );
         }
         if let Some(elapsed) = app.synthesis.load_elapsed(&entry.selection()) {
-            weak(ui, format!("加载耗时 {:.2} 秒", elapsed.as_secs_f64()));
+            weak(ui, crate::lformat!("加载耗时 {:.2} 秒", elapsed.as_secs_f64()));
         }
     }
     if let Some(catalog) = app.synthesis.library.catalog()
         && !catalog.warnings.is_empty()
     {
         ui.collapsing(
-            format!("扫描提示（{}）", catalog.warnings.len()),
+            crate::lformat!("扫描提示（{}）", catalog.warnings.len()),
             |ui| {
                 for warning in &catalog.warnings {
                     weak(ui, warning);

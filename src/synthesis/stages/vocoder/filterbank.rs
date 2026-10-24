@@ -1,8 +1,3 @@
-//! Eight-band analysis/synthesis filter pair.
-//!
-//! The coefficients are stored in tap order, not reversed. Both banks keep
-//! their overlap across calls; `end` supplies the final boundary only once.
-
 use std::sync::Arc;
 
 use crate::synthesis::{
@@ -21,7 +16,6 @@ pub const SYNTHESIS_TYPE_ID: [u8; 16] = [
     0x0d, 0x49, 0x6d, 0x65, 0x5f, 0xfe, 0x23, 0xe8, 0x1b, 0x1e, 0x4d, 0xf0, 0x0f, 0xba, 0x72, 0x29,
 ];
 
-/// Shared immutable tap-major weights, prepared from the actual voice tree.
 #[derive(Clone)]
 struct Kernels(Arc<[f32]>);
 
@@ -51,8 +45,6 @@ impl Kernels {
     }
 }
 
-/// Full-rate mono samples to consecutive eight-channel subband frames.
-/// A clone shares weights and snapshots the small streaming overlap.
 #[derive(Clone)]
 pub struct AnalysisBank {
     kernels: Kernels,
@@ -77,9 +69,6 @@ impl AnalysisBank {
         self.finished = false;
     }
 
-    /// `y[n, b] = sum_k h[k, b] * x[8*n + k - 32]` with zero boundaries.
-    /// Nonfinal calls wait for real right context instead of padding each chunk.
-    /// The final total number of frames is `ceil(input_samples / 8)`.
     pub fn process(&mut self, samples: &[f32], end: bool) -> Result<Vec<f32>> {
         #[cfg(feature = "synth-profile")]
         let _profile = crate::synthesis::profiling::span("vocoder.filterbank.analysis.process");
@@ -121,14 +110,13 @@ impl AnalysisBank {
     }
 }
 
-/// Eight-channel subband frames to full-rate mono PCM by overlap-add.
 #[derive(Clone)]
 pub struct SynthesisBank {
     kernels: Kernels,
     pending: Vec<f32>,
-    /// Sample position of the next input impulse relative to `pending[0]`.
+
     advance: usize,
-    /// One-time removal of the leading half filter.
+
     skip: usize,
     finished: bool,
 }
@@ -154,11 +142,6 @@ impl SynthesisBank {
         self.finished = false;
     }
 
-    /// Input is frame-major `[frame][band]`. Coefficients already include the
-    /// synthesis gain: do not multiply the result by eight again.
-    /// A completed stream emits exactly `input_frames * 8` samples. Synthesis
-    /// retains another 32 samples after the initial 32-sample skip;
-    /// finalization releases that pending output and removes the trailing half.
     pub fn process(&mut self, subbands: &[f32], end: bool) -> Result<Vec<f32>> {
         #[cfg(feature = "synth-profile")]
         let _profile = crate::synthesis::profiling::span("vocoder.filterbank.synthesis.process");

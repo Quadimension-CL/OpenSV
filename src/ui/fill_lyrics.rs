@@ -53,11 +53,11 @@ pub fn show(app: &mut App, ctx: &Context) {
             ui.set_width(width);
             ui.spacing_mut().item_spacing.y = 12.0;
             ui.label(
-                RichText::new("填入歌词")
+                RichText::new(crate::i18n::t("填入歌词"))
                     .font(FontId::new(17.0, FontFamily::Name("SectionTitle".into()))),
             );
             ui.add_space(4.0);
-            ui.label(RichText::new("用空格隔开字词。\n每个音符对应一个字词。").color(MUTED));
+            ui.label(RichText::new(crate::i18n::t("用空格隔开字词。\n每个音符对应一个字词。")).color(MUTED));
             let input_id = Id::new("fill-lyrics-text");
             if edit.focus {
                 TextEdit::store_state(ctx, input_id, Default::default());
@@ -96,41 +96,41 @@ pub fn show(app: &mut App, ctx: &Context) {
                             }
                         });
                 });
-            ui.checkbox(&mut edit.repeat, "循环填入");
-            ui.checkbox(&mut edit.by_character, "逐字填入")
-                .on_hover_text("拆分汉字、假名和韩文音节；拼音、罗马字及英文按空格分词。");
+            ui.checkbox(&mut edit.repeat, crate::i18n::t("循环填入"));
+            ui.checkbox(&mut edit.by_character, crate::i18n::t("逐字填入"))
+                .on_hover_text(crate::i18n::t("拆分汉字、假名和韩文音节；拼音、罗马字及英文按空格分词。"));
             words = split_lyrics(&edit.text, edit.by_character);
             let notes = edit.selection.len();
             let hint = if words.is_empty() {
-                format!("已选择 {notes} 个音符，请输入歌词。")
+                crate::lformat!("已选择 {notes} 个音符，请输入歌词。")
             } else if edit.repeat {
-                format!("{} 个字词 · 循环填入 {notes} 个音符", words.len())
+                crate::lformat!("{} 个字词 · 循环填入 {notes} 个音符", words.len())
             } else if words.len() > notes {
-                format!(
+                crate::lformat!(
                     "填入 {notes} 个音符 · 多出的 {} 个字词不填入",
                     words.len() - notes
                 )
             } else if words.len() < notes {
-                format!("填入 {} / {notes} 个音符 · 其余保留原歌词", words.len())
+                crate::lformat!("填入 {} / {notes} 个音符 · 其余保留原歌词", words.len())
             } else {
-                format!("{} 个字词 · 填入 {notes} 个音符", words.len())
+                crate::lformat!("{} 个字词 · 填入 {notes} 个音符", words.len())
             };
             ui.label(RichText::new(hint).size(11.0).color(MUTED))
-                .on_hover_text("更改歌词时会清除对应音符的自定义音素，以便重新生成发音。");
+                .on_hover_text(crate::i18n::t("更改歌词时会清除对应音符的自定义音素，以便重新生成发音。"));
             ui.add_space(8.0);
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 let size = vec2(106.0, 34.0);
                 submit = ui
                     .add_enabled(
                         !words.is_empty(),
-                        Button::new(RichText::new("确定").color(CANVAS))
+                        Button::new(RichText::new(crate::i18n::t("确定")).color(CANVAS))
                             .fill(GREEN)
                             .min_size(size),
                     )
-                    .on_hover_text("Ctrl+Enter 确定")
+                    .on_hover_text(crate::i18n::t("Ctrl+Enter 确定"))
                     .clicked();
                 cancel = ui
-                    .add_sized(size, Button::new("取消").fill(BUTTON_HOVER))
+                    .add_sized(size, Button::new(crate::i18n::t("取消")).fill(BUTTON_HOVER))
                     .clicked();
             });
         });
@@ -144,7 +144,7 @@ pub fn show(app: &mut App, ctx: &Context) {
     }
     if submit && !words.is_empty() {
         let changed = app.editor.fill_lyrics(&edit.selection, &words, edit.repeat);
-        app.status = format!("已更新 {changed} 个音符的歌词");
+        app.status = crate::lformat!("已更新 {changed} 个音符的歌词");
         ctx.memory_mut(|m| m.surrender_focus(Id::new("fill-lyrics-text")));
     } else {
         app.fill_lyrics = Some(edit);

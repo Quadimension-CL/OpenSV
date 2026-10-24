@@ -1,4 +1,8 @@
 /target/
 /analysis/
-/docs/
 *.tmp
+node_modules/
+MEMORY.md
+/.codex/
+/.claude/
+/tools/

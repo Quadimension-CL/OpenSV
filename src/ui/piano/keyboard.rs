@@ -1,5 +1,3 @@
-//! Transient piano audition, independent of note selection and project edits.
-
 mod decoration;
 mod layout;
 
@@ -84,15 +82,14 @@ pub(super) fn show(app: &mut App, ui: &mut Ui, all: Rect, canvas: Rect) {
         .and_then(|point| layout.hit(point));
     if enabled && pressed && response.contains_pointer() && note.is_some() {
         app.piano_audition.captured = true;
-        // Even a press/release pair within one UI frame is sent as a strike.
+
         set_note(app, note);
     }
     if app.piano_audition.captured {
         if !enabled || !held {
             cancel_audition(app);
         } else {
-            // Leaving the keyboard releases the note; returning while held
-            // continues the captured gesture without editing the note canvas.
+
             set_note(app, note);
         }
     }
@@ -105,6 +102,6 @@ pub(super) fn show(app: &mut App, ui: &mut Ui, all: Rect, canvas: Rect) {
     if enabled && note.is_some() {
         response
             .on_hover_cursor(CursorIcon::PointingHand)
-            .on_hover_text("按住试听钢琴音，拖动切换琴键");
+            .on_hover_text(crate::i18n::t("按住试听钢琴音，拖动切换琴键"));
     }
 }

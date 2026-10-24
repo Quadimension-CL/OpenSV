@@ -3,7 +3,6 @@ use crate::synthesis::{
     voice::{Result, VoiceError},
 };
 
-/// Rows waiting for another branch at the same temporal rate.
 pub(super) struct Rows {
     channels: usize,
     values: Vec<f32>,
@@ -63,8 +62,6 @@ pub(super) fn align(
     Ok((left.take(count)?, right.take(count)?))
 }
 
-/// Natural upsampling may end a few rows before the full-rate source. Only
-/// the true final flush holds its last row to the source's final count.
 #[derive(Default)]
 pub(super) struct TailHold {
     emitted: usize,

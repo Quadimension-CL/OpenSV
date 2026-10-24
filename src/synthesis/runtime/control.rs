@@ -1,6 +1,3 @@
-//! Submission and dispatch share this short lock. A plan invalidates active
-//! numerical work immediately, even while the worker cannot read its channel.
-
 use super::worker::Command;
 use crate::synthesis::{
     plan::{OwnerId, OwnerRequest, RenderPlan},
@@ -63,8 +60,7 @@ impl Control {
             Command::Reset => state.reset(),
             Command::Retry | Command::Demand { .. } => {}
         }
-        // Keep the channel send inside the same lock. Dispatch must not see a
-        // new desired plan before the corresponding command can be drained.
+
         sender.send(command).is_ok()
     }
 

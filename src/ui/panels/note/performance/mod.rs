@@ -1,6 +1,7 @@
 mod interaction;
 mod rap;
 mod widgets;
+pub(crate) mod spread;
 
 pub(crate) use interaction::end_frame;
 
@@ -26,7 +27,7 @@ pub(super) fn mode(app: &mut App, ui: &mut Ui) {
             ui.painter().rect_filled(rect, 3, BACKGROUND);
             let mut clicked = None;
             for (index, value, label) in
-                [(0, NoteMode::Singing, "歌唱"), (1, NoteMode::Rap, "说唱")]
+                [(0, NoteMode::Singing, crate::i18n::t("歌唱")), (1, NoteMode::Rap, crate::i18n::t("说唱"))]
             {
                 let half = Rect::from_min_max(
                     pos2(rect.left() + rect.width() * index as f32 * 0.5, rect.top()),
@@ -71,7 +72,7 @@ pub(super) fn mode(app: &mut App, ui: &mut Ui) {
                     clicked = Some(value);
                 }
                 if !supported {
-                    response.on_disabled_hover_text("此声库暂不支持说唱模式");
+                    response.on_disabled_hover_text(crate::i18n::t("此声库暂不支持说唱模式"));
                 }
             }
             clicked
@@ -82,7 +83,7 @@ pub(super) fn mode(app: &mut App, ui: &mut Ui) {
         app.editor.set_note_mode(mode);
     }
     if selected.is_some_and(|selection| selection.mode.is_none()) {
-        ui.weak("多个模式");
+        ui.weak(crate::i18n::t("多个模式"));
     }
 }
 
@@ -123,7 +124,7 @@ pub(super) fn expression(app: &mut App, ui: &mut Ui) {
         },
     );
     if native_voice {
-        ui.weak("此声库暂不支持演绎坐标");
+        ui.weak(crate::i18n::t("此声库暂不支持演绎坐标"));
     }
     ui.add_space(8.0);
     if selected.is_none_or(|selection| selection.mode != Some(NoteMode::Rap)) {
@@ -133,13 +134,13 @@ pub(super) fn expression(app: &mut App, ui: &mut Ui) {
     {
         rap::show(app, ui, selection, enabled && !native_voice);
         if native_voice {
-            ui.weak("此声库暂不支持说唱模式");
+            ui.weak(crate::i18n::t("此声库暂不支持说唱模式"));
         }
     }
     if let Err(error) = &selection {
-        ui.weak(error);
+        ui.weak(crate::i18n::message(&error));
     } else if selected.is_none() {
-        ui.weak("在钢琴卷帘中选择音符");
+        ui.weak(crate::i18n::t("在钢琴卷帘中选择音符"));
     }
 }
 
@@ -154,9 +155,9 @@ fn vibrato(app: &mut App, ui: &mut Ui, selection: Option<&PerformanceSelection>,
         .add_enabled_ui(enabled, |ui| {
             widgets::labeled_slider(
                 ui,
-                "颤音调制",
+                crate::i18n::t("颤音调制"),
                 if mixed {
-                    "多个值".into()
+                    crate::i18n::t("多个值").into()
                 } else {
                     format!("{:.0}%", current.unwrap_or(defaults.vibrato) * 100.0)
                 },

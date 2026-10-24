@@ -7,13 +7,10 @@ use crate::synthesis::{
     },
     plan::OwnerInput,
     render_cache::CompletedOwner,
-    rendered::RenderedPhonemeTrack,
     score::{self, HOP_SAMPLES, LyricFrontend, SAMPLE_RATE},
     voice::{PreparedVoice, Result, VoiceError, VoiceFamily},
 };
 
-/// Both voice generations prepare duration and pitch before choosing a demand
-/// position. Frame-level acoustics and PCM remain deferred to streaming cursors.
 pub fn prepare(
     voice: &PreparedVoice,
     identity: Option<u64>,
@@ -23,10 +20,26 @@ pub fn prepare(
     mut checkpoint: impl FnMut(RenderStage) -> Result<()>,
 ) -> Result<PreparedRender> {
     let phrase = score::prepare_owner(input, lexicon, voice.model("duration")?, voice.family)?;
-    // Local invalidation currently uses the SV2 feature program. Compatible
-    // voices still retain progressive PCM, but prepare a fresh owner on edits.
+    if !voice.speakers.is_empty() || phrase.unison.count>1 {
+        let result = super::super::ensemble::synthesize(voice, identity, &phrase, checkpoint)?;
+        let pcm = PcmStore::complete(&result.state.components)?;
+        return Ok(PreparedRender {
+            acoustic: PreparedRenderAcoustics {
+                family: voice.family,
+                prepared: result.state.prepared,
+                duration: result.state.duration,
+                pitch: result.state.pitch,
+                timings: result.timings,
+            },
+            pcm,
+            pitch: result.visuals.pitch,
+            timbre_frames: Default::default(),
+        });
+    }
+
     let base = base.filter(|base| {
         voice.family == VoiceFamily::Sv2
+            && base.clip.state.prepared.phrase.unison.count==1
             && matches!(
                 base.clip.state.prepared.features,
                 PreparedModelFeatures::Sv2 { .. }
@@ -66,6 +79,7 @@ pub fn prepare(
         )?;
         (
             PreparedRenderAcoustics {
+                family: voice.family,
                 prepared: updated.state.prepared,
                 duration: updated.state.duration,
                 pitch: updated.state.pitch,
@@ -91,13 +105,10 @@ pub fn prepare(
         (acoustic, pcm)
     };
     let pitch = models::pitch_track(voice, &acoustic.prepared.phrase, acoustic.pitch.clone())?;
-    let phonemes =
-        RenderedPhonemeTrack::from_phrase(&acoustic.prepared.phrase, &acoustic.duration)?;
     Ok(PreparedRender {
         acoustic,
         pcm,
         pitch,
-        phonemes,
         timbre_frames: Default::default(),
     })
 }

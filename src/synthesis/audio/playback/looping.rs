@@ -40,8 +40,6 @@ impl LoopControl {
             .and_then(|range| range.map(|range| FrameLoop::new(range, sample_rate)))
     }
 
-    /// A concurrent edit retains the previous buffer's bounds. The audio
-    /// callback never waits for the UI to release its control lock.
     pub(super) fn update_frames(&self, sample_rate: u32, range: &mut Option<FrameLoop>) {
         if let Ok(current) = self.0.try_read() {
             *range = current.map(|range| FrameLoop::new(range, sample_rate));

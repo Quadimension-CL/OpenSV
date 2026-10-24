@@ -1,8 +1,3 @@
-//! Bounded, read-only access to the NOFS key/value container.
-//!
-//! Index validation checks record references and complete coverage, without
-//! authenticating the hashes or reading private binding values during scans.
-
 use std::{
     collections::HashSet,
     fs::File,
@@ -51,8 +46,7 @@ impl NofsArchive {
                 "NOFS declared length differs from file size",
             ));
         }
-        // The supported index layout has a 4096-byte block with kind
-        // 0x1000 and the same length repeated in its footer.
+
         if header[16..20] != (INDEX_BYTES as u32).to_le_bytes()
             || header[20..22] != 0x1000u16.to_le_bytes()
             || header[INDEX_FOOTER..RECORDS_START] != (INDEX_BYTES as u32).to_le_bytes()
@@ -124,7 +118,6 @@ impl NofsArchive {
         })
     }
 
-    /// Read a complete value only after its caller supplies an explicit bound.
     pub fn read(&mut self, index: usize, max_bytes: usize) -> Result<Vec<u8>> {
         let range = self.record_range(index)?;
         let length = usize::try_from(range.end - range.start)
@@ -135,7 +128,6 @@ impl NofsArchive {
         self.read_value(range.start, length)
     }
 
-    /// Inspect magic or public metadata without loading model weight payloads.
     pub fn prefix(&mut self, index: usize, max_bytes: usize) -> Result<Vec<u8>> {
         if max_bytes > MAX_METADATA_BYTES {
             return Err(VoiceError::new("NOFS prefix exceeds metadata read limit"));
@@ -171,7 +163,7 @@ fn parse_index(header: &[u8; RECORDS_START], file_length: u64) -> Result<HashSet
         if entry.iter().all(|byte| *byte == 0) {
             break;
         }
-        // A hash of zero is not assumed invalid; only its paired offset is used.
+
         let record_offset = u64::from_le_bytes(entry[4..12].try_into().expect("eight bytes"));
         if !(RECORDS_START as u64..file_length).contains(&record_offset)
             || !offsets.insert(record_offset)

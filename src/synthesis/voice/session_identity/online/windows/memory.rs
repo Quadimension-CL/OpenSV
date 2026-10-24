@@ -13,8 +13,7 @@ pub(super) fn session_field(process: &Handle, slot: usize) -> Result<Zeroizing<V
         .checked_add(IDENTITY_POINTER_OFFSET)
         .ok_or_else(|| VoiceError::new("原编辑器的模型上下文地址无效。"))?;
     let text = pointer(process, field_pointer)?;
-    // Allocate once: no reallocation or intermediate raw-field copies. This
-    // wrapper clears partial reads on every error path, including invalid UTF-8.
+
     let mut field = Zeroizing::new(vec![0u8; MAXIMUM_FIELD_BYTES]);
     for offset in 0..MAXIMUM_FIELD_BYTES {
         let address = text
@@ -22,8 +21,7 @@ pub(super) fn session_field(process: &Handle, slot: usize) -> Result<Zeroizing<V
             .ok_or_else(|| VoiceError::new("原编辑器的模型上下文地址无效。"))?;
         read(process, address, &mut field[offset..offset + 1])?;
         if field[offset] == 0 {
-            // A string can also change in-place without changing its pointer.
-            // Confirm the complete bounded value in a second zeroized buffer.
+
             let mut confirmation = Zeroizing::new(vec![0u8; offset + 1]);
             read(process, text, &mut confirmation)?;
             if pointer(process, slot)? != object || pointer(process, field_pointer)? != text {
@@ -68,8 +66,7 @@ fn read(process: &Handle, address: usize, output: &mut [u8]) -> Result<()> {
         return Err(VoiceError::new("原编辑器的模型上下文地址不可用。"));
     }
     let mut received = 0;
-    // SAFETY: ReadProcessMemory validates the remote range; output owns exactly
-    // output.len() writable bytes. The process handle grants read-only access.
+
     let success = unsafe {
         ReadProcessMemory(
             process.0,

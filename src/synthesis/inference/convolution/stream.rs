@@ -1,9 +1,5 @@
-//! Stateful row queue for temporal convolution.
-
 use super::{Convolution, ConvolutionError, MatrixError};
 
-/// Stream state is independent of immutable weights and can be cloned for an
-/// incremental rendering checkpoint. Only unconsumed input rows are retained.
 #[derive(Clone)]
 pub struct ConvolutionStream {
     operator: Convolution,
@@ -42,8 +38,6 @@ impl ConvolutionStream {
         self.finished
     }
 
-    /// Supply chronological input once; `final_chunk` makes the right padding
-    /// available. A finalized stream must be reset before reuse.
     pub fn process(
         &mut self,
         input: &[f32],
@@ -76,7 +70,7 @@ impl ConvolutionStream {
             .ok_or(MatrixError::InvalidShape)?;
         self.pending.extend_from_slice(input);
         if frames == 0 {
-            // A zero-output call leaves the final flag unset.
+
             return Ok(Vec::new());
         }
         let output = self.operator.execute_pending(&self.pending, frames)?;

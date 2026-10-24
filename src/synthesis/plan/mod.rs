@@ -1,8 +1,7 @@
-//! Conservative edit dependency planning. Input identity, revision, and run
-//! cancellation epoch are separate; render_cache owns completed PCM and jobs.
-
 mod input;
+mod publication;
 mod units;
+mod sections;
 
 pub use input::*;
 pub use units::*;
@@ -13,9 +12,7 @@ use std::{collections::BTreeMap, sync::Arc};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 pub enum DependencyPolicy {
-    /// Whole owner content and mapping are dependencies. Silence is not an
-    /// independence boundary; local task ranges do not define the acoustic
-    /// model's receptive field.
+
     ConservativeWholeOwner,
 }
 
@@ -36,9 +33,6 @@ pub struct CoverageChange {
     pub new: Option<Coverage>,
 }
 
-/// Publication/mixer controls are kept outside neural dependencies. In
-/// particular, an instance mute must withdraw playback without throwing away
-/// otherwise reusable acoustic content; note-level mute remains a model input.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct OwnerOutputControls {
     pub track_id: u64,
@@ -48,14 +42,12 @@ pub struct OwnerOutputControls {
 
 #[derive(Clone, Default)]
 pub struct RenderPlan {
-    /// Authoritative pending work, at most one current request per owner.
+
     pub requests: BTreeMap<OwnerId, Arc<OwnerRequest>>,
     pub output_controls: BTreeMap<OwnerId, OwnerOutputControls>,
-    /// This update's delta; consumers can inspect both old and new placements.
+
     pub changes: Vec<CoverageChange>,
-    /// This update's old placements to withdraw from a future published audio
-    /// snapshot, separate from requested render input. There is no published PCM
-    /// in this planner, so no permanent deleted-owner tombstones are retained.
+
     pub obsolete_clear: BTreeMap<OwnerId, Coverage>,
 }
 
@@ -123,12 +115,13 @@ impl Planner {
                 let Some(group) = project.group(&reference.group_id) else {
                     continue;
                 };
-                let identity = voice_identity(OwnerId(reference.id));
+                let identity = voice_identity(OwnerId::new(reference.id));
                 let input = OwnerInput::new(project, track, reference, group, identity.as_deref());
+                for (section, input) in input.sections() {
                 let Some(coverage) = input.coverage() else {
                     continue;
                 };
-                let owner = OwnerId(reference.id);
+                let owner = OwnerId(reference.id, section);
                 self.plan.output_controls.insert(
                     owner,
                     OwnerOutputControls {
@@ -156,6 +149,7 @@ impl Planner {
                 });
                 self.invalidate(owner, old.as_ref().map(|r| r.coverage), Some(coverage));
                 self.plan.requests.insert(owner, request);
+                }
             }
         }
         for (owner, old) in previous {
@@ -178,7 +172,7 @@ impl Planner {
         self.plan = RenderPlan::default();
         self.revision = ProjectRevision(0);
         self.output_changed_owners = 0;
-        // Never rewind epochs when a project is replaced.
+
         self.advance_epoch();
     }
 
