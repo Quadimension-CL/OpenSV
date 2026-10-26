@@ -75,7 +75,7 @@ pub(super) fn load(path: &Path) -> Result<VoiceInventory> {
         tensors,
         configuration_parsed: true,
     };
-    Ok(VoiceInventory {
+    let mut inventory = VoiceInventory {
         database_id: nofs::database_id(path)?,
         directory: archive.path,
         display_name: description.configuration.name.clone(),
@@ -87,5 +87,9 @@ pub(super) fn load(path: &Path) -> Result<VoiceInventory> {
         configuration: Some(description.configuration),
         _models: vec![LoadedModel::Nofs { trees }],
         preparation: OnceLock::new(),
-    })
+    };
+    let names = inventory.embedded_style_names()?;
+    inventory.configuration.as_mut().expect("NOFS configuration")
+        .resolve_embedded_styles(&names)?;
+    Ok(inventory)
 }

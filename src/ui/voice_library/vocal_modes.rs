@@ -22,6 +22,7 @@ pub(super) fn show(app: &mut App, ui: &mut Ui) {
         VocalModeEditCapability::independent_lanes,
     );
     let mut names = configuration.vocal_mode_names().to_vec();
+    let hidden = configuration.hidden_styles.clone();
     let selected_voice = voice_key(app);
     let selection = match app.editor.vocal_mode_selection() {
         Ok(selection) => selection,
@@ -41,7 +42,7 @@ pub(super) fn show(app: &mut App, ui: &mut Ui) {
         let control = selection.controls.get(&name).cloned().unwrap_or_else(PublicModeControl::default);
         let changes = mode_controls::show(ui,
             selected_voice.as_deref().unwrap_or("unavailable"),selection.reference_id,slot,
-            &name,&control,reason.as_deref(),independent);
+            &name,&control,reason.as_deref(),independent,hidden.contains(&name));
         if !changes.is_empty() {actions.push((name,changes));}
     }
     for (name,changes) in actions {

@@ -237,11 +237,7 @@ impl VoiceInventory {
             inventory.files.push(file);
             inventory._models.push(LoadedModel::Dnni { archive, trees });
         }
-        if inventory
-            .configuration
-            .as_ref()
-            .is_some_and(|config| config.model_version == 2)
-        {
+        if inventory.configuration.is_some() {
             let names = inventory.embedded_style_names()?;
             inventory
                 .configuration

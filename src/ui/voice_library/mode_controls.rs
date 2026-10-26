@@ -23,7 +23,7 @@ fn snap_enabled(ctx: &Context) -> bool {
 }
 
 pub(super) fn show(ui: &mut Ui, voice_key: &str, reference: EntityId, slot: usize,
-    name: &str, control: &PublicModeControl, unavailable: Option<&str>, independent: bool)
+    name: &str, control: &PublicModeControl, unavailable: Option<&str>, independent: bool, hidden: bool)
     -> Vec<(PublicModeComponent, f64)>
 {
     let mut changes = Vec::new();
@@ -36,6 +36,10 @@ pub(super) fn show(ui: &mut Ui, voice_key: &str, reference: EntityId, slot: usiz
         ui.painter().rect_filled(card, 3, CARD);
         ui.painter().text(card.min + vec2(12.0, 9.0), Align2::LEFT_TOP,
             name, FontId::proportional(13.0), CAPTION);
+        if hidden {
+            ui.painter().text(pos2(card.right()-36.0, card.top()+10.0), Align2::RIGHT_TOP,
+                crate::i18n::t("隐藏唱法"), FontId::proportional(10.0), CAPTION);
+        }
         let toggle_rect = Rect::from_min_size(card.min + vec2(card.width()-30.0, 4.0), Vec2::splat(24.0));
         let toggle = ui.interact(toggle_rect, ui.id().with("expand"), Sense::click());
         let center = toggle_rect.center();

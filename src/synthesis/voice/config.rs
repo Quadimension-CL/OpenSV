@@ -19,6 +19,10 @@ pub struct VoiceConfiguration {
     pub default_language: String,
     pub supported_languages: Vec<String>,
     pub styles: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub hidden_styles: Vec<String>,
+    #[serde(skip)]
+    available_styles: Vec<String>,
     #[serde(skip)]
     styles_declared: bool,
     pub speakers: Vec<super::Speaker>,
@@ -35,7 +39,11 @@ impl VoiceConfiguration {
     pub fn has_declared_vocal_modes(&self) -> bool { self.styles_declared }
 
     pub fn vocal_mode_names(&self) -> &[String] {
-        &self.styles
+        &self.available_styles
+    }
+
+    pub fn is_hidden_vocal_mode(&self, name: &str) -> bool {
+        self.hidden_styles.iter().any(|style| style == name)
     }
 
     pub(super) fn parse(bytes: &[u8]) -> Result<Self> {
@@ -104,7 +112,9 @@ impl VoiceConfiguration {
             vendor,
             default_language,
             supported_languages,
+            available_styles: styles.clone(),
             styles,
+            hidden_styles: Vec::new(),
             styles_declared,
             speakers,
             additional_fields: fields.len(),
@@ -114,15 +124,15 @@ impl VoiceConfiguration {
     }
 
     pub(super) fn resolve_embedded_styles(&mut self, basis_names: &[String]) -> Result<()> {
-        if self.model_version != 2 {
-            return Err(VoiceError::new("Embedded catalogue resolution requires model-version 2"));
-        }
-
         if !self.styles_declared {
             self.styles = basis_names.to_vec();
 
             self.styles.sort();
         }
+        self.hidden_styles = basis_names.iter()
+            .filter(|name| !self.styles.contains(name)).cloned().collect();
+        self.available_styles = self.styles.clone();
+        self.available_styles.extend(self.hidden_styles.iter().cloned());
         Ok(())
     }
 
@@ -143,7 +153,7 @@ impl VoiceConfiguration {
             Some(value) => value.split_whitespace().map(str::to_owned).collect(),
             None => vec![default_language.clone()],
         };
-        let styles = fields
+        let styles: Vec<String> = fields
             .remove(".timbre_styles")
             .unwrap_or_default()
             .split_whitespace()
@@ -178,7 +188,9 @@ impl VoiceConfiguration {
             vendor,
             default_language,
             supported_languages,
+            available_styles: styles.clone(),
             styles,
+            hidden_styles: Vec::new(),
             styles_declared: true,
             speakers: Vec::new(),
             additional_fields: fields.len(),
@@ -203,19 +215,22 @@ mod mode_catalog_tests {
     }
 
     #[test]
-    fn declared_catalogue_keeps_its_order_not_hidden_basis_rows() {
+    fn declared_catalogue_keeps_its_order_and_exposes_embedded_names() {
         let mut config = configuration(2, Some("Breathy,Resonant,Soulful,Powerful")).unwrap();
         config.resolve_embedded_styles(&basis()).unwrap();
         assert_eq!(config.styles, ["Breathy", "Resonant", "Soulful", "Powerful"]);
         assert!(!config.styles.iter().any(|name| name == "Soft"));
+        assert_eq!(config.hidden_styles, ["Soft"]);
+        assert_eq!(config.vocal_mode_names(), ["Breathy", "Resonant", "Soulful", "Powerful", "Soft"]);
     }
 
     #[test]
-    fn explicit_empty_does_not_fall_back_but_absent_does() {
+    fn empty_declaration_and_absent_declaration_discover_embedded_names() {
         let mut empty = configuration(2, Some("")).unwrap();
         empty.resolve_embedded_styles(&basis()).unwrap();
         assert!(empty.styles.is_empty());
-        assert!(empty.vocal_mode_names().is_empty());
+        assert_eq!(empty.hidden_styles, basis());
+        assert_eq!(empty.vocal_mode_names(), basis());
         let mut absent = configuration(2, None).unwrap();
         absent.resolve_embedded_styles(&basis()).unwrap();
         assert_eq!(absent.styles, ["Breathy", "Powerful", "Resonant", "Soft", "Soulful"]);
@@ -236,10 +251,11 @@ mod mode_catalog_tests {
     }
 
     #[test]
-    fn legacy_catalogue_does_not_acquire_sv2_fallback() {
+    fn legacy_catalogue_preserves_declarations_and_discovers_embedded_names() {
         let mut config = configuration(1, Some("Legacy")).unwrap();
-        assert!(config.resolve_embedded_styles(&basis()).is_err());
+        config.resolve_embedded_styles(&basis()).unwrap();
         assert_eq!(config.styles, ["Legacy"]);
+        assert_eq!(config.hidden_styles, basis());
         assert!(configuration(1, Some("")).is_err());
     }
 }

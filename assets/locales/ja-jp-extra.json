@@ -919,5 +919,6 @@
   "Unison pitch member count exceeds the supported range": "ユニゾンのピッチメンバー数が対応範囲を超えています",
   "Invalid unison pitch display range": "ユニゾンのピッチ表示範囲が無効です",
   "Supported SVP versions are 113 through {}; the file version is {}": "対応する SVP バージョンは113～{}ですが、ファイルはバージョン {} です",
-  "Invalid DDS F0 note kind or pitch": "ピッチモデルのノートの種類またはピッチが無効です"
+  "Invalid DDS F0 note kind or pitch": "ピッチモデルのノートの種類またはピッチが無効です",
+  "Hidden style": "隠しスタイル"
 }

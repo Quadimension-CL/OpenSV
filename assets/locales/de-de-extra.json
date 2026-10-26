@@ -1046,5 +1046,6 @@
   "Shortcuts": "Tastenkürzel",
   "NOT INSTALLED": "Nicht installiert",
   "{} (not installed)": "{} (nicht installiert)",
-  "Invalid DDS F0 note kind or pitch": "Ungültiger Notentyp oder ungültige Tonhöhe im Tonhöhenmodell"
+  "Invalid DDS F0 note kind or pitch": "Ungültiger Notentyp oder ungültige Tonhöhe im Tonhöhenmodell",
+  "Hidden style": "Verborgener Stil"
 }

@@ -1032,5 +1032,6 @@
   "Tracks": "Rãnh",
   "NOT INSTALLED": "Chưa cài đặt",
   "{} (not installed)": "{} (chưa cài đặt)",
-  "Invalid DDS F0 note kind or pitch": "Loại nốt hoặc cao độ không hợp lệ trong mô hình cao độ"
+  "Invalid DDS F0 note kind or pitch": "Loại nốt hoặc cao độ không hợp lệ trong mô hình cao độ",
+  "Hidden style": "Phong cách ẩn"
 }

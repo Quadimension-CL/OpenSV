@@ -1034,5 +1034,6 @@
   "Upgrade the voice to version 2 to individually control pitch, timbre, and pronunciation.": "Atualize a voz para a versão 2 para controlar afinação, timbre e pronúncia separadamente.",
   "NOT INSTALLED": "Não instalado",
   "{} (not installed)": "{} (não instalado)",
-  "Invalid DDS F0 note kind or pitch": "Tipo de nota ou altura inválidos no modelo de altura"
+  "Invalid DDS F0 note kind or pitch": "Tipo de nota ou altura inválidos no modelo de altura",
+  "Hidden style": "Estilo oculto"
 }

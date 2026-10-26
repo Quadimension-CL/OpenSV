@@ -1027,5 +1027,6 @@
   "Stereo": "스테레오",
   "NOT INSTALLED": "설치되지 않음",
   "{} (not installed)": "{} (설치되지 않음)",
-  "Invalid DDS F0 note kind or pitch": "피치 모델의 노트 유형 또는 피치가 올바르지 않습니다"
+  "Invalid DDS F0 note kind or pitch": "피치 모델의 노트 유형 또는 피치가 올바르지 않습니다",
+  "Hidden style": "숨겨진 스타일"
 }

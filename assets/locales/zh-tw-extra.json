@@ -916,5 +916,6 @@
   "Unison pitch member count exceeds the supported range": "齊唱音高成員數量超出范圍",
   "Invalid unison pitch display range": "齊唱音高顯示范圍無效",
   "Supported SVP versions are 113 through {}; the file version is {}": "支持 SVP version 113 至 {SVP_VERSION}，文件版本為 {}",
-  "Invalid DDS F0 note kind or pitch": "音高模型的音符類型或音高無效"
+  "Invalid DDS F0 note kind or pitch": "音高模型的音符類型或音高無效",
+  "Hidden style": "隱藏唱法"
 }
